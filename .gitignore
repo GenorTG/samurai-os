@@ -1,0 +1,9 @@
+.vm/
+out/
+work/
+*.iso
+*.qcow2
+*.pkg.tar.zst
+*.pkg.tar.zst.sig
+target/
+.tmp/
