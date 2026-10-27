@@ -12,9 +12,10 @@ What we change (checked against the chwd source, 2026-10-27):
   scripts from CachyOS's tag, and `samurai-hardware` installs **our** profile set into the db dir. No
   patching of chwd itself.
 - Our profiles start from CachyOS's set with CachyOS-only packages removed (e.g.
-  `cachyos-drm-awaiter`). Kernel module packages are chosen by kernel: Arch's prebuilt
-  `nvidia-open` for `linux` and `nvidia-open-lts` for `linux-lts`, `nvidia-open-dkms` for anything
-  else (zen, cachyos). The same snippet style as CachyOS's `conditional_packages`.
+  `cachyos-drm-awaiter`, unless the CachyOS repo provides it). Kernel module packages are chosen
+  per installed kernel: CachyOS's prebuilt `linux-cachyos-nvidia-open` for `linux-cachyos`, Arch's
+  prebuilt `nvidia-open` for `linux` and `nvidia-open-lts` for `linux-lts`, `nvidia-open-dkms` for the
+  rest (`linux-zen`). The same snippet style as CachyOS's `conditional_packages`.
 - Tracking upstream: a weekly CI job diffs CachyOS's `profiles/` against ours and opens an issue when
   they change. We port the changes by hand; CachyOS is upstream for device knowledge.
 
@@ -53,6 +54,58 @@ What we change (checked against the chwd source, 2026-10-27):
 - Driver branch changes (e.g. when a new driver drops a GPU generation): an intervention (spec 03)
   moves affected machines to the right branch before the update that would break them. This is how
   Pascal users get moved to the 580xx branch.
+
+## CUDA (NVIDIA, default on)
+- When the NVIDIA profile applies and the installer's CUDA toggle is on (default): `cuda`, `cudnn`,
+  `nvtop` from Arch `extra` (CUDA 13.x on 2026-10-27). Docker gets `nvidia-container-toolkit` (spec 13).
+- Only for **Turing (RTX 20) and newer**. CUDA 13 no longer targets Maxwell, Pascal or Volta, so a
+  GTX 10xx machine gets the driver without the CUDA toolkit, and the installer says why. (Older CUDA
+  versions for those cards are a manual install.)
+- `cuda` is about 4–5 GiB, so the summary page shows it in the download size.
+
+## gpu-unlock (FP16/BF16 tensor throughput unlock, default on for supported cards)
+[`Zagitta/gpu-unlock`](https://github.com/Zagitta/gpu-unlock) is a kernel module that runs before
+the unmodified NVIDIA driver. It sets the speed selectors on consumer cards to the professional
+rate (upstream's 3090 Ti measurement: BF16 87.5 → 157.4 TFLOPS, FP16 87.5 → 118.4, TF32 42.6 → 82.6,
+dense GEMM with FP32 accumulation). We reviewed and built it on genorbox1 today (`~/work/gpu-unlock`,
+upstream 1.1.0 @ `6081407`); the stealth-dragon (Arch) test is running.
+
+What it supports (from its `kernel/gpu_unlock/recipes.c`, not from our own list):
+| GPU | Status in upstream 1.1.0 |
+|-----|--------------------------|
+| Ampere GA102/GA103/GA104/GA106 (RTX 3060–3090 Ti), GA100 | supported |
+| RTX 4090 (AD102) | supported, one hardware success report so far |
+| Turing (RTX 20), other Ada (RTX 4060–4080) | only in forks; upstream says it will integrate them |
+| Blackwell (RTX 50) | not supported |
+The installer reads the recipe table from the source we build, so newly supported cards appear
+when upstream adds them.
+
+**Distribution constraint (decides the design).** The module needs firmware extracted from an
+NVIDIA driver package. The repo's `firmware/NOTICE.md` says redistribution approval is not claimed,
+and personal local packaging is the intended use. So we **never publish the firmware or a built
+package** in `[samurai]` or on the ISO. Instead:
+- `samurai-gpu-unlock` (in `[samurai]`) contains only the pinned upstream source reference and a
+  builder. On the target machine it runs upstream's own Arch packaging (`packaging/arch/PKGBUILD`):
+  it downloads the NVIDIA inputs from nvidia.com and checks them against pinned SHA-256 sums, builds
+  `gpu-unlock-dkms` + `gpu-unlock-firmware` locally, and installs them. That is the same model as an
+  AUR package.
+- Install flow (spec 08 step 5): for each detected card that matches a recipe, the hardware page shows
+  it with a checkbox (default on). The build needs network; without network it is deferred to first
+  boot.
+- Kernel command line through `samurai boot`: `gpu_unlock.targets=<PCI address list>`, listing the exact
+  cards (`0000:01:00.0`), not `all`. A machine with an unsupported second GPU (e.g. genorbox1's GTX 1070)
+  is never touched.
+- DKMS rebuilds the module for every installed kernel (cachyos + zen). mkinitcpio puts it right
+  before `nvidia` (upstream drop-in `zz-gpu-unlock.conf`).
+- Upstream updates: we bump the pinned version in `samurai-gpu-unlock` after the VM build test plus a
+  hardware check on a 3090. The package hook then rebuilds locally on each machine.
+- Health check `drivers.gpu-unlock`: for every target, the kernel log reports success this boot
+  (`journalctl -k -b | grep gpu_unlock`); after resume too (the module re-unlocks after suspend to RAM;
+  hibernation is not covered). The toolbox shows per-card state and a toggle that removes the card from
+  `targets`.
+- Side effects to tell the user: the display card's screen is blank for about a second during boot
+  (between the unlock's reset and `nvidia-drm` taking over); resume takes about a second longer; the
+  card may run slightly warmer under tensor loads (normal power and thermal limits still apply).
 
 ## Testing
 - **Profile matching**: unit tests run chwd against recorded `lspci -nnmm` / `lsusb` dumps of real

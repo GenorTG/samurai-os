@@ -1,0 +1,268 @@
+# Samurai OS install catalog: our choices on top of catalog/garuda-setup-wizard.toml (spec 08).
+# The graphical installer, the terminal installer, the setup assistant and the toolbox all read
+# these two files. Merge rule: an [[override]] changes fields of a Garuda app by id; [[app]]
+# adds new entries; [[choice]] defines single-select or multi-select groups.
+#
+# source = where the package comes from, checked by CI against the live repos:
+#   arch | multilib | cachyos | chaotic | samurai | flatpak | local-build | user-script
+# Package names were checked against Arch, AUR and Chaotic-AUR on 2026-10-27.
+
+# ---------------------------------------------------------------- single/multi choices
+[[choice]]
+id = "desktop"
+mode = "single"
+default = "kde"
+options = [
+  { id = "kde", name = "KDE Plasma (Wayland)", meta = "samurai-desktop-kde", tested = true },
+  { id = "gnome", name = "GNOME", meta = "samurai-desktop-gnome", tested = false },
+  { id = "hyprland", name = "Hyprland", meta = "samurai-desktop-hyprland", tested = false },
+  { id = "cosmic", name = "COSMIC", meta = "samurai-desktop-cosmic", tested = false },
+  { id = "xfce", name = "Xfce", meta = "samurai-desktop-xfce", tested = false },
+  { id = "cinnamon", name = "Cinnamon", meta = "samurai-desktop-cinnamon", tested = false },
+  { id = "sway", name = "Sway", meta = "samurai-desktop-sway", tested = false },
+  { id = "i3", name = "i3 (X11)", meta = "samurai-desktop-i3", tested = false },
+  { id = "none", name = "No desktop (server / build your own)", meta = "", tested = true },
+]
+
+[[choice]]
+id = "kernels"
+mode = "multi"
+default = ["linux-cachyos", "linux-zen"]
+default_boot = "linux-cachyos"
+options = [
+  { id = "linux-cachyos", packages = ["linux-cachyos", "linux-cachyos-headers"], source = "cachyos" },
+  { id = "linux-zen", packages = ["linux-zen", "linux-zen-headers"], source = "arch" },
+  { id = "linux", packages = ["linux", "linux-headers"], source = "arch" },
+  { id = "linux-lts", packages = ["linux-lts", "linux-lts-headers"], source = "arch" },
+  { id = "linux-cachyos-lts", packages = ["linux-cachyos-lts", "linux-cachyos-lts-headers"], source = "cachyos" },
+]
+
+[[choice]]
+id = "browsers"
+mode = "multi"
+default = ["firefox"]
+# options = every app in category "browsers" (Garuda list) + the extras below
+
+[[choice]]
+id = "kde-theme"
+mode = "single"
+default = "otto"
+when = "desktop == kde"
+options = [
+  { id = "otto", name = "Otto (dark, orange/yellow)", meta = "samurai-theme-otto" },
+  { id = "scratchy", name = "Scratchy (dark, Catppuccin Macchiato)", meta = "samurai-theme-scratchy" },
+  { id = "breeze", name = "Breeze Dark (KDE default)", meta = "" },
+]
+
+[[choice]]
+id = "conda"
+mode = "single"
+default = "miniforge"
+options = [
+  { id = "miniforge", name = "Miniforge (conda + mamba, conda-forge channel)", packages = ["samurai-miniforge"], source = "samurai" },
+  { id = "miniconda", name = "Miniconda (Anaconda defaults channel)", packages = ["samurai-miniconda"], source = "samurai" },
+  { id = "none", name = "None (uv only)" },
+]
+
+[[choice]]
+id = "firewall"
+mode = "single"
+default = "firewalld"
+options = [
+  { id = "firewalld", packages = ["firewalld", "plasma-firewall"], source = "arch" },
+  { id = "ufw", packages = ["ufw", "plasma-firewall"], source = "arch" },
+  { id = "none", name = "No firewall (not recommended)" },
+]
+
+# ---------------------------------------------------------------- defaults ON (toggleable)
+[[toggle]]
+id = "docker"
+default = true
+packages = ["docker", "docker-compose", "docker-buildx"]
+services = ["docker.socket"]
+user_groups = ["docker"]          # root-equivalent; separate checkbox "add me to the docker group", default on
+source = "arch"
+
+[[toggle]]
+id = "tailscale"
+default = true
+packages = ["tailscale"]
+services = ["tailscaled.service"]
+firstboot = "welcome: Connect to Tailscale (runs `tailscale up`, opens the login URL)"
+source = "arch"
+
+[[toggle]]
+id = "nvidia-cuda"
+default = true
+when = "gpu.nvidia && gpu.nvidia.generation >= turing"   # CUDA 13 no longer targets Maxwell/Pascal/Volta
+packages = ["cuda", "cudnn", "nvtop"]
+source = "arch"
+
+[[toggle]]
+id = "gpu-unlock"
+default = true
+when = "gpu.any_supported_by_gpu_unlock"                  # spec 07: recipe table read from the module source
+packages = ["samurai-gpu-unlock"]                         # builder only; firmware is built on this machine
+source = "samurai"
+
+[[toggle]]
+id = "kde-monitor-widgets"
+default = true
+when = "desktop == kde"
+
+[[toggle]]
+id = "python-versions"
+default = true
+packages = ["uv", "samurai-python310", "samurai-python311", "samurai-python312", "samurai-python313"]
+note = "python (3.14) from Arch core stays the system python"
+
+[[toggle]]
+id = "gaming"
+default = true
+packages = [
+  "steam", "heroic-games-launcher-bin", "gamemode", "lib32-gamemode", "mangohud", "lib32-mangohud",
+  "gamescope", "protontricks", "umu-launcher", "samurai-proton-ge", "proton-cachyos", "samurai-wine",
+]
+
+# ---------------------------------------------------------------- new categories
+[[app]]
+category = "craft"
+id = "craft-launcher"
+name = "Craft Launcher (installs and updates every ArtCraft app)"
+packages = ["artcraft-launcher-appimage"]
+source = "samurai"   # AUR only today; repackaged in [samurai]
+
+[[app]]
+category = "craft"
+id = "photocraft"
+name = "PhotoCraft (Photoshop-style)"
+packages = ["photocraft"]
+source = "chaotic"
+
+[[app]]
+category = "craft"
+id = "vectorcraft"
+name = "VectorCraft (Illustrator-style)"
+packages = ["vectorcraft-bin"]
+source = "samurai"   # not in Chaotic-AUR on 2026-10-27
+
+[[app]]
+category = "craft"
+id = "filmcraft"
+name = "FilmCraft (Premiere-style)"
+packages = ["filmcraft"]
+source = "chaotic"
+
+[[app]]
+category = "craft"
+id = "lightcraft"
+name = "LightCraft (Lightroom-style)"
+packages = ["lightcraft"]
+source = "chaotic"
+
+[[app]]
+category = "craft"
+id = "effectcraft"
+name = "EffectCraft (After Effects-style)"
+packages = ["effectcraft"]
+source = "chaotic"
+
+[[app]]
+category = "craft"
+id = "designcraft"
+name = "DesignCraft (InDesign-style)"
+packages = ["designcraft"]
+source = "chaotic"
+
+[[app]]
+category = "craft"
+id = "pdfcraft"
+name = "PdfCraft (Acrobat-style)"
+packages = ["pdfcraft"]
+source = "chaotic"
+
+[[app]]
+category = "craft"
+id = "craft-office"
+name = "WordCraft, GridCraft, DeckCraft (Office-style)"
+packages = ["gridcraft", "deckcraft"]
+source = "chaotic"   # WordCraft: add when packaged
+
+[[app]]
+category = "craft"
+id = "craft-more"
+name = "FigCraft, CADCraft, SoundCraft"
+packages = ["figcraft", "cadcraft", "soundcraft"]
+source = "chaotic"
+
+# AI command-line tools (spec 13). One checkbox each; all updated by pacman.
+[[app]]
+category = "ai-cli"
+id = "claude-code"
+name = "Claude Code (Anthropic)"
+packages = ["claude-code"]
+source = "chaotic"
+env = { DISABLE_AUTOUPDATER = "1" }     # pacman updates it
+
+[[app]]
+category = "ai-cli"
+id = "codex"
+name = "Codex CLI (OpenAI)"
+packages = ["openai-codex-bin"]
+source = "samurai"
+
+[[app]]
+category = "ai-cli"
+id = "gemini-cli"
+name = "Gemini CLI (Google)"
+packages = ["gemini-cli"]
+source = "arch"
+
+[[app]]
+category = "ai-cli"
+id = "copilot-cli"
+name = "GitHub Copilot CLI"
+packages = ["github-copilot-cli"]
+source = "chaotic"
+
+[[app]]
+category = "ai-cli"
+id = "opencode"
+name = "OpenCode"
+packages = ["opencode-bin"]
+source = "samurai"
+
+[[app]]
+category = "ai-cli"
+id = "aider"
+name = "Aider"
+user_commands = ["uv tool install aider-chat"]
+source = "user-script"
+
+[[app]]
+category = "ai-cli"
+id = "cursor-cli"
+name = "Cursor CLI"
+user_commands = ["curl https://cursor.com/install -fsS | bash"]
+source = "user-script"   # vendor installer; last resort, runs as the user, shows the URL first
+
+[[app]]
+category = "ai-local"
+id = "ollama"
+name = "Ollama (GPU build picked by driver profile)"
+packages = ["ollama"]          # ollama-cuda / ollama-rocm substituted by the hardware step
+services = ["ollama.service"]
+source = "arch"
+
+# ---------------------------------------------------------------- overrides of Garuda entries
+[[override]]
+id = "firefox"
+default = true
+
+[[override]]
+id = "docker"
+default = true   # also covered by the docker toggle
+
+[[override]]
+category = "kernels"
+hidden = true    # the whole Garuda kernels category: kernels come from the "kernels" choice instead

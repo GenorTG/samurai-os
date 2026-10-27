@@ -23,7 +23,7 @@ means: CLI command, helper method with polkit action, GUI control, VM test.
 |---------|--------|------|-----|
 | Update system | `garuda-update` | `samurai update` (spec 03) | `samurai update` |
 | Refresh Arch mirrorlist | yes | yes | `samurai mirrors refresh` |
-| Refresh third-party mirrorlists (Chaotic, CachyOS) | Chaotic only | whichever optional repo is enabled | `samurai mirrors refresh --all` |
+| Refresh third-party mirrorlists (Chaotic, CachyOS) | Chaotic only | CachyOS + Chaotic-AUR (both on by default, ADR-0007) | `samurai mirrors refresh --all` |
 | Refresh / reset keyring | yes ("update keyring") | yes: refresh, or full reset (`pacman-key --init` + populate) | `samurai fix keyring [--reset]` |
 | Remove pacman lock | yes | yes, only if no pacman process holds it | `samurai fix lock` |
 | Clean package cache | yes | `paccache` keep N, uninstalled, or all | `samurai clean pkgcache` |
@@ -56,7 +56,7 @@ means: CLI command, helper method with polkit action, GUI control, VM test.
 ### Kernels, boot and recovery
 | Feature | Garuda | Ours | CLI |
 |---------|--------|------|-----|
-| Kernel manager: install/remove, headers, missing/broken DKMS warnings, set default | yes | yes; kernels come from Arch (+CachyOS if enabled) | `samurai kernel list/install/remove/default` |
+| Kernel manager: install/remove, headers, missing/broken DKMS warnings, set default | yes | yes; kernels from CachyOS (default `linux-cachyos`) and Arch (`linux-zen` and others) | `samurai kernel list/install/remove/default` |
 | Boot options: timeout, default entry, saved default, kernel parameters, quiet level, Plymouth on/off and theme, os-prober, SysRq, mitigations off | yes (GRUB) | yes, for our bootloader (ADR-0003). "Mitigations off" stays, behind a security warning | `samurai boot get/set` |
 | Boot repair: reinstall bootloader, regenerate config, back up / restore MBR/PBR, open LUKS, chroot | yes | yes, works from the live ISO (spec 06) | `samurai rescue` |
 | Snapshot manager: list, compare, restore, delete, settings | snapper-tools + btrfs-assistant | yes (spec 06) | `samurai snap ...` |
@@ -83,6 +83,11 @@ means: CLI command, helper method with polkit action, GUI control, VM test.
 | hblock (hosts blocklist) | yes | yes, opt-in | `samurai tweak hblock on` |
 | iwd instead of wpa_supplicant | yes | yes | `samurai tweak iwd on` |
 | **Security page**: firewall state, AppArmor, Secure Boot, LUKS, TPM unlock, CVE packages, SSH exposure | no | **ours** (spec 09) | `samurai security status` |
+| **Firewall page**: switch firewalld/ufw, zones per network, open/close ports and one-click service presets, Docker-published ports | no (component toggle only) | **ours** (spec 09) | `samurai firewall ...` |
+| **Tailscale page**: on/off, login, exit node, tailnet zone services | no | **ours** (spec 09) | `samurai tailscale ...` |
+| **GPU page**: driver profile, CUDA, gpu-unlock per card (state, toggle, last boot result) | no | **ours** (spec 07) | `samurai hw gpu` |
+| **Python page**: installed versions (EOL badges), uv config, conda on/off | no | **ours** (spec 13) | `samurai python ...` |
+| **Desktop page** (KDE): theme switch, rebuild panel widgets, reduced effects on/off | no | **ours** (spec 14) | `samurai desktop ...` |
 
 ### Gaming
 | Feature | Garuda | Ours | CLI |

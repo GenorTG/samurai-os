@@ -72,8 +72,27 @@ net.ipv4.icmp_ignore_bogus_error_responses = 1
   toolbox shows which profiles logged denials before you switch it to enforce.
 
 ## Network
-- firewalld, default zone `public`: inbound denied except DHCPv6 client and mDNS. Toolbox toggles
-  open KDE Connect, Steam Remote Play, local file sharing. ADR-0006 explains firewalld over ufw.
+- **firewalld** (nftables backend), enabled at install; ufw is the installer/toolbox alternative,
+  OpenSnitch an optional per-app outbound firewall on top. Default zone `public`: inbound denied except
+  DHCPv6 client and mDNS. ADR-0006 explains firewalld over ufw.
+- **Opening ports and services should be easy**, in two places that change the same firewalld config:
+  - System Settings → Firewall (`plasma-firewall`, KDE's own module; works with firewalld and ufw);
+  - toolbox → Firewall page, and `samurai firewall`:
+    ```
+    samurai firewall status                        # zones, interfaces, open services/ports, Docker-published ports
+    samurai firewall open kdeconnect               # a preset
+    samurai firewall open 8080/tcp --zone home     # a port (ranges and udp too)
+    samurai firewall close 8080/tcp
+    samurai firewall zone wlan0 home               # trust level per network
+    ```
+  - Presets (one click): KDE Connect, Steam Remote Play, Steam local game transfer, Sunshine/Moonlight,
+    LocalSend, Syncthing, Samba, SSH, Minecraft server, Ollama API (LAN), web dev server 3000/5173/8000.
+    Each preset says which ports it opens. Every change is reversible from the same page.
+- **Tailscale** (default on, installer toggle; spec 08): `tailscaled` enabled, login at first boot.
+  `tailscale0` goes into its own zone `samurai-tailnet`: inbound denied like `public`, so joining your
+  tailnet exposes nothing until you open a service for that zone (e.g. SSH only on the tailnet). The
+  toolbox Tailscale page shows status, login/logout, exit node and the zone's open services. Turning it
+  off disables the service and leaves the package installed.
 - NetworkManager: Wi-Fi scan MAC randomisation on (the NM default), `stable` per-connection MAC
   option in the toolbox.
 - systemd-resolved; the toolbox can switch to DNS-over-TLS providers (Garuda parity).

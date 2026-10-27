@@ -51,6 +51,17 @@ Scenarios in `full`:
 | `rescue-bootloader` | delete the Limine EFI binary; boot the ISO; `samurai rescue bootloader`; installed system boots |
 | `uninstall-check` | remove every `samurai-*` package (keeping Arch equivalents); the system still boots to a shell (spec 01 design test) |
 | `toolbox-actions` | each CLI action in spec 04 with `--dry-run`, plus the non-destructive ones for real |
+| `install-profile-parity` | the same choices made through Calamares and through the terminal installer produce byte-identical `install-profile.toml` files and the same `pacman -Qq` set |
+| `install-tui` | terminal installer driven through the serial console (expect script) in guided mode |
+| `catalog-resolve` | every package in `catalog/` resolves to a repo; a full "everything ticked" install in a VM succeeds (nightly, long) |
+| `python-versions` | `python3.10`…`python3.14` each create a venv and import `ssl, sqlite3, ctypes`; `uv venv --python 3.11` downloads nothing; `conda create -n t python=3.12` works as the user |
+| `docker` | `docker run hello-world` as the user; `docker compose version` |
+| `kde-layout` | after first login: top + bottom panels exist, the task manager is not icons-only, one monitor widget per CPU socket and GPU (VM: virtio GPU counts as one), effects config matches spec 14 |
+| `firewall-ux` | each preset opens exactly the ports it lists and closes them again; Tailscale zone denies inbound by default |
+| `gpu-unlock-builder` | builder runs in a VM with no NVIDIA card: detects nothing, installs nothing, exits 0; recipe matching against hw fixtures (3090 → supported, 1070 → skipped, 5080 → unsupported) |
+
+The gpu-unlock build and unlock themselves are tested only on real hardware (stealth-dragon's 3090,
+spec 07), because a VM has no supported NVIDIA card.
 
 ## CI safety for the self-hosted runner
 The genorbox1 runner runs only on `push` to `main` and `workflow_dispatch`, never on `pull_request`,
@@ -64,7 +75,7 @@ without a backup.
 | Machine | Covers |
 |---------|--------|
 | fan-dragon (RTX 5080, Blackwell) | NVIDIA open modules, Wayland on NVIDIA, gaming suite, fingerprint-change flow (it just went 3090 → 5080) |
-| stealth-dragon | second NVIDIA config |
+| stealth-dragon (RTX 3090) | gpu-unlock end to end: build, boot unlock, BF16 GEMM before/after, suspend/resume |
 | a laptop | hybrid graphics (prime), power profiles, Wi-Fi/Bluetooth, suspend/resume, TPM unlock |
 Each run fills `tests/hardware/<machine>-<date>.md`: boot, install, drivers, suspend, gaming smoke
 (one Proton title), update, rollback, Secure Boot.

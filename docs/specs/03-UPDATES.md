@@ -36,10 +36,11 @@ safe here only because of these rules, which CI enforces for the self-update set
 - The self-update set never contains anything else.
 
 ### Kernel safety
-- The default install has two kernels: the main one (spec 10) and `linux-lts` as a fallback. Both
-  appear in the boot menu.
-- If the main kernel's DKMS build fails, the post check says so, and the toolbox offers to make LTS
-  the default until it is fixed.
+- The default install has two kernels: `linux-cachyos` (default) and `linux-zen` (spec 10). Both
+  appear in the boot menu, so each is the other's fallback. They come from different repos (CachyOS,
+  Arch), so one bad upstream release cannot take out both.
+- If a kernel's NVIDIA or gpu-unlock module fails to build, the post check says so, and the toolbox
+  offers to boot the other kernel by default until it is fixed.
 - We never pin or hold kernel versions by default. `samurai kernel hold <pkg>` exists for emergencies
   and adds an `IgnorePkg` entry with an expiry date that the health check reminds you about.
 

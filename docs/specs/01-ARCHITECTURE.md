@@ -28,7 +28,9 @@ samurai-os/
     crates/samurai-cli          `samurai` binary
     crates/samurai-helper       privileged D-Bus service
     crates/samurai-notifier     user session tray/notification agent
+    crates/samurai-install      terminal installer (ratatui) + profile schema + samurai-postinstall
     gui/                        Qt6/QML toolbox and welcome app (ADR-0004)
+  catalog/                      install catalog: Garuda import + our choices (spec 08)
   settings/                     source trees for samurai-*-settings packages
   iso/                          archiso profile (releng-derived) + Calamares config
   tests/vm/                     QEMU/libvirt harness and scenarios (spec 11)
@@ -58,7 +60,13 @@ published package repository lives in a second, data-only repo (spec 02).
 | `samurai-update` | tool | thin package: `/usr/bin/samurai-update` → `samurai update`; updated first in every run (spec 03) |
 | `samurai-branding` | assets | wallpapers, Plymouth theme, bootloader theme, icons, logo |
 | `samurai-desktop-kde` | meta | Plasma + our app selection (spec 10) |
-| `samurai-gaming` | meta | Steam, gamemode, gamescope, Proton tools (opt-in in installer and toolbox) |
+| `samurai-gaming` | meta | Steam, Heroic, GameMode, MangoHud, gamescope, Proton tools (default on in the installer) |
+| `samurai-wine` | meta | Wine staging + winetricks + mono/gecko + Wine's documented optional deps (spec 10) |
+| `samurai-settings-dev` | config | `/etc/uv/uv.toml`, conda shell hooks, PEP 668 hint, AI-CLI self-updater switches (spec 13) |
+| `samurai-theme-otto`, `samurai-theme-scratchy` | assets | KDE themes (spec 14, licence check first) |
+| `samurai-gpu-unlock` | builder | pinned upstream source + local build script; never ships firmware (ADR-0008) |
+| `samurai-proton-ge`, `samurai-python310…313`, `samurai-miniforge`, `samurai-miniconda` | repackaged binaries | auto-bumped from upstream releases (spec 02) |
+| `samurai-install` | tool | terminal guided installer + unattended mode; shares `samurai-postinstall` with Calamares (spec 08) |
 | `samurai-iso-live`, `samurai-calamares-config` | ISO only | live session and installer config, removed at the end of install |
 
 Target size of `[samurai]`: about 20–30 packages. A new package needs a reason in its PKGBUILD header.
@@ -81,11 +89,12 @@ Target size of `[samurai]`: about 20–30 packages. A new package needs a reason
 | Need | Tool | Why |
 |------|------|-----|
 | packages | pacman, pacman-contrib (`checkupdates`, `paccache`, `pacdiff`) | the package manager |
-| AUR (optional) | paru | Garuda/CachyOS default; never run by the updater as root |
+| AUR helper | yay (paru optional) | never run by the updater as root (spec 02) |
+| prebuilt AUR + kernels | Chaotic-AUR, CachyOS repos | below Arch (ADR-0007) |
 | mirrors | reflector or rate-mirrors | ranked Arch mirrors |
 | snapshots | snapper + snap-pac + btrfs-progs; btrfs-assistant as GUI | Garuda's proven stack |
 | drivers | chwd | CachyOS's maintained detector (spec 07) |
 | hardware info | inxi, lspci, lsusb, hwinfo, smartmontools, fwupd | diagnostics |
 | boot | bootloader per ADR-0003; sbctl for Secure Boot | spec 06, 09 |
-| installer | Calamares | used by both Garuda and CachyOS |
+| installer | Calamares (graphical) + our `samurai-install` (terminal) | Calamares is used by both Garuda and CachyOS |
 | ISO | archiso | official Arch ISO builder |

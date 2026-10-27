@@ -1,27 +1,32 @@
 # HANDOFF — samurai-os
 
 ## Mission
-A personal Arch-based distro: Arch repos unchanged (kernels included), a small signed `[samurai]`
-repo built by GitHub Actions and published on GitHub Releases, a Garuda-level toolbox (updates,
-maintenance, health checks + fixes, diagnostics, snapshots, drivers, boot repair), a Calamares ISO,
-a security baseline, all proven in QEMU VMs on genorbox1.
+A personal Arch-based distro: Arch repos unchanged, CachyOS + Chaotic-AUR below Arch, a small signed
+`[samurai]` repo built by GitHub Actions on GitHub Releases. Plus a Garuda-level toolbox, graphical +
+terminal guided installers fed by Garuda's app catalog, a dev environment (Python 3.10–3.14, uv,
+conda, Docker, AI CLIs), GPU setup (CUDA + local gpu-unlock build), and a customised KDE. Everything
+proven in QEMU VMs on genorbox1.
 
 ## State (2026-10-27)
-- Spec set v0 written: `docs/specs/00`–`12`, ADR-0001…0006, `OPEN-QUESTIONS.md`.
-- Research inputs: Garuda toolbox source (Electron/Angular, feature inventory in spec 04),
-  `garuda-update` (stages, interventions), `garuda-health` (check list in spec 05), CachyOS chwd
-  (profile paths/format, spec 07), CachyOS Limine + Secure Boot approach (ADR-0003).
-- Local git repo only. No GitHub repos created, no signing key generated, no code yet.
-- Test host checked: `/dev/kvm` usable by genorbox1, OVMF (incl. secboot) + swtpm + QEMU 7.2 + Docker present.
+- Specs 00–14, ADR-0001…0008, OPEN-QUESTIONS (decided + open tables).
+- Round 2 (Genor's brainstorm) folded in: installers (spec 08), dev env (spec 13), KDE setup
+  (spec 14), CUDA + gpu-unlock (spec 07, ADR-0008), repos default on (ADR-0007), kernels cachyos+zen
+  (ADR-0001), gaming/Wine (spec 10), firewall UX + Tailscale (spec 09).
+- `catalog/garuda-setup-wizard.toml`: 175 apps / 16 categories imported from Garuda toolbox
+  `setup-wizard.data.ts` via `scripts/import-garuda-catalog.py`. `catalog/samurai.toml`: our
+  choices/toggles/apps/overrides.
+- Package availability checked 2026-10-27 (Arch, AUR, Chaotic db): see `catalog/samurai.toml`
+  `source=`. Arch python = 3.14.8, cuda 13.4, uv 0.13.
+- Local git only. No GitHub repos, no signing key, no code beyond the catalog importer.
 
 ## Next steps
-1. Genor answers OPEN-QUESTIONS (at least Q1 kernel, Q2 name, Q3 GUI stack, Q6 repo visibility).
-2. M0: `ci/build-iso.sh` (mkarchiso in a privileged archlinux container) + `tests/vm/boot-iso.sh`; ISO boots on OVMF.
-3. M1 spike: pacman from GitHub Releases with a throwaway test key (real key needs Genor).
-4. M2: `samurai-install` + harness with QMP/guest agent.
+1. Genor answers open questions (Q2 name, Q3 GUI stack, Q4 theme, Q6 repo visibility, Q12–Q16).
+2. M0: `ci/build-iso.sh` + VM boot. M1 spike: pacman from GitHub Releases with a throwaway key.
+3. Check Otto/Scratchy licences before M7a.
 
 ## Commands
 - `bash scripts/install-hooks.sh` (per-commit build number).
+- `python3 -I scripts/import-garuda-catalog.py <setup-wizard.data.ts> catalog/garuda-setup-wizard.toml`
 
 ## Blockers
-- Creating public repos / the real build key: waiting for Genor's OK.
+- Public repos / real build key: waiting for Genor's OK.

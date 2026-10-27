@@ -11,18 +11,34 @@ Include = /etc/pacman.d/mirrorlist
 Include = /etc/pacman.d/mirrorlist
 [multilib]
 Include = /etc/pacman.d/mirrorlist
-# optional, toolbox-managed, always BELOW Arch so they only add packages and never replace Arch ones:
-#[cachyos]       linux-cachyos kernels, proton-cachyos
-#[chaotic-aur]   prebuilt AUR packages
+# enabled by default (ADR-0007), always BELOW Arch so they only add packages and never replace Arch ones:
+[cachyos]        # linux-cachyos kernels + prebuilt NVIDIA modules, proton-cachyos, chwd upstream
+Include = /etc/pacman.d/cachyos-mirrorlist
+[chaotic-aur]    # Garuda's prebuilt AUR repo: heroic, yay, claude-code, the ArtCraft apps, brave, vscode ...
+Include = /etc/pacman.d/chaotic-mirrorlist
 ```
 `[samurai]` sits above Arch so that `samurai-*` names always resolve to us, but it never contains a
 package with an Arch name. CI enforces that rule (`ci/check-no-shadowing`): the build fails if any
 package name exists in core, extra or multilib.
 
-The optional third-party repos go below Arch on purpose. CachyOS's own docs put their repo above
-Arch to swap in x86-64-v3 rebuilds; we do not want that (non-goal in spec 00). Below Arch we only
-get packages Arch does not have, such as `linux-cachyos` and `proton-cachyos`. The toolbox shows
-this choice with a warning when you enable them.
+The third-party repos go below Arch on purpose. CachyOS's own docs put their repo above Arch to swap
+in x86-64-v3 rebuilds; we do not want that (non-goal in spec 00). Below Arch we only get packages Arch
+does not have, such as `linux-cachyos` and `proton-cachyos`. Chaotic-AUR is how Garuda ships AUR
+software without building it on your machine; we copy that. Both can be turned off in the toolbox's
+Repos page. The page warns which installed packages would then stop getting updates.
+
+## What `[samurai]` contains
+| Kind | Examples | Rule |
+|------|----------|------|
+| Our own packages | toolbox, settings, meta, keyring, branding, hooks | the ≤ 30 target from spec 00 |
+| Builders | `samurai-gpu-unlock` | ships source pins + build scripts only; output is built on the user's machine (spec 07) |
+| Repackaged upstream binaries | `samurai-proton-ge` (GE-Proton from its GitHub releases), `samurai-python310…313` (python-build-standalone), `samurai-miniforge`, `samurai-miniconda`, `samurai-theme-otto/scratchy` | only when no Arch/CachyOS/Chaotic package exists; a CI job watches each upstream's releases and opens a version-bump PR |
+| AUR-only packages Chaotic lacks | `openai-codex-bin`, `opencode-bin`, `vectorcraft-bin`, `artcraft-launcher-appimage` | built from the AUR PKGBUILD (pinned commit, reviewed diff); dropped again when Chaotic or Arch picks them up |
+
+Names: AUR names are kept where we rebuild an AUR package unchanged, so yay sees the same package. Our
+own repackages use the `samurai-` prefix and `provides=` the common name (e.g. `samurai-proton-ge`
+provides `proton-ge-custom`), which avoids epochs (the AUR `proton-ge-custom-bin` has one; the epoch ban
+below forbids them).
 
 ## Hosting
 | What | Where | Why |
@@ -84,8 +100,11 @@ is fixed in the M1 spike.)
   `samurai-keyring`.
 
 ## AUR policy
-- `paru` is installed but never run as root and never run by `samurai update` unless the user turns
-  on `update.aur = true`. Even then it runs as the user after the pacman transaction, with a snapshot
-  already taken. Garuda's toolbox also refuses to run AUR updates itself.
+- **yay** is installed by default (from Chaotic-AUR); paru is a catalog option. yay never runs as root
+  and never runs inside `samurai update` unless `update.aur = true`. Even then it runs as the user after
+  the pacman transaction, with a snapshot already taken. Garuda's toolbox also refuses to run AUR
+  updates itself.
+- Packages in the install catalog never come from a live AUR build: they come from Arch, CachyOS,
+  Chaotic-AUR or `[samurai]`, so installs are fast, signed and reproducible. yay is for what you add later.
 - Nothing in `[samurai]` depends on an AUR package. If we need one, we package it ourselves in
   `pkgbuilds/` with a reason.

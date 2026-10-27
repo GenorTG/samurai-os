@@ -5,8 +5,17 @@
 ## Decision
 Samurai OS uses the Arch repositories unchanged. We ship only our own tools, configuration packages,
 meta-packages, branding, and the few things Arch does not package (Calamares, chwd, limine helper
-scripts). Kernels come from Arch (`linux`, `linux-zen`, `linux-lts`), optionally `linux-cachyos`
-from the CachyOS repo placed below Arch.
+scripts, repackaged upstream binaries; spec 02). Kernels come prebuilt from their official repos:
+**`linux-cachyos` (default)** from the CachyOS repo and **`linux-zen`** from Arch, with `linux`,
+`linux-lts` and `linux-cachyos-lts` as options. (Genor 2026-10-27: CachyOS kernel as main, zen to
+switch to.)
+
+Why CachyOS's kernel as the default is fine under this ADR: we do not build it. CachyOS builds,
+signs and ships it, and it is pulled from their repo (placed below Arch, ADR-0007) like any other
+upstream package. It brings the BORE scheduler and CachyOS's desktop tuning, plus prebuilt NVIDIA
+modules (`linux-cachyos-nvidia-open`), so no DKMS build is needed for the main kernel. `linux-zen` from
+Arch is the second entry, so a bad CachyOS kernel release still leaves a bootable system from a
+different source.
 
 ## Why
 - Every rebuilt package is a package we must rebuild on every upstream change, forever. CachyOS does

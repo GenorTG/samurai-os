@@ -25,3 +25,8 @@ See `docs/specs/01-ARCHITECTURE.md` "Source layout". Today only `docs/`, `script
 - Garuda's wiki pages are JS-rendered (`web_fetch` returns nothing). Read Garuda sources on GitLab
   (`garuda-linux/applications/*`, `garuda-linux/pkgbuilds`) instead.
 - chwd reads profiles only from `/var/lib/chwd/db/{pci,usb}/` (hard-coded in `src/consts.rs`).
+- gpu-unlock firmware/modules must never be published (repo, ISO, CI artifacts): NVIDIA firmware has no
+  redistribution approval (ADR-0008). Build on the target only.
+- `catalog/garuda-setup-wizard.toml` is generated: edit `catalog/samurai.toml` (overrides) or re-run
+  `scripts/import-garuda-catalog.py` against Garuda's toolbox `setup-wizard.data.ts`.
+- Never replace `/usr/bin/python` (Arch's python is the system python; extra versions live in `/opt/samurai/python`).
