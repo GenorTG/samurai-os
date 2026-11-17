@@ -70,7 +70,7 @@ means: CLI command, helper method with polkit action, GUI control, VM test.
 ### System settings
 | Feature | Garuda | Ours | CLI |
 |---------|--------|------|-----|
-| System components (install + enable service + add user to group): audio (PipeWire, JACK, EasyEffects, plugins), Bluetooth, printing/scanning (CUPS, SANE), virtualization (KVM, QEMU, libvirt, virt-manager, VirtualBox), containers (Docker, Podman, Distrobox, BoxBuddy, WinBoat), firewall (firewalld, ufw, OpenSnitch), ModemManager | yes | yes, from a component catalog (`/usr/lib/samurai/components.toml`) so new entries need no code | `samurai component list/enable/disable` |
+| System components (install + enable service + add user to group): audio (PipeWire, JACK, EasyEffects, plugins), Bluetooth, printing/scanning (CUPS, SANE), virtualization (KVM, QEMU, libvirt, virt-manager, VirtualBox), containers (Docker, Podman, Distrobox, BoxBuddy, WinBoat), firewall (firewalld, ufw, OpenSnitch), reverse proxy (Caddy default, nginx, traefik; `samurai proxy` pages), ModemManager | yes | yes, from a component catalog (`/usr/lib/samurai/components.toml`) so new entries need no code — anything the installer offers is also installable later (Genor 2026-11-17) | `samurai component list/enable/disable` |
 | Systemd services: list, start/stop/enable/disable, failed units | yes | yes | `samurai service ...` |
 | Users and groups | yes | yes (thin; KDE has its own) | `samurai user ...` |
 | Locales, language packs, keyboard | yes | yes | `samurai locale ...` |
@@ -83,7 +83,8 @@ means: CLI command, helper method with polkit action, GUI control, VM test.
 | hblock (hosts blocklist) | yes | yes, opt-in | `samurai tweak hblock on` |
 | iwd instead of wpa_supplicant | yes | yes | `samurai tweak iwd on` |
 | **Security page**: firewall state, AppArmor, Secure Boot, LUKS, TPM unlock, CVE packages, SSH exposure | no | **ours** (spec 09) | `samurai security status` |
-| **Firewall page**: switch firewalld/ufw, zones per network, open/close ports and one-click service presets, Docker-published ports | no (component toggle only) | **ours** (spec 09) | `samurai firewall ...` |
+| **Firewall page**: switch firewalld/ufw, zones per network, open/close ports and one-click service presets, Docker-published ports, live listening + connection view, per-interface traffic (vnstat), stale-hole warnings | no (component toggle only) | **ours** (spec 09) | `samurai firewall ...` |
+| **Reverse proxy page**: site list/add/disable, engine choice (Caddy/nginx/traefik), config test + reload, cert status | no | **ours** (spec 09), installable at install or later | `samurai proxy ...` |
 | **Tailscale page**: on/off, login, exit node, tailnet zone services | no | **ours** (spec 09) | `samurai tailscale ...` |
 | **GPU page**: driver profile, CUDA, gpu-unlock per card (state, toggle, last boot result) | no | **ours** (spec 07) | `samurai hw gpu` |
 | **Python page**: installed versions (EOL badges), uv config, conda on/off | no | **ours** (spec 13) | `samurai python ...` |

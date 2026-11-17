@@ -55,7 +55,7 @@ The app lists come from `catalog/`:
 | 8 | Gaming | **on**: Steam, Heroic, GameMode, MangoHud, gamescope, GE-Proton (latest), Proton-CachyOS, Wine stack | spec 10; untick individually |
 | 9 | Development | **Python versions as checkboxes** (3.10–3.13, all unticked; 3.14 is the system python; uv fetches missing versions on demand), conda: **Miniforge**, **Docker + Compose on** with mode choice: **docker group** or **rootless** (asked during install), AI CLIs (checkboxes, all off), local AI (Ollama, off) | spec 13 |
 | 10 | Applications | Garuda's 16 categories + Craft suite; **Firefox ticked** in Browsers | search box; "selected: N, download: X GiB" |
-| 11 | Network & security | firewall **firewalld** (ufw, none), **Tailscale on**, SSH server off, security profile **standard** | spec 09 |
+| 11 | Network & security | firewall **firewalld** (ufw, none), **Tailscale on**, SSH server off, security profile **standard**; **reverse proxy optional** (off; Caddy default, nginx, traefik; "open 80/443?" note about router port forwarding) | spec 09 |
 | 12 | Summary | everything chosen, disk changes in red, total download and disk use | Save profile; Install |
 | 13 | Install | progress per step, log view, "copy log" | on failure: keep the log and offer "open rescue shell" |
 | 14 | Done | reboot; list of first-boot steps (Secure Boot, TPM unlock, Tailscale login) | |

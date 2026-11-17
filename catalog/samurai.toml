@@ -91,6 +91,18 @@ services = ["tailscaled.service"]
 firstboot = "welcome: Connect to Tailscale (runs `tailscale up`, opens the login URL)"
 source = "arch"
 
+# ---------------------------------------------------------------- optional (default off, installable later via toolbox)
+[[choice]]
+id = "reverse-proxy"
+mode = "single"
+default = "none"
+options = [
+  { id = "caddy", name = "Caddy (auto-HTTPS, simplest)", packages = ["caddy"], source = "arch" },
+  { id = "nginx", name = "nginx", packages = ["nginx", "certbot"], source = "arch" },
+  { id = "traefik", name = "traefik (Docker-native routing)", packages = ["traefik"], source = "arch" },
+  { id = "none", name = "No reverse proxy" },
+]  # samurai-reverse-proxy wraps the engine: sites-available/enabled + `samurai proxy` + toolbox page
+
 [[toggle]]
 id = "nvidia-cuda"
 default = true

@@ -88,6 +88,30 @@ net.ipv4.icmp_ignore_bogus_error_responses = 1
   - Presets (one click): KDE Connect, Steam Remote Play, Steam local game transfer, Sunshine/Moonlight,
     LocalSend, Syncthing, Samba, SSH, Minecraft server, Ollama API (LAN), web dev server 3000/5173/8000.
     Each preset says which ports it opens. Every change is reversible from the same page.
+- **Traffic monitoring (easy, built in).** The same firewall page shows, without extra tools:
+  - what is **listening** right now (service, port, zone) and what **active connections** each
+    service has — `samurai firewall watch` (live view) / the GUI page (polls the same source:
+    `ss` + firewalld state);
+  - per-interface traffic counters via **vnstat** (installed with the firewall, daemon on):
+    today/month per `wlan0`, `eth0`, `tailscale0`.
+  - `security.listening` (spec 05) still alerts on anything new.
+- **Hosting helper (many services on one box).** A "Servers" section groups the hosting presets
+  (web 80/443, game servers, Sunshine/Moonlight, Ollama API, Syncthing, Samba…), shows every
+  Docker-published port next to the firewalld ones, and warns when an open port is not backed by a
+  running service (stale holes) — one click closes it.
+- **Reverse proxy (optional, at install or any time later).** One component, three engines:
+  - **Caddy** (default: automatic HTTPS for public names, simple `reverse_proxy` syntax),
+  - **nginx**, **traefik** (for people already running Docker stacks).
+  - Ships as `samurai-reverse-proxy` plus the chosen engine; config is standard upstream config
+    under `/etc/` (no our-format rewrites), with drop-in dirs: `sites-available` / `sites-enabled`
+    (nginx/Caddy convention).
+  - Toolbox → **Reverse proxy page** and `samurai proxy site list/add/disable/renew`: create a site
+    entry (domain or LAN name) that proxies to a local port or service, enable/disable it, test the
+    config, reload. Works on the tailnet too (HTTP-only names inside the tailnet, HTTPS for public).
+  - HTTPS: Caddy handles certificates itself; nginx/traefik entries get a `certbot` question. The
+    page never prints or stores private keys.
+  - Installer: checkbox on page 11 (off by default), engine choice, and "open 80/443 in firewall?"
+    with a plain-English note about port forwarding on the router.
 - **Tailscale** (default on, installer toggle; spec 08): `tailscaled` enabled, login at first boot.
   `tailscale0` goes into its own zone `samurai-tailnet`: inbound denied like `public`, so joining your
   tailnet exposes nothing until you open a service for that zone (e.g. SSH only on the tailnet). The
