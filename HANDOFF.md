@@ -7,8 +7,15 @@ terminal guided installers fed by Garuda's app catalog, a dev environment (Pytho
 conda, Docker, AI CLIs), GPU setup (CUDA + local gpu-unlock build), and a customised KDE. Everything
 proven in QEMU VMs on genorbox1.
 
-## State (2026-10-27)
-- Specs 00–14, ADR-0001…0008, OPEN-QUESTIONS (decided + open tables).
+## State (2026-11-17)
+- Specs 00–14, ADR-0001…0008, OPEN-QUESTIONS: **all 11 remaining questions answered** (Genor,
+  native form 2026-11-17). Decisions applied to the specs: name Samurai OS confirmed; toolbox
+  Qt6/QML; source repo public now (both repos at M1); KDE theme default **Breeze Dark** (Otto,
+  Scratchy optional); Miniforge; Python versions per-version checkboxes all unticked; Docker
+  group-vs-rootless chosen during install; AI CLIs all unticked; gpu-unlock includes fork recipes
+  for RTX 20 / non-4090 Ada with **every** recipe labelled "untested / potentially unstable"
+  (spec 07, ADR-0008); diagnostics manual opt-in only; testing genorbox1-first, plus M10a
+  `samurai drive write` (install-drive creator) so Genor can hand-test on his spare laptop.
 - Round 2 (Genor's brainstorm) folded in: installers (spec 08), dev env (spec 13), KDE setup
   (spec 14), CUDA + gpu-unlock (spec 07, ADR-0008), repos default on (ADR-0007), kernels cachyos+zen
   (ADR-0001), gaming/Wine (spec 10), firewall UX + Tailscale (spec 09).
@@ -17,12 +24,13 @@ proven in QEMU VMs on genorbox1.
   choices/toggles/apps/overrides.
 - Package availability checked 2026-10-27 (Arch, AUR, Chaotic db): see `catalog/samurai.toml`
   `source=`. Arch python = 3.14.8, cuda 13.4, uv 0.13.
-- Local git only. No GitHub repos, no signing key, no code beyond the catalog importer.
+- Local git only. **GitHub repos approved (public now)** — created at M1 with the signing key.
 
 ## Next steps
-1. Genor answers open questions (Q2 name, Q3 GUI stack, Q4 theme, Q6 repo visibility, Q12–Q16).
-2. M0: `ci/build-iso.sh` + VM boot. M1 spike: pacman from GitHub Releases with a throwaway key.
-3. Check Otto/Scratchy licences before M7a.
+1. M0: `ci/build-iso.sh` + VM boot on genorbox1 (QEMU/OVMF).
+2. M1 spike: pacman from GitHub Releases with a throwaway key; create both public repos + signing key.
+3. Check Otto/Scratchy licences before M7a; gpu-unlock hardware validation on stealth-dragon's 3090
+   (fork recipes too) to retire the "untested" labels.
 
 ## Commands
 - `bash scripts/install-hooks.sh` (per-commit build number).

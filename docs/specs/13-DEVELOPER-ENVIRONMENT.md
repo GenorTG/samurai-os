@@ -3,11 +3,15 @@
 Installer page 9 (spec 08). Everything here is pacman-managed, so `samurai update` keeps it current.
 Where a tool has its own self-updater, we turn the self-updater off.
 
-## Python: every version from 3.10 up, 3.14 as the system python
+## Python: versions selectable during install, 3.14 as the system python
 | Version | Comes from | Path | Role |
 |---------|-----------|------|------|
 | 3.14 | Arch `core/python` (3.14.8 on 2026-10-27) | `/usr/bin/python`, `python3`, `python3.14` | **system python**: Arch's `python-*` packages are built against it |
 | 3.13, 3.12, 3.11, 3.10 | `samurai-python313` … `samurai-python310` in `[samurai]` | `/opt/samurai/python/3.X/`, symlinks `/usr/bin/python3.X`, `pip3.X` | extra interpreters for venvs and projects |
+
+- **Installer choice (Genor 2026-11-17):** every version is a separate checkbox on page 9,
+  **all unticked by default**. uv's `python-downloads = "automatic"` covers versions not installed,
+  so nothing is missing functionally; the checkboxes only pre-download them.
 
 - The extra packages repackage **python-build-standalone** (Astral's prebuilt CPython, the same builds
   `uv python install` downloads). No compiling during install. CI bumps a package when a new patch
@@ -16,9 +20,8 @@ Where a tool has its own self-updater, we turn the self-updater off.
   with another build, because every pacman-installed Python tool and library would break. When Arch
   moves to 3.15, it becomes the system python, and CI adds `samurai-python314` automatically. The rule
   is "every minor version from 3.10 up to the one before Arch's".
-- **3.10 reached end of life this month** (October 2026): no more security fixes upstream. It is still
-  installed, as asked, but the toolbox marks it EOL and the health check shows an info notice (not a
-  warning).
+- **3.10 reached end of life in October 2026**: no more security fixes upstream. The toolbox marks
+  it EOL and the health check shows an info notice (not a warning).
 - Arch's python stays "externally managed" (PEP 668). `pip install` into the system python is
   refused; use uv, venvs or conda envs. The shell config prints a hint when it happens.
 
@@ -52,8 +55,9 @@ setup is the same:
 - NVIDIA machines also get `nvidia-container-toolkit`, configured for Docker, so `--gpus all` works
   in containers out of the box.
 - Data on the `@containers` subvolume (spec 06), outside root snapshots.
-- "Add me to the docker group" is a separate checkbox, default on. The installer notes that this
-  group is equivalent to root. Rootless Docker is a toolbox option.
+- **Docker mode is chosen during install (Genor 2026-11-17):** "docker group" or "rootless". The
+  installer notes that group membership is equivalent to root; rootless trades a little convenience
+  for safety. Rootless is also switchable later in the toolbox.
 - Firewall caveat: ports published with `-p` are reachable from the network regardless of firewalld
   zones (Docker programs its own rules). The security page shows published ports (spec 09).
 

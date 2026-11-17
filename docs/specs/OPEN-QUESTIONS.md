@@ -2,6 +2,8 @@
 
 Work proceeds on the default until he answers.
 
+All open questions answered in the native form on 2026-11-17; none remain open.
+
 ## Decided
 | # | Question | Decision | Where |
 |---|----------|----------|-------|
@@ -12,16 +14,18 @@ Work proceeds on the default until he answers.
 | Q11 | Installers | graphical (Calamares) + terminal guided + unattended profile (Genor) | spec 08 |
 
 ## Open
+
+None. Every Q1–Q16 has a decision above. New questions go here when they appear.
 | # | Question | Default in the specs | Notes |
 |---|----------|----------------------|-------|
-| Q2 | Final name | "Samurai OS", id `samurai` | one-variable rename (spec 00) |
-| Q3 | Toolbox GUI stack: Qt6/QML or Tauri/web? | Qt6/QML (ADR-0004) | CLI/helper are the same either way |
-| Q4 | Default KDE theme: Otto or Scratchy? | Otto, Scratchy offered | spec 14 |
-| Q6 | Source repo public from day one, or private until near v1? The package repo must be public (pacman cannot log in to private release downloads) | `samurai-os` private until M7, `samurai-repo` public from M1 | creating either repo waits for Genor's OK |
-| Q7 | Diagnostics upload host | PrivateBin at `paste.smart-samurai.pl` | |
-| Q10 | Spare disk / USB SSD on fan-dragon for real installs? | live USB only until one exists | |
-| Q12 | Conda: Miniforge (recommended) or Miniconda as the default? | Miniforge, Miniconda offered | spec 13: same `conda` command; Miniforge avoids Anaconda's channel terms |
-| Q13 | Python 3.10 went EOL this month: still install by default? | yes, with an EOL badge | spec 13 |
-| Q14 | Docker group membership by default (root-equivalent) or rootless Docker? | docker group, checkbox on | spec 13 |
-| Q15 | AI CLIs: anything to tick by default? | all off | spec 13 |
-| Q16 | gpu-unlock on Turing / non-4090 Ada from forks, or only upstream recipes? | upstream only | spec 07, ADR-0008 |
+| Q2 | Final name | **"Samurai OS", id `samurai` — confirmed (Genor 2026-11-17)** | one-variable rename is now moot |
+| Q3 | Toolbox GUI stack | **Qt6/QML — confirmed (Genor 2026-11-17)** | ADR-0004; CLI/helper are the same either way |
+| Q4 | Default KDE theme | **Breeze Dark — confirmed (Genor 2026-11-17)** | Otto and Scratchy offered in installer; spec 14 needs default switched |
+| Q6 | Repo visibility | **Source repo public now — confirmed (Genor 2026-11-17)** | `samurai-os` public at M1 alongside `samurai-repo` |
+| Q7 | Diagnostics upload | **Manual opt-in only — confirmed (Genor 2026-11-17)** | `paste` prints/copies a command; nothing uploads by itself; PrivateBin host stays the target |
+| Q10 | Test hardware | **genorbox1 VMs first; other hosts later (Genor 2026-11-17)** | disk space on other machines not guaranteed; SSH workflow avoided; a bootable install-drive creator (USB) is in scope so Genor can hand-test on his spare laptop |
+| Q12 | Conda | **Miniforge — confirmed (Genor 2026-11-17)** | Miniconda offered |
+| Q13 | Python versions | **All versions 3.10–3.14 selectable per-version during install — confirmed (Genor 2026-11-17)** | spec 13: change default-all to a per-version checkbox list |
+| Q14 | Docker mode | **Both offered; choice made during install — confirmed (Genor 2026-11-17)** | group vs rootless becomes an installer option, not a global default |
+| Q15 | AI CLIs | **All unticked by default — confirmed (Genor 2026-11-17)** | spec 13 as written |
+| Q16 | gpu-unlock scope | **Include forks for RTX 20 + non-4090 RTX 40 — confirmed (Genor 2026-11-17)** | ALL recipes (upstream included) marked "untested / potentially unstable" until we validate on real hardware; spec 07 + ADR-0008 updated |

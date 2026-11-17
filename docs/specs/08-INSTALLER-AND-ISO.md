@@ -50,10 +50,10 @@ The app lists come from `catalog/`:
 | 4 | User | user in `wheel`; login shell **fish** (bash and zsh offered; bash always installed); hostname | root locked |
 | 5 | Kernels | **linux-cachyos** (default boot) + **linux-zen** | also `linux`, `linux-lts`, `linux-cachyos-lts` (spec 10) |
 | 6 | Desktop | **KDE Plasma**; GNOME, Hyprland, COSMIC, Xfce, Cinnamon, Sway, i3, none | only KDE gets our full setup and is tested; the others get upstream defaults plus our shell, tools and toolbox |
-| 6a | KDE setup (KDE only) | theme **Otto** (Scratchy, Breeze Dark), **monitor widgets on**, **reduced effects on**, panel layout top + bottom task bar | spec 14 |
+| 6a | KDE setup (KDE only) | theme **Breeze Dark** (Otto, Scratchy offered), **monitor widgets on**, **reduced effects on**, panel layout top + bottom task bar | spec 14 |
 | 7 | Hardware | detected devices + recommended driver profiles (chwd); NVIDIA: **CUDA on** (Turing and newer); **gpu-unlock on** for each supported card, listed per card with its PCI address | spec 07; unsupported cards show why |
 | 8 | Gaming | **on**: Steam, Heroic, GameMode, MangoHud, gamescope, GE-Proton (latest), Proton-CachyOS, Wine stack | spec 10; untick individually |
-| 9 | Development | **Python 3.10–3.13 + uv on** (3.14 is the system python), conda: **Miniforge**, **Docker + Compose on** (+ "add me to the docker group", on), AI CLIs (checkboxes, all off), local AI (Ollama, off) | spec 13 |
+| 9 | Development | **Python versions as checkboxes** (3.10–3.13, all unticked; 3.14 is the system python; uv fetches missing versions on demand), conda: **Miniforge**, **Docker + Compose on** with mode choice: **docker group** or **rootless** (asked during install), AI CLIs (checkboxes, all off), local AI (Ollama, off) | spec 13 |
 | 10 | Applications | Garuda's 16 categories + Craft suite; **Firefox ticked** in Browsers | search box; "selected: N, download: X GiB" |
 | 11 | Network & security | firewall **firewalld** (ufw, none), **Tailscale on**, SSH server off, security profile **standard** | spec 09 |
 | 12 | Summary | everything chosen, disk changes in red, total download and disk use | Save profile; Install |

@@ -16,8 +16,9 @@ redistribution approval is not claimed."
   `gpu-unlock-firmware` locally.
 - No built module, firmware or NVIDIA archive is ever published in our repo, on the ISO or in CI
   artifacts. CI builds only to test, in a throwaway container, and discards the output.
-- Enabled per card by PCI address (`gpu_unlock.targets=0000:01:00.0`), only for cards in upstream's
-  recipe table; default on in the installer for those cards (spec 07).
+- Enabled per card by PCI address (`gpu_unlock.targets=0000:01:00.0`), for cards in the recipe
+  table (upstream + pinned forks — Genor 2026-11-17 wants fork coverage for RTX 20 / non-4090 Ada).
+  Every recipe is labelled "untested, potentially unstable" (spec 07) until validated on hardware.
 
 ## Why
 This keeps a feature Genor explicitly wants without publishing NVIDIA firmware, which upstream itself

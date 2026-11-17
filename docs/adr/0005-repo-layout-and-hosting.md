@@ -19,4 +19,4 @@
 ## Consequences
 - Publishing needs a token that can write to `samurai-repo` releases; it lives in the same protected
   CI environment as the signing subkey (spec 09).
-- Creating both public repos is an outward-facing step: done only when Genor says so (M1).
+- Creating both repos was approved by Genor (2026-11-17, "public now"): they go up at M1.

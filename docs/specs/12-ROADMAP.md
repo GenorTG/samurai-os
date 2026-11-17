@@ -15,10 +15,11 @@ typing.
 | M6 | Drivers + GPU | chwd + our profiles, fingerprint service, CUDA rule, `samurai-gpu-unlock` builder | fixture tests; `hw-fingerprint-change`, `gpu-unlock-builder` green; **hardware**: gpu-unlock end to end on stealth-dragon's 3090 | 1–2 weeks |
 | M6b | Developer environment | `samurai-python310…313`, uv config, Miniforge/Miniconda packages, Docker defaults, AI-CLI catalog entries + `[samurai]` rebuilds | `python-versions`, `docker` green | 1 week |
 | M7 | Desktop ISO + installers | KDE live session, Calamares build + our catalog pages, terminal guided installer, catalog import + resolver, `samurai-gaming` + `samurai-wine` + `samurai-proton-ge`, size report ≤ 2 GiB | `iso-boot`, `install-calamares`, `install-tui`, `install-profile-parity`, `catalog-resolve` green | 2–3 weeks |
-| M7a | KDE setup | theme licence check + packages (Otto, Scratchy), `samurai-plasma-layout` (panels + monitor widgets), reduced-effects defaults; **spike**: ksystemstats sensor ids, per-socket option | `kde-layout` green | 1 week |
+| M7a | KDE setup | theme licence check + packages (Breeze Dark default; Otto, Scratchy optional), `samurai-plasma-layout` (panels + monitor widgets), reduced-effects defaults; **spike**: ksystemstats sensor ids, per-socket option | `kde-layout` green | 1 week |
 | M8 | Security | `samurai-settings-security`, Secure Boot setup, TPM+PIN, firewall presets, Tailscale zone, AppArmor | `secureboot`, `tpm-unlock` green; `security status` all pass on a fresh install | 1 week |
 | M9 | GUI toolbox | Qt6/QML app over the helper's D-Bus API: every page in spec 04; welcome app; tray notifier | each page reaches the same helper calls (D-Bus mock tests) + manual review | 3–4 weeks |
-| M10 | Real hardware, daily driver | hardware checklist on fan-dragon (spare disk), stealth-dragon, a laptop | Genor daily-drives it for 2 weeks without a manual repair | 2+ weeks |
+| M10 | Real hardware, daily driver | hardware checklist on stealth-dragon, Genor's spare laptop and genorbox1 hardware; **testing order (Genor 2026-11-17): genorbox1 first**, other hosts later (their disk space is not guaranteed) | Genor daily-drives it for 2 weeks without a manual repair; his own laptop install (below) | 2+ weeks |
+| M10a | Install-drive creator | `samurai drive write` (dd-based, USB installer drive) + a full install drive image, so Genor can hand-test on his spare laptop without SSH workflows | writes a bootable drive from the latest ISO in one command; verified in VM | 2–3 days |
 | v1.0 | Release | first `v1.0.0.x` ISO + public repo | all suites green; hardware checklist passed | — |
 
 Rough total to v1.0: **4–5 months part-time** (grew by about a month with the installers' catalog

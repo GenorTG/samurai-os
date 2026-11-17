@@ -75,10 +75,15 @@ What it supports (from its `kernel/gpu_unlock/recipes.c`, not from our own list)
 |-----|--------------------------|
 | Ampere GA102/GA103/GA104/GA106 (RTX 3060–3090 Ti), GA100 | supported |
 | RTX 4090 (AD102) | supported, one hardware success report so far |
-| Turing (RTX 20), other Ada (RTX 4060–4080) | only in forks; upstream says it will integrate them |
+| Turing (RTX 20), other Ada (RTX 4060–4080) | fork recipes (upstream plans to integrate them) |
 | Blackwell (RTX 50) | not supported |
-The installer reads the recipe table from the source we build, so newly supported cards appear
-when upstream adds them.
+
+**Source of recipes (Genor 2026-11-17).** Fork recipes for Turing and non-4090 Ada are **included**:
+the builder pulls the recipe table from the upstream repo plus our pinned fork list, and the
+installer lists the card's source (upstream / fork) next to it. Per Genor's decision, **every**
+recipe — upstream ones included — is labelled "untested, potentially unstable" until it has been
+validated on real hardware; validated cards lose the label. Nothing is on by default in the
+installer without that label being shown.
 
 **Distribution constraint (decides the design).** The module needs firmware extracted from an
 NVIDIA driver package. The repo's `firmware/NOTICE.md` says redistribution approval is not claimed,

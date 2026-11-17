@@ -7,9 +7,9 @@ a one-time first-login script, so no package ever overwrites an existing user's 
 ## Theme (installer page 6a)
 | Choice | Contents | Package |
 |--------|----------|---------|
-| **Otto** (default) | dark, orange/yellow gradients: global theme, Plasma style, colour schemes, Kvantum style, window decoration, Konsole scheme (KDE Store 1360125 and related items) | `samurai-theme-otto` (+ `kvantum`) |
+| **Breeze Dark** (default, Genor 2026-11-17) | KDE's own, no third-party dependency | — |
+| Otto | dark, orange/yellow gradients: global theme, Plasma style, colour schemes, Kvantum style, window decoration, Konsole scheme (KDE Store 1360125 and related items) | `samurai-theme-otto` (+ `kvantum`) |
 | Scratchy | dark, Catppuccin Macchiato palette, same set of parts (KDE Store 1898344) | `samurai-theme-scratchy` |
-| Breeze Dark | KDE's own | — |
 
 - Before packaging: confirm each theme's licence allows redistribution (KDE Store items are usually
   GPL or CC-BY-SA) and that it renders correctly on the current Plasma 6. If a licence does not allow

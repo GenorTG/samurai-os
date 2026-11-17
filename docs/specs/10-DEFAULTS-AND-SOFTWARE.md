@@ -22,7 +22,8 @@ install catalog (spec 08, `catalog/`). Each entry can be removed without breakin
 | Firmware | `linux-firmware`, CPU microcode, `sof-firmware`, `fwupd` |
 
 ## Desktop
-KDE Plasma (Wayland) is the default and the tested desktop. Its setup (Otto/Scratchy theme, top
+KDE Plasma (Wayland) is the default and the tested desktop. Its setup (Breeze Dark default theme
+with Otto/Scratchy offered, top panel + bottom task bar, reduced effects)
 panel + bottom task bar, monitor widgets, reduced effects) is in spec 14. Other desktops are
 installer choices with upstream defaults (spec 08 page 6).
 
