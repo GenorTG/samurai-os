@@ -26,7 +26,7 @@ proven in QEMU VMs on genorbox1.
   `source=`. Arch python = 3.14.8, cuda 13.4, uv 0.13.
 - Local git only. **GitHub repos approved (public now)** — created at M1 with the signing key.
 
-## Next steps
+## Next steps (updated 2026-11-17 after M1)
 1. M0: `ci/build-iso.sh` + VM boot on genorbox1 (QEMU/OVMF).
 2. M1 spike: pacman from GitHub Releases with a throwaway key; create both public repos + signing key.
 3. Check Otto/Scratchy licences before M7a; gpu-unlock hardware validation on stealth-dragon's 3090
@@ -47,3 +47,27 @@ proven in QEMU VMs on genorbox1.
   out_dir must be ABSOLUTE (relative arg = docker named volume!), work dir mounted for caching.
 - `ci/boot-vm.sh`: OVMF q35 + KVM, serial to build/serial.log, PASS = `root@samurai` on serial.
 - Verified: build/samurai-os-2026.11.17-x86_64.iso (1.3 GB) boots to root shell in OVMF VM. Boot ~40 s.
+## M1 done (2026-11-17)
+- GitHub (public, per Genor's "public now"): `GenorTG/samurai-os` (source, main pushed) +
+  `GenorTG/samurai-repo` (data-only, README initialized, release tag `x86_64` rolling:
+  keyring/mirrorlist/release packages + sigs, `samurai.db`/`samurai.files` + sigs uploaded LAST).
+- Keys (docs/KEYS.md): primary `DFE8C148C042AA3C199AAEA08436E12731EDD3FA` offline in
+  `~/samurai-keys/gnupg` (0700); signing subkey ed25519 `9849CC7F67786E5037FBB35B5385F81F2AD03400`
+  expires 2027-11-17. No passphrase yet (TODO). Backup of `~/samurai-keys/` still TODO.
+- `samurai-release` 0.0.1-4 design (spike-verified): NEVER lists /usr/lib/os-release (owned by
+  Arch `filesystem`; --overwrite leaves ambiguous ownership and a filesystem upgrade reverts
+  content). Hook + `samurai-apply-os-release` re-apply identity after every filesystem or
+  samurai-release transaction. `provides/conflicts/replaces=(lsb-release)` (provides satisfies
+  open-vm-tools). mktemp template must end in X.
+- `ci/build-repo.sh` gotchas learned: `docker run -i` REQUIRED when the script arrives via stdin
+  heredoc (without -i the container runs an empty script and exits 0); EOS terminator must not be
+  eaten by later edits; repo-add's trailing re-sign aborts harmlessly after both dbs are valid —
+  VERIFY dbs instead of trusting its exit code; chown handback must run on the HOST side.
+- makepkg gotchas: sha256sums=('SKIP') means "verify PGP instead" (use real sums); `*.asc`
+  sources are treated as detached signatures (key export renamed build-key.txt).
+- Checks: ci/check-no-shadowing + check-no-epoch; negative tests pass (reject 'linux', '1:2.0');
+  db name parsing must read %NAME% records, not entry dir names.
+- Spike transcript detail: `--noconfirm` does NOT answer conflict questions (default N) — use
+  `--ask 4`; raw.githubusercontent 404s are CDN cache lag; QEMU user-net host = 10.0.2.2.
+- ISO: serial autologin drop-in now targets serial-getty@ttyS0.service (getty@ttyS0 was wrong);
+  existing ISO predates the fix — rebuild before next VM run.
