@@ -26,7 +26,7 @@ proven in QEMU VMs on genorbox1.
   `source=`. Arch python = 3.14.8, cuda 13.4, uv 0.13.
 - Local git only. **GitHub repos approved (public now)** — created at M1 with the signing key.
 
-## Next steps (updated 2026-11-17 after M1)
+## Next steps (updated 2026-11-17 after M2)
 1. M0: `ci/build-iso.sh` + VM boot on genorbox1 (QEMU/OVMF).
 2. M1 spike: pacman from GitHub Releases with a throwaway key; create both public repos + signing key.
 3. Check Otto/Scratchy licences before M7a; gpu-unlock hardware validation on stealth-dragon's 3090
@@ -71,3 +71,21 @@ proven in QEMU VMs on genorbox1.
   `--ask 4`; raw.githubusercontent 404s are CDN cache lag; QEMU user-net host = 10.0.2.2.
 - ISO: serial autologin drop-in now targets serial-getty@ttyS0.service (getty@ttyS0 was wrong);
   existing ISO predates the fix — rebuild before next VM run.
+## M2 done (2026-11-17)
+- Smoke suite GREEN from one command: `tests/vm/run-smoke.sh` (iso_boot + install_default, 2 passed
+  in ~3.5 min). Full proven cycle: profile -> strict validation -> erase+LUKS2+spec 06 subvolumes ->
+  pacstrap -> [samurai] repo from baked key (inline Server lines, NO pre-placed mirrorlist - the
+  package owns that path) -> postinstall -> systemd-boot -> LUKS auto-unlock via EMBEDDED keyfile
+  (mkinitcpio FILES=, rd.luks.key without keydev) -> rootflags=subvol=@ -> reboot -> installed system
+  verified via QGA (hostname, Samurai OS identity, crypt root, @ subvol, zero failed units).
+- The M2 install set: base + linux + linux-firmware + mkinitcpio + sudo + fish + python + pciutils +
+  samurai-{release,mirrorlist,keyring} + qemu-guest-agent. mkinitcpio is NOT in base. pacman vs
+  repo pitfalls: db csize must equal uploaded asset size (makepkg zstd not deterministic) - use
+  ci/publish-repo.sh for publishes (uploads full consistent set, db LAST, csize-verified).
+- Harness lessons: strip ANSI before matching (ESC ( B splits 'root@samurai'); qemu-ga here rejects
+  capture-output and returns buf-b64 from guest-file-read; serial_cmd needs a settle-nudge before
+  sending; OVMF prefers the CD - eject the ISO (QMP) before the reboot; mkarchiso stamp-skips on a
+  reused work dir; docker stdin needs -i for heredoc scripts; pkill -f self-matches the exec shell
+  (use -x or kill by PID).
+- Debug-disk trick: mount the failed run's qcow2 via the LIVE ISO + QGA (vda1 = ESP, vda2 = LUKS,
+  keyfile at /esp/keys/samurai.key) - found the missing FILES= line that way.
