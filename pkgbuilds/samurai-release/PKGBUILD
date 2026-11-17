@@ -1,23 +1,44 @@
 # Maintainer: Samurai OS <build@smart-samurai.pl>
 # Spec: docs/specs/01-ARCHITECTURE.md (samurai-release), docs/specs/02-PACKAGE-REPOSITORY.md
 # Bumped with every Samurai OS distro release (VERSION file in the source repo).
+#
+# Ownership note (M1 spike evidence, 2026-11-17):
+# /usr/lib/os-release is owned by Arch's `filesystem` package. Claiming it here
+# either fails (file conflict) or leaves ambiguous ownership with --overwrite,
+# and a later `filesystem` upgrade/reinstall silently reverts the content.
+# So we do NOT list os-release in the file array. Instead:
+#  - /usr/share/samurai/os-release holds our identity (owned by us),
+#  - a pacman hook re-applies it to /usr/lib/os-release after every
+#    `filesystem` or `samurai-release` transaction.
+#  - /etc/lsb-release is taken over with Conflicts/Replaces=(lsb-release).
 
 pkgname=samurai-release
 pkgver=0.0.1
-pkgrel=1
-pkgdesc="Samurai OS identity: /usr/lib/os-release and /etc/lsb-release"
+pkgrel=4
+pkgdesc="Samurai OS identity: os-release hook + /etc/lsb-release"
 arch=(any)
 url="https://github.com/GenorTG/samurai-os"
 license=(MIT)
 groups=(samurai-base)
-depends=()
+depends=(filesystem)
+conflicts=(lsb-release)
+replaces=(lsb-release)
+# satisfies open-vm-tools (and friends) which depend on 'lsb-release'
+provides=(lsb-release)
 backup=('etc/lsb-release')
+source=("samurai-os-release.hook" "samurai-apply-os-release")
+sha256sums=('b051707215a2facc8b6f0496983b2d90f58f29119397e90a74190b50c590abca'
+           '2ac8ebbf34a0decb6f0b43aa7b7a91d84170680fef59b6a2ba141b15962f3757')
+# samurai-release.install is the install= script: makepkg picks it up from the
+# PKGBUILD dir automatically and it is exempt from source checksums.
+install=samurai-release.install
 
 package() {
     cd "$pkgdir"
 
-    install -d usr/lib
-    cat > usr/lib/os-release << 'EOF'
+    # source of truth for our identity; the hook applies it
+    install -d usr/share/samurai
+    cat > usr/share/samurai/os-release << 'EOF'
 NAME="Samurai OS"
 PRETTY_NAME="Samurai OS (rolling)"
 ID=samurai
@@ -37,4 +58,12 @@ DISTRIB_RELEASE="0.0.1"
 DISTRIB_CODENAME="samurai"
 DISTRIB_DESCRIPTION="Samurai OS (rolling)"
 EOF
+
+    # re-apply identity after every filesystem or samurai-release transaction
+    install -d usr/share/libalpm/hooks etc/pacman.d/hooks
+    install -m644 "$srcdir/samurai-os-release.hook" \
+        usr/share/libalpm/hooks/samurai-os-release.hook
+
+    install -d usr/bin
+    install -m755 "$srcdir/samurai-apply-os-release" usr/bin/
 }

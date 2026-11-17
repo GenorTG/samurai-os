@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Spec 02: no package epochs in [samurai] — GitHub rewrites ':' in asset names,
+# so epoch versions would produce URLs pacman cannot fetch. CI fails on any.
+# Usage: ci/check-no-epoch [pkgbuilds-dir]
+set -euo pipefail
+
+dir="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../pkgbuilds" && pwd)}"
+
+fail=0
+for p in "$dir"/*/PKGBUILD; do
+    if grep -qE '^epoch=' "$p"; then
+        echo "EPOCH: '$(grep -E '^pkgname=' "$p" | cut -d= -f2)' sets an epoch" >&2
+        fail=1
+    fi
+    pkgver=$(grep -E '^pkgver=' "$p" | head -1 | cut -d= -f2)
+    case "$pkgver" in
+        *:*) echo "EPOCH: '$(grep -E '^pkgname=' "$p" | head -1 | cut -d= -f2)' has an epoch-style pkgver '$pkgver'" >&2; fail=1 ;;
+    esac
+done
+
+if [ "$fail" -eq 1 ]; then
+    echo "==> FAIL: epoch check" >&2
+    exit 1
+fi
+echo "==> no-epoch OK ($(find "$dir" -name PKGBUILD | wc -l) packages)"

@@ -1,0 +1,11 @@
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Package
+Target = filesystem
+Target = samurai-release
+
+[Action]
+Description = Applying Samurai OS identity to /usr/lib/os-release
+When = PostTransaction
+Exec = /usr/bin/samurai-apply-os-release

@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Apply Samurai OS identity to /usr/lib/os-release (idempotent).
+# /usr/lib/os-release stays owned by Arch's `filesystem`; this only replaces
+# the content atomically after transactions (see PKGBUILD ownership note).
+set -euo pipefail
+
+src=/usr/share/samurai/os-release
+dst=/usr/lib/os-release
+[ -f "$src" ] || exit 0
+[ -e "$dst" ] || exit 0   # never create it; `filesystem` owns that path
+
+cmp -s "$src" "$dst" && exit 0
+tmp=$(mktemp "${dst}.tmp.XXXXXX")   # X's must end the template (mktemp requirement)
+cat "$src" > "$tmp"
+chmod 644 "$tmp"
+mv -f "$tmp" "$dst"

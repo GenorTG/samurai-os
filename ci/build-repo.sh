@@ -70,15 +70,23 @@ cd "$out64"
 for p in *.pkg.tar.zst; do
     [ -f "$p.sig" ] || gpg --batch --detach-sign --local-user "$SAMURAI_SUBKEY" "$p"
 done
-repo-add --sign samurai.db.tar.gz "$out64"/*.pkg.tar.zst
-# current repo-add also builds and signs samurai.files.tar.gz itself (see output)
-for f in samurai.db.tar.gz samurai.files.tar.gz; do
-    [ -f "$f" ] || continue
-    gpg --batch --detach-sign --local-user "$SAMURAI_SUBKEY" "$f"
-done
-ls -lh /out/x86_64
-# hand the output back to the host user (root-owned bind-mount writes)
-chown -R 1000:1000 /out
+repo-add --sign samurai.db.tar.gz "$out64"/*.pkg.tar.zst || true
+# current repo-add also builds and signs samurai.files.tar.gz; its trailing
+# re-sign step can abort with 'File exists' after both dbs are valid, so we
+# verify instead of trusting its exit code:
+test -s samurai.db.tar.gz && test -s samurai.db.tar.gz.sig
+test -s samurai.files.tar.gz && test -s samurai.files.tar.gz.sig
+gpg --batch --verify samurai.db.tar.gz.sig samurai.db.tar.gz
+gpg --batch --verify samurai.files.tar.gz.sig samurai.files.tar.gz
+pacman --noconfirm -Sy samurai.db.tar.gz --dbpath /tmp/dbcheck >/dev/null 2>&1 || true
+# (safety net; repo-add --sign already signed both dbs)
 EOS
+
+echo "==> done:"
+ls -lh "$out_dir/x86_64"
+# ownership handback independent of the container's exit code: root-owned
+# bind-mount writes are invisible to pacman on the host otherwise
+# (learned: the in-container chown is skipped when set -e aborts first)
+docker run --rm -v "$out_dir":/o alpine chown -R 1000:1000 /o >/dev/null
 
 echo "==> repo built in $out_dir/x86_64"

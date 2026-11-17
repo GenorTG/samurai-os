@@ -1,0 +1,9 @@
+# re-apply identity at first install (hook covers upgrades + this package's
+# own transaction, but /etc/lsb-release replacement needs nothing extra)
+post_install() {
+    usr/bin/samurai-apply-os-release || true
+}
+
+post_upgrade() {
+    usr/bin/samurai-apply-os-release || true
+}

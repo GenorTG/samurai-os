@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Spec 02: [samurai] must never contain a package name that exists in Arch's
+# core/extra/multilib — [samurai] sits ABOVE Arch, so a name clash would shadow
+# Arch's package silently. CI fails on any clash.
+# Usage: ci/check-no-shadowing [pkgbuilds-dir]
+set -euo pipefail
+
+dir="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../pkgbuilds" && pwd)}"
+
+# Query the live repo db for Arch's package names (run inside the build
+# container; outside it, /tmp/arch-names is used if present).
+arch_names=/tmp/arch-names
+if [ ! -f "$arch_names" ]; then
+    pacman -Slq core extra multilib > "$arch_names"
+fi
+
+fail=0
+for p in "$dir"/*/PKGBUILD; do
+    name=$(grep -E '^pkgname=' "$p" | head -1 | cut -d= -f2)
+    if grep -qx "$name" "$arch_names"; then
+        echo "SHADOWING: '$name' exists in Arch repos and would be shadowed by [samurai]" >&2
+        fail=1
+    fi
+done
+
+if [ "$fail" -eq 1 ]; then
+    echo "==> FAIL: shadowing check" >&2
+    exit 1
+fi
+echo "==> no-shadowing OK ($(find "$dir" -name PKGBUILD | wc -l) packages)"
