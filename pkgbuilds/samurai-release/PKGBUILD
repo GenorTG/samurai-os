@@ -1,0 +1,40 @@
+# Maintainer: Samurai OS <build@smart-samurai.pl>
+# Spec: docs/specs/01-ARCHITECTURE.md (samurai-release), docs/specs/02-PACKAGE-REPOSITORY.md
+# Bumped with every Samurai OS distro release (VERSION file in the source repo).
+
+pkgname=samurai-release
+pkgver=0.0.1
+pkgrel=1
+pkgdesc="Samurai OS identity: /usr/lib/os-release and /etc/lsb-release"
+arch=(any)
+url="https://github.com/GenorTG/samurai-os"
+license=(MIT)
+groups=(samurai-base)
+depends=()
+backup=('etc/lsb-release')
+
+package() {
+    cd "$pkgdir"
+
+    install -d usr/lib
+    cat > usr/lib/os-release << 'EOF'
+NAME="Samurai OS"
+PRETTY_NAME="Samurai OS (rolling)"
+ID=samurai
+ID_LIKE=arch
+BUILD_ID=samurai-0.0.1
+ANSI_COLOR="0;36"
+HOME_URL="https://smart-samurai.pl/"
+DOCUMENTATION_URL="https://github.com/GenorTG/samurai-os"
+SUPPORT_URL="https://github.com/GenorTG/samurai-os/issues"
+BUG_REPORT_URL="https://github.com/GenorTG/samurai-os/issues"
+EOF
+
+    install -d etc
+    cat > etc/lsb-release << 'EOF'
+DISTRIB_ID="Samurai OS"
+DISTRIB_RELEASE="0.0.1"
+DISTRIB_CODENAME="samurai"
+DISTRIB_DESCRIPTION="Samurai OS (rolling)"
+EOF
+}

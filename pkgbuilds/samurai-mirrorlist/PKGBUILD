@@ -1,0 +1,33 @@
+# Maintainer: Samurai OS <build@smart-samurai.pl>
+# Spec: docs/specs/02-PACKAGE-REPOSITORY.md (Hosting / samurai-mirrorlist)
+# GitHub Releases is the primary; repo.smart-samurai.pl (genorbox1, Caddy) is the
+# fallback mirror. [samurai] db lives in the $arch tag; testing in $arch-testing.
+
+pkgname=samurai-mirrorlist
+pkgver=1
+pkgrel=1
+pkgdesc="Samurai OS pacman mirrorlists ([samurai] and [samurai-testing])"
+arch=(any)
+url="https://github.com/GenorTG/samurai-repo"
+license=(MIT)
+groups=(samurai-base)
+depends=()
+
+package() {
+    cd "$pkgdir"
+    install -d etc/pacman.d
+
+    cat > etc/pacman.d/samurai-mirrorlist << 'EOF'
+# [samurai] - primary (GitHub Releases, CDN-backed)
+Server = https://github.com/GenorTG/samurai-repo/releases/download/x86_64
+# fallback mirror
+Server = https://repo.smart-samurai.pl/samurai/x86_64
+EOF
+
+    cat > etc/pacman.d/samurai-testing-mirrorlist << 'EOF'
+# [samurai-testing] - primary (GitHub Releases)
+Server = https://github.com/GenorTG/samurai-repo/releases/download/x86_64-testing
+# fallback mirror
+Server = https://repo.smart-samurai.pl/samurai-testing/x86_64
+EOF
+}

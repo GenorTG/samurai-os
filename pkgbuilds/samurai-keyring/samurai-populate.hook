@@ -1,0 +1,8 @@
+[Trigger]
+Operation = Install
+Type = File
+Target = usr/share/pacman/keyrings/samurai-trusted
+
+[Action]
+When = PostTransaction
+Exec = /usr/bin/pacman-key --populate samurai

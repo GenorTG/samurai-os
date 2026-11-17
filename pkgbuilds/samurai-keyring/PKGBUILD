@@ -1,0 +1,45 @@
+# Maintainer: Samurai OS <build@smart-samurai.pl>
+# Spec: docs/specs/02-PACKAGE-REPOSITORY.md (Signing keys)
+# Ships the build key's public half in the pacman keyring format, so a fresh
+# system can verify [samurai] with SigLevel = Required DatabaseRequired.
+# The primary key stays offline (runbook: docs/KEYS.md); only the public
+# export lives in this package.
+
+pkgname=samurai-keyring
+pkgver=20261117
+pkgrel=1
+pkgdesc="Samurai OS build keyring for pacman"
+arch=(any)
+url="https://github.com/GenorTG/samurai-os"
+license=(MIT)
+groups=(samurai-base)
+depends=('pacman')
+source=("build-key.txt" "samurai-populate.hook")
+sha256sums=('6443d0a8cfba757e4280a9fafc4208e85ba216b5ad83abe70fcf411f7795fd6a'
+           'cba519f060917199d2e7f611b106d36f4bcd526f7363a718e2c0d80e90f15a5b')
+# The extension is .txt on purpose: makepkg treats *.asc sources as detached
+# PGP signatures and would try to verify a nonexistent 'build-key'.
+# Any key material change (rotation per docs/KEYS.md) must bump this sum in the
+# same commit; the CI keyring check re-verifies it against the offline keyring.
+
+package() {
+    local keydir=usr/share/pacman/keyrings
+    cd "$pkgdir"
+
+    install -dm755 "$keydir"
+
+    # <name>.gpg: gpg keyring file pacman-key --populate samurai imports
+    gpg --batch --homedir "$srcdir" --import-options import-export \
+        --import "$srcdir/build-key.txt" > "$keydir/samurai.gpg"
+
+    # <name>-trusted: fingerprint:ownertrust lines (Arch keyring format).
+    # Full trust (4) for the build key; ultimate (5) is never shipped.
+    printf 'DFE8C148C042AA3C199AAEA08436E12731EDD3FA:4:\n' > "$keydir/samurai-trusted"
+
+    # <name>-revoked: empty until a key is compromised; rotate via runbook.
+    : > "$keydir/samurai-revoked"
+
+    # Populate hook: imports the keyring + trusted into the local keyring.
+    install -Dm644 "$srcdir/samurai-populate.hook" \
+        etc/pacman.d/hooks/samurai-populate.hook
+}
