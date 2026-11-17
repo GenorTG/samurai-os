@@ -28,6 +28,10 @@ gpg --armor --export-secret-subkeys "$subkey!" > "$keyfile"
 chmod 600 "$keyfile"
 
 mkdir -p "$out_dir"
+# repo-add APPENDS to an existing db: a stale one would duplicate entries
+# and resurrect removed packages. Always start the db from scratch.
+rm -rf "$out_dir/x86_64"
+mkdir -p "$out_dir/x86_64"
 
 echo "==> building [samurai] packages in $container (subkey $subkey)"
 docker run --rm -i --name "$container" \

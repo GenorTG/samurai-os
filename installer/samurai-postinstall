@@ -60,17 +60,20 @@ cat > /etc/hosts <<EOF
 127.0.1.1	$HOSTNAME.localdomain	$HOSTNAME
 EOF
 
-### [samurai] repo (spec 02): key + mirrorlist baked into the live ISO ###
+### [samurai] repo (spec 02): key staged from the live ISO ###
+# NOTE: the mirrorlist is NOT pre-placed — the samurai-mirrorlist package owns
+# /etc/pacman.d/samurai-mirrorlist and a pre-placed file breaks its install.
+# The bootstrap repo section carries inline Server lines instead.
 log "repos: enabling [samurai]"
 pacman-key --init
 if [ -f /usr/share/samurai/build-key.txt ]; then
     pacman-key --add /usr/share/samurai/build-key.txt
     pacman-key --lsign-key DFE8C148C042AA3C199AAEA08436E12731EDD3FA
 fi
-if [ -f /usr/share/samurai/samurai-mirrorlist ]; then
-    install -m644 /usr/share/samurai/samurai-mirrorlist /etc/pacman.d/samurai-mirrorlist
-fi
-sed -i '/^\[core\]/i [samurai]\nInclude = /etc/pacman.d/samurai-mirrorlist\nSigLevel = Required DatabaseRequired' /etc/pacman.conf
+sed -i '/^\[core\]/i [samurai]\
+Server = https://github.com/GenorTG/samurai-repo/releases/download/x86_64\
+Server = https://repo.smart-samurai.pl/samurai/x86_64\
+SigLevel = Required DatabaseRequired' /etc/pacman.conf
 pacman -Syy
 
 if [ "${#PACKAGES[@]}" -gt 0 ]; then
@@ -107,29 +110,48 @@ visudo -c -q || { rm -f /etc/sudoers.d/10-wheel; log "FATAL: sudoers check faile
 
 ### mkinitcpio + bootloader ###
 HOOKS="base systemd autodetect modconf kms keyboard sd-vconsole block filesystems fsck"
-[ "$ENCRYPT" -eq 1 ] && HOOKS="base systemd autodetect modconf kms keyboard sd-vconsole sd-encrypt block filesystems fsck"
+MODULES=""
+[ "$ENCRYPT" -eq 1 ] && HOOKS="base systemd autodetect modconf kms keyboard sd-vconsole sd-encrypt block filesystems fsck" && MODULES="vfat nls_cp437 nls_ascii"
 mkdir -p /etc/mkinitcpio.conf.d
-cat > /etc/mkinitcpio.conf.d/10-samurai.conf <<EOF
-HOOKS=($HOOKS)
-EOF
+{
+    printf 'HOOKS=(%s)\n' "$HOOKS"
+    [ -n "$MODULES" ] && printf 'MODULES=(%s)\n' "$MODULES"
+    if [ "$ENCRYPT" -eq 1 ] && [ "$AUTOKEY" -eq 1 ]; then
+        printf 'FILES=(/etc/cryptsetup-keys.d/samurai-root.key)\n'
+    fi
+} > /etc/mkinitcpio.conf.d/10-samurai.conf
 for k in $KERNELS; do
     log "mkinitcpio for $k"
-    mkinitcpio --preset "$k" 2>&1 | tail -2
+    mkinitcpio --preset "$k" 2>&1 || log "mkinitcpio exited nonzero for $k"
 done
 
-ROOT_UUID=$(blkid -s UUID -o value "$(findmnt -n -o SOURCE / | sed 's/\[.*\]$//' | head -1)")
-ESP_UUID=$(blkid -s UUID -o value "$(findmnt -n -o SOURCE /boot | head -1)")
+ROOT_UUID="${SAMURAI_ROOT_UUID:-}"
+LUKS_UUID="${SAMURAI_LUKS_UUID:-}"
+ESP_UUID="${SAMURAI_ESP_UUID:-}"
+# fallbacks for manual runs (the installer env file is authoritative)
+if [ -z "$ROOT_UUID" ] && [ -f /etc/samurai-install-env ]; then
+    . /etc/samurai-install-env
+fi
+ROOT_UUID="${SAMURAI_ROOT_UUID:-$ROOT_UUID}"
+LUKS_UUID="${SAMURAI_LUKS_UUID:-$LUKS_UUID}"
+ESP_UUID="${SAMURAI_ESP_UUID:-$ESP_UUID}"
+# no /etc/crypttab: the initramfs unlock (rd.luks.uuid + embedded keyfile)
+# names the mapper luks-<uuid> and the fstab addresses everything by UUID —
+# a crypttab re-open of the same device just produces a failed unit.
 if [ "$BLDR" = "systemd-boot" ]; then
     log "bootloader: systemd-boot"
     bootctl --esp-path=/boot install
     mkdir -p /boot/loader/entries
     printf 'timeout 5\ndefault %s.conf\n' "$(echo "$KERNELS" | head -1)" > /boot/loader/loader.conf
-    kopts="root=UUID=$ROOT_UUID rw"
+    kopts="root=UUID=$ROOT_UUID rw rootflags=subvol=@ console=tty1 console=ttyS0,115200"
     if [ "$ENCRYPT" -eq 1 ]; then
-        LUKS_UUID=$(blkid -s UUID -o value $(lsblk -no pkname /dev/mapper/samurai-root 2>/dev/null || true) 2>/dev/null || true)
+        # LUKS_UUID comes from the installer env file (cryptsetup luksUUID on
+        # the live side); the in-chroot blkid/lsblk derivation produced garbage
         [ -n "$LUKS_UUID" ] && kopts="$kopts rd.luks.uuid=$LUKS_UUID"
-        if [ "$AUTOKEY" -eq 1 ] && [ -f /boot/keys/samurai.key ]; then
-            kopts="$kopts rd.luks.key=/keys/samurai.key:UUID=$ESP_UUID"
+        if [ "$AUTOKEY" -eq 1 ]; then
+            # keyfile is EMBEDDED in the initramfs (mkinitcpio FILES=()) — no
+            # keydev mount needed during unlock
+            kopts="$kopts rd.luks.key=/etc/cryptsetup-keys.d/samurai-root.key"
         fi
     fi
     for k in $KERNELS; do
@@ -140,7 +162,9 @@ linux   /vmlinuz-$k
 initrd  /initramfs-$k.img
 options $kopts
 EOF
+        log "boot entry $(basename /boot/loader/entries/samurai-$k.conf): $(cat /boot/loader/entries/samurai-$k.conf | tr '\n' ' ')"
     done
+    log "fstab: $(tr '\n' ' ' < /etc/fstab)"
 else
     log "bootloader $BLDR lands with milestone M4 (Limine); systemd-boot kept as M2 fallback"
 fi
@@ -152,8 +176,9 @@ systemctl enable systemd-networkd.service systemd-resolved.service
 
 ### fingerprint + install info ###
 mkdir -p /var/lib/samurai
-(lspci -nn 2>/dev/null; lsusb 2>/dev/null) | sed 's/^/  /' > /var/lib/samurai/hw-fingerprint
-cp "$PROFILE" /var/lib/samurai/install-profile.toml
+{ lspci -nn 2>/dev/null || true; lsusb 2>/dev/null || true; } | sed 's/^/  /' > /var/lib/samurai/hw-fingerprint
+cp "$PROFILE" /var/lib/samurai/install-profile.toml 2>/dev/null || true  # driver may have staged it already
+[ -f /var/lib/samurai/install-profile.toml ] || cp "$PROFILE" /var/lib/samurai/install-profile.toml
 python3 - <<'PY' > /var/lib/samurai/install-info.json
 import json, os, platform, time
 print(json.dumps({"version": 1, "arch": platform.machine(),

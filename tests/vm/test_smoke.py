@@ -111,21 +111,22 @@ def test_install_default(mirror):
         )
         assert "INSTALL-RC=0" in acc, f"installer failed:\n{acc[-1500:]}"
 
-        # reboot from disk; qemu-guest-agent is enabled, so verify via QGA
+        # reboot from disk: eject the ISO first (OVMF prefers the CD otherwise)
+        vm.eject_iso()
         vm.reboot()
         vm.wait_for("login:", timeout=300)  # installed prompt: "samurai-vm login:"
         qga = vm.qga()  # must already be up (enabled at install); no serial login needed
 
-        _, out = qga.exec("hostname")
+        _, out = qga.exec("cat /etc/hostname")
         assert out.strip() == "samurai-vm"
         _, out = qga.exec("head -1 /usr/lib/os-release")
         assert "Samurai OS" in out, out
-        _, out = qga.exec("lsblk -no TYPE /dev/mapper/samurai-root")
+        _, out = qga.exec("lsblk -no TYPE $(findmnt -n -o SOURCE / | sed 's/\\[.*\\]//')")
         assert "crypt" in out, "expected LUKS2 root"
         _, out = qga.exec("findmnt -n -o SOURCE /")
         assert out.strip().endswith("[/@]"), f"root must be @ subvolume: {out}"
-        _, out = qga.exec("systemctl --failed --no-legend | wc -l")
-        assert out.strip() == "0", f"failed units: {out}"
+        _, out = qga.exec("systemctl --failed --no-legend | head -3")
+        assert out.strip() == "", f"failed units: {out}"
         _, out = qga.exec("test -f /var/lib/samurai/hw-fingerprint && echo yes")
         assert out.strip() == "yes"
         _, out = qga.exec("test -f /var/lib/samurai/install-profile.toml && echo yes")

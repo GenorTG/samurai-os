@@ -131,22 +131,52 @@ mount -o subvol=@vm,nodatacow,noatime "$ROOTDEV" /mnt/var/lib/libvirt/images
 mount -o subvol=@snapshots,noatime "$ROOTDEV" /mnt/.snapshots
 mount "$ESP" /mnt/boot
 
+# mkinitcpio hooks go in BEFORE pacstrap so the kernel's own mkinitcpio hook
+# inside the transaction builds with OUR hooks, not the base defaults
+HOOKS="base systemd autodetect modconf kms keyboard sd-vconsole block filesystems fsck"
+MODULES=""
+if [ "$DEVICE_ENCRYPT" -eq 1 ]; then
+    HOOKS="base systemd autodetect modconf kms keyboard sd-vconsole sd-encrypt block filesystems fsck"
+    # the LUKS keyfile lives on the vfat ESP: the initramfs must be able to
+    # mount it (autodetect prunes vfat otherwise) — learned the hard way
+    MODULES="vfat nls_cp437 nls_ascii"
+fi
+mkdir -p /mnt/etc/mkinitcpio.conf.d
+{
+    printf 'HOOKS=(%s)\n' "$HOOKS"
+    [ -n "$MODULES" ] && printf 'MODULES=(%s)\n' "$MODULES"
+    if [ "$DEVICE_ENCRYPT" -eq 1 ] && [ "$AUTOKEY" -eq 1 ]; then
+        printf 'FILES=(/etc/cryptsetup-keys.d/samurai-root.key)\n'
+    fi
+} > /mnt/etc/mkinitcpio.conf.d/10-samurai.conf
+
 ### LUKS boot wiring (before postinstall: boot entries reference the keyfile) ###
 if [ "$DEVICE_ENCRYPT" -eq 1 ] && [ "$AUTOKEY" -eq 1 ]; then
-    mkdir -p /mnt/boot/keys
+    mkdir -p /mnt/boot/keys /mnt/etc/cryptsetup-keys.d
     cp "$keyfile" /mnt/boot/keys/samurai.key
     chmod 600 /mnt/boot/keys/samurai.key
+    # the unlock key is ALSO embedded in the initramfs (FILES= below): the
+    # ESP-mount-in-initramfs path proved fragile; reading the key from the
+    # initramfs itself is deterministic. Same threat model: both live on the
+    # unencrypted ESP. Real installs use the passphrase prompt or TPM (spec 09).
+    cp "$keyfile" /mnt/etc/cryptsetup-keys.d/samurai-root.key
+    chmod 600 /mnt/etc/cryptsetup-keys.d/samurai-root.key
 fi
 
 ### Base install ###
 log "pacstrap base + kernels"
 pacman -Sy --noconfirm --needed archlinux-keyring 2>/dev/null || true
-pacstrap -K /mnt base "$KERNELS" linux-firmware sudo fish python 2>&1 | tee -a "$LOG"
+pacstrap -K /mnt base "$KERNELS" linux-firmware mkinitcpio sudo fish python pciutils 2>&1 | tee -a "$LOG"
 [ -d /mnt/etc ] || die "pacstrap failed"
 
 # the postinstall runs in the TARGET: bring it + its deps over first
+# (same bug class as above: the target has neither the script nor the
+# baked [samurai] key/mirrorlist — the live ISO is not visible in the chroot)
 cp /usr/local/bin/samurai-postinstall /mnt/usr/local/bin/
 chmod 755 /mnt/usr/local/bin/samurai-postinstall
+mkdir -p /mnt/usr/share/samurai
+cp /usr/share/samurai/build-key.txt /mnt/usr/share/samurai/ 2>/dev/null || true
+cp /usr/share/samurai/samurai-mirrorlist /mnt/usr/share/samurai/ 2>/dev/null || true
 
 genfstab -U /mnt >> /mnt/etc/fstab
 log "fstab written"
@@ -154,6 +184,20 @@ log "fstab written"
 ### Apply the profile in the target ###
 mkdir -p /mnt/var/lib/samurai
 cp "$PROFILE" /mnt/var/lib/samurai/install-profile.toml
+# pass the install-time facts to postinstall (never re-derive them in the
+# chroot: blkid/lsblk there gave garbage rd.luks params once already)
+ROOT_UUID=$(blkid -s UUID -o value "$ROOTDEV")
+LUKS_UUID=""; ESP_UUID=""
+[ "$DEVICE_ENCRYPT" -eq 1 ] && LUKS_UUID=$(cryptsetup luksUUID "$ROOTPART")
+ESP_UUID=$(blkid -s UUID -o value "$ESP")
+cat > /mnt/etc/samurai-install-env <<EOF
+SAMURAI_ROOT_UUID=$ROOT_UUID
+SAMURAI_LUKS_UUID=$LUKS_UUID
+SAMURAI_ESP_UUID=$ESP_UUID
+SAMURAI_ENCRYPT=$DEVICE_ENCRYPT
+SAMURAI_AUTOKEY=$AUTOKEY
+EOF
+chmod 644 /mnt/etc/samurai-install-env
 log "running samurai-postinstall"
 arch-chroot /mnt /usr/local/bin/samurai-postinstall /var/lib/samurai/install-profile.toml 2>&1 | tee -a "$LOG"
 

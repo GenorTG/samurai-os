@@ -14,7 +14,12 @@ out_dir="$(realpath -m "$out_dir")"   # docker needs an absolute path: a relativ
 image="archlinux:base-devel"
 container="samurai-iso-build-$$"
 
-mkdir -p "$out_dir" "$repo_root/build/work"
+mkdir -p "$out_dir"
+# mkarchiso skips every stamped step when the work dir holds stamps from a
+# previous build — a reused work dir "succeeds" in 2 s and produces NO ISO.
+# (Same bug class: stale repo db in build-repo.sh, stale qcow2 in tests/vm.)
+# The container runs privileged, so leftovers are root-owned: clean via docker.
+docker run --rm -v "$repo_root/build":/b alpine sh -c 'rm -rf /b/work && mkdir -p /b/work'
 
 echo "==> building ISO in $image (container $container)"
 docker run --rm --privileged \

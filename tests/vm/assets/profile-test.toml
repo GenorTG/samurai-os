@@ -27,7 +27,7 @@ bootloader = "systemd-boot"  # M2 interim; Limine + snapper boot lands in M4 (AD
 name = "samurai"
 shell = "bash"
 groups = ["wheel"]
-password_hash = "$6$mrrNGwMNPTsEpcD0$y638UBteNOx.sD1nHWbDHkDyT7EXopkN2wPCl2YAg4n8Ay4e8IZDCE0Pvgk./RBVEx0kAvAI5U0PIZ.FYw84I/"
+password_hash = "$6$6MmFC8MKDYvKpVdT$GqnWCw.Zwf8.x059zOoRn46U72rJMh3mtVxY8pEuDaxzDq8J1.GmsSZw6.Q7A1l8fhgFgRNJsiC0TeZxaMJqD/"
 
 [packages]
 # M2 install set: enough for a booting, testable system. Desktop/gaming/dev

@@ -6,6 +6,7 @@ virtio-serial (no guest network port). Everything is reproducible from one host.
 """
 from __future__ import annotations
 
+import json
 import os
 import pathlib
 import re
@@ -51,6 +52,12 @@ class VM:
         WORK.mkdir(parents=True, exist_ok=True)
         self.iso = iso
         self.disk_path = disk or str(WORK / f"{name}.qcow2")
+        self.fresh = True
+        # tests need a fresh disk every run: a reused qcow2 would boot the
+        # PREVIOUS test's installed system (same bug class as stale build
+        # work dirs / stale repo dbs)
+        if disk is None and os.path.exists(self.disk_path):
+            os.unlink(self.disk_path)
         self.ram, self.smp = ram, smp
         self.code, self.vars = _find_ovmf()
         self.vars_rw = str(WORK / f"{name}-VARS.fd")
@@ -226,8 +233,29 @@ class VM:
         f.write(json.dumps(req) + "\n"); f.flush()
         resp = f.readline()
         s.close()
-        import json as _j
-        return _j.loads(resp)
+        return json.loads(resp)
+
+    def qmp_query_block(self) -> list:
+        self.wait_socket(self.qmp_sock)
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.settimeout(30)
+        s.connect(self.qmp_sock)
+        f = s.makefile("rw")
+        f.readline()
+        f.write('{"execute": "qmp_capabilities"}\n'); f.flush(); f.readline()
+        f.write('{"execute": "query-block"}\n'); f.flush()
+        resp = json.loads(f.readline())
+        s.close()
+        return resp.get("return", [])
+
+    def eject_iso(self) -> None:
+        """Remove the attached ISO so the reboot lands on the installed disk
+        (OVMF prefers the CD when both are present)."""
+        for b in self.qmp_query_block():
+            if b.get("removable") and b.get("inserted"):
+                device = b["device"]
+                self.qmp_command("eject", device=device, force=True)
+                return
 
     def reboot(self) -> None:
         self.qmp_command("system_reset")
