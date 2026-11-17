@@ -1,0 +1,4 @@
+# [samurai] - primary (GitHub Releases, CDN-backed)
+Server = https://github.com/GenorTG/samurai-repo/releases/download/x86_64
+# fallback mirror
+Server = https://repo.smart-samurai.pl/samurai/x86_64

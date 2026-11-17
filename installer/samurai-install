@@ -1,0 +1,160 @@
+#!/usr/bin/env bash
+# samurai-install — unattended install driver (spec 08). Terminal/Calamares UIs
+# produce the same profile and call this (M2: --profile mode; TUI comes at M5/M7).
+#
+# Usage: samurai-install --profile FILE [--disk /dev/...] [--yes]
+# Security posture (Genor 2026-11-17): strict profile validation before any disk
+# is touched; no eval; every value quoted; all output logged for post-mortem.
+set -euo pipefail
+
+PROFILE=""
+DISK_OVERRIDE=""
+ASSUME_YES=0
+LOG=/var/log/samurai/install.log
+
+log() { printf '%s %s\n' "$(date -Is)" "$*" | tee -a "$LOG"; }
+die() { log "FATAL: $*"; echo "FATAL: $*" >&2; exit 1; }
+
+mkdir -p /var/log/samurai
+log "samurai-install starting: $*"
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --profile) PROFILE="${2:?}"; shift 2 ;;
+        --disk) DISK_OVERRIDE="${2:?}"; shift 2 ;;
+        --yes) ASSUME_YES=1; shift ;;
+        *) die "unknown argument: $1" ;;
+    esac
+done
+[ -n "$PROFILE" ] || die "usage: samurai-install --profile FILE [--disk /dev/...] [--yes]"
+[ -f "$PROFILE" ] || die "profile not found: $PROFILE"
+
+validator=/usr/local/bin/validate-profile.py
+[ -f "$validator" ] || die "missing $validator"
+
+# Validation first: nothing touches a disk before the profile is proven sane.
+python3 "$validator" "$PROFILE" || die "profile validation failed"
+
+# Apply the CLI disk override through the validator too (never bypass it).
+if [ -n "$DISK_OVERRIDE" ]; then
+    sed -E "s|^device = .*|device = \"${DISK_OVERRIDE}\"|" "$PROFILE" > /tmp/profile-disk.toml
+    PROFILE=/tmp/profile-disk.toml
+    python3 "$validator" "$PROFILE" || die "disk override failed validation"
+fi
+
+# Pull validated values (strict regexes already passed; read via toml for quoting)
+read -r HOSTNAME TZ DISK DEVICE_ENCRYPT AUTOKEY \
+    < <(python3 - "$PROFILE" <<'PY'
+import sys, tomllib
+p = tomllib.loads(open(sys.argv[1]).read())
+d = p.get("disk", {})
+s = p.get("system", {})
+print(s.get("hostname", "samurai"), s.get("timezone", "UTC"),
+      d.get("device", ""), int(bool(d.get("encryption", True))),
+      int(bool(d.get("auto_unlock_keyfile", False))))
+PY
+) || die "profile read failed"
+
+read -r KERNELS USER_NAME USER_SHELL < <(python3 - "$PROFILE" <<'PY'
+import sys, tomllib
+p = tomllib.loads(open(sys.argv[1]).read())
+print(" ".join(p.get("boot", {}).get("kernels", ["linux"])),
+      p.get("user", {}).get("name", "samurai"),
+      p.get("user", {}).get("shell", "bash"))
+PY
+) || die "profile read failed"
+
+[ -b "$DISK" ] || die "not a block device: $DISK"
+
+cat >> "$LOG" <<EOF
+plan: erase $DISK, LUKS2=$DEVICE_ENCRYPT, hostname=$HOSTNAME, tz=$TZ
+plan: kernels=$KERNELS user=$USER_NAME shell=$USER_SHELL
+EOF
+echo "==> Plan: ERASE $DISK | LUKS2=$DEVICE_ENCRYPT | host=$HOSTNAME | kernels=$KERNELS"
+if [ "$ASSUME_YES" -ne 1 ]; then
+    read -r -p "Proceed? [yes/no] " answer
+    [ "$answer" = "yes" ] || die "aborted by user"
+fi
+
+### Partitioning (erase only in M2) ###
+log "partitioning $DISK"
+sgdisk -Z "$DISK"
+sgdisk -n 1:0:+1G -t 1:ef00 -c 1:esp "$DISK"   # ESP
+sgdisk -n 2:0:0 -t 2:8304 -c 2:samurai-root "$DISK"  # Linux x86-64 root (/usr split ok)
+partprobe "$DISK"; sleep 1
+ESP="${DISK}1"; ROOTPART="${DISK}2"
+[ -b "$ESP" ] && [ -b "$ROOTPART" ] || die "partitioning failed"
+mkfs.fat -F32 -n ESP "$ESP"
+
+### LUKS2 + btrfs subvolumes (spec 06 flat layout) ###
+ROOTMAP="samurai-root"
+if [ "$DEVICE_ENCRYPT" -eq 1 ]; then
+    keyfile=/run/samurai.key
+    dd if=/dev/urandom of="$keyfile" bs=512 count=8
+    chmod 600 "$keyfile"
+    if [ "$AUTOKEY" -eq 1 ]; then
+        # headless/VM path: keyfile unlock, then it is also copied to the ESP
+        # below so the boot entry can unlock unattended. Profile-gated: real
+        # installs keep the passphrase prompt.
+        cryptsetup luksFormat --type luks2 --batch-mode \
+            --key-file "$keyfile" --pbkdf argon2id "$ROOTPART"
+        cryptsetup luksAddKey "$ROOTPART" "$keyfile" --key-file "$keyfile"
+    else
+        read -r -s -p "LUKS passphrase: " pass1; echo
+        read -r -s -p "LUKS passphrase (again): " pass2; echo
+        [ "$pass1" = "$pass2" ] || die "passphrases do not match"
+        printf '%s' "$pass1" | cryptsetup luksFormat --type luks2 --batch-mode "$ROOTPART"
+        printf '%s' "$pass1" | cryptsetup luksAddKey "$ROOTPART" "$keyfile"
+    fi
+    cryptsetup open "$ROOTPART" "$ROOTMAP" --key-file "$keyfile"
+    ROOTDEV="/dev/mapper/$ROOTMAP"
+else
+    ROOTDEV="$ROOTPART"
+fi
+log "creating btrfs on $ROOTDEV"
+mkfs.btrfs -f -L samurai "$ROOTDEV"
+mount "$ROOTDEV" /mnt
+for sub in @ @home @root @srv @cache @log @tmp @containers @vm @snapshots; do
+    btrfs subvolume create "/mnt/$sub"
+done
+umount /mnt
+mount -o subvol=@,compress=zstd:1,noatime "$ROOTDEV" /mnt
+mkdir -p /mnt/{boot,home,root,srv,var/cache,var/log,var/tmp,var/lib/docker,var/lib/containers,var/lib/libvirt/images,.snapshots}
+mount -o subvol=@home,compress=zstd:1,noatime "$ROOTDEV" /mnt/home
+mount -o subvol=@root,noatime "$ROOTDEV" /mnt/root
+mount -o subvol=@srv,noatime "$ROOTDEV" /mnt/srv
+mount -o subvol=@cache,noatime "$ROOTDEV" /mnt/var/cache
+mount -o subvol=@log,noatime "$ROOTDEV" /mnt/var/log
+mount -o subvol=@tmp,noatime "$ROOTDEV" /mnt/var/tmp
+mount -o subvol=@containers,noatime "$ROOTDEV" /mnt/var/lib/docker
+mount -o subvol=@vm,nodatacow,noatime "$ROOTDEV" /mnt/var/lib/libvirt/images
+mount -o subvol=@snapshots,noatime "$ROOTDEV" /mnt/.snapshots
+mount "$ESP" /mnt/boot
+
+### LUKS boot wiring (before postinstall: boot entries reference the keyfile) ###
+if [ "$DEVICE_ENCRYPT" -eq 1 ] && [ "$AUTOKEY" -eq 1 ]; then
+    mkdir -p /mnt/boot/keys
+    cp "$keyfile" /mnt/boot/keys/samurai.key
+    chmod 600 /mnt/boot/keys/samurai.key
+fi
+
+### Base install ###
+log "pacstrap base + kernels"
+pacman -Sy --noconfirm --needed archlinux-keyring 2>/dev/null || true
+pacstrap -K /mnt base "$KERNELS" linux-firmware sudo fish 2>&1 | tee -a "$LOG"
+[ -d /mnt/etc ] || die "pacstrap failed"
+
+genfstab -U /mnt >> /mnt/etc/fstab
+log "fstab written"
+
+### Apply the profile in the target ###
+mkdir -p /mnt/var/lib/samurai
+cp "$PROFILE" /mnt/var/lib/samurai/install-profile.toml
+log "running samurai-postinstall"
+arch-chroot /mnt /usr/local/bin/samurai-postinstall /var/lib/samurai/install-profile.toml 2>&1 | tee -a "$LOG"
+
+log "install complete; unmounting"
+umount -R /mnt
+[ "$DEVICE_ENCRYPT" -eq 1 ] && cryptsetup close "$ROOTMAP"
+log "DONE"
+echo "==> Install complete. Reboot to start the new system."

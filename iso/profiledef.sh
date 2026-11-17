@@ -23,4 +23,7 @@ file_permissions=(
   ["/usr/local/bin/choose-mirror"]="0:0:755"
   ["/usr/local/bin/Installation_guide"]="0:0:755"
   ["/usr/local/bin/livecd-sound"]="0:0:755"
+  ["/usr/local/bin/samurai-install"]="0:0:755"
+  ["/usr/local/bin/samurai-postinstall"]="0:0:755"
+  ["/usr/local/bin/validate-profile.py"]="0:0:755"
 )
