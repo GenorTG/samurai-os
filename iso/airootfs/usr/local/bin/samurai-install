@@ -141,8 +141,12 @@ fi
 ### Base install ###
 log "pacstrap base + kernels"
 pacman -Sy --noconfirm --needed archlinux-keyring 2>/dev/null || true
-pacstrap -K /mnt base "$KERNELS" linux-firmware sudo fish 2>&1 | tee -a "$LOG"
+pacstrap -K /mnt base "$KERNELS" linux-firmware sudo fish python 2>&1 | tee -a "$LOG"
 [ -d /mnt/etc ] || die "pacstrap failed"
+
+# the postinstall runs in the TARGET: bring it + its deps over first
+cp /usr/local/bin/samurai-postinstall /mnt/usr/local/bin/
+chmod 755 /mnt/usr/local/bin/samurai-postinstall
 
 genfstab -U /mnt >> /mnt/etc/fstab
 log "fstab written"

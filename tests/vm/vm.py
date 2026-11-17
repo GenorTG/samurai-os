@@ -8,12 +8,28 @@ from __future__ import annotations
 
 import os
 import pathlib
+import re
 import socket
 import subprocess
 import time
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 WORK = REPO / ".vm"
+
+# Serial streams are full of ANSI/OSC noise (zsh colours split words like
+# 'root@samurai', boot menu box art). Matching happens on the cleaned text;
+# the raw stream stays on disk in the serial log for forensics.
+# Covers: CSI sequences, OSC strings, two-char charset designations (ESC ( B —
+# that one sits between 'root' and '@samurai' in the live prompt!), and other
+# two-character escape forms.
+ANSI_RE = re.compile(
+    "\x1b(?:"
+    r"\[[0-9;?=!/<>*\"']*[ -/]*[@-~]"
+    r"|\][^\x07\x1b]*(?:\x07|\x1b\\)"
+    r"|[()][0-9A-Za-z]"
+    r"|[@-Z\\-_]"
+    ")"
+)
 OVMF_CODE_CANDIDATES = [
     "/usr/share/OVMF/OVMF_CODE_4M.fd",
     "/usr/share/OVMF/OVMF_CODE.fd",
@@ -112,7 +128,7 @@ class VM:
         if got:
             with open(self.serial_log, "ab") as f:
                 f.write(got)
-        return got.decode("utf-8", "replace")
+        return ANSI_RE.sub("", got.decode("utf-8", "replace"))
 
     def wait_for(self, pattern: str, timeout: float = 120.0) -> str:
         """Read the serial stream until `pattern` appears; returns the full new text."""
@@ -126,12 +142,55 @@ class VM:
                 raise RuntimeError(f"serial FATAL while waiting for {pattern!r}:\n{acc[-800:]}")
         raise TimeoutError(f"serial never showed {pattern!r}; last:\n{acc[-800:]}")
 
+    def wait_for_any(self, patterns: list[str], timeout: float = 120.0,
+                     required: bool = True) -> tuple[str, str] | tuple[None, str]:
+        """Wait until any pattern appears; returns (matched_pattern, acc).
+
+        required=False returns (None, acc) on timeout instead of raising —
+        used for short opportunistic waits (e.g. autologin may beat us).
+        """
+        deadline = time.time() + timeout
+        acc = ""
+        while time.time() < deadline:
+            acc += self.serial_read(max_wait=1.5)
+            for p in patterns:
+                if p in acc:
+                    return p, acc
+            if "FATAL" in acc:
+                raise RuntimeError(f"serial FATAL while waiting for {patterns}:\n{acc[-800:]}")
+        if required:
+            raise TimeoutError(f"serial never showed any of {patterns}; last:\n{acc[-800:]}")
+        return None, acc
+
     def send(self, text: str) -> None:
         if self._serial is None:
             self.serial_connect()
         self._serial.sendall(text.encode())  # type: ignore[union-attr]
 
+    def login_root(self, timeout: float = 300.0) -> None:
+        """Get a root shell on the serial console, autologin-aware.
+
+        The live ISO autologins instantly (serial-getty drop-in): the getty
+        prompt prints a beat before the autologin completes, so sending
+        'root' blindly would just be an unknown command in the shell. Wait
+        briefly for autologin; only if it does not happen, log in by hand.
+        """
+        matched, _ = self.wait_for_any(["root@samurai", " login:"], timeout=timeout)
+        if matched != "root@samurai":
+            # autologin may still land on its own (spawn under boot load is
+            # slow); give it a real chance before logging in by hand
+            m, _ = self.wait_for_any(["root@samurai"], timeout=15, required=False)
+            if m is None:
+                self.send("root\n")
+                self.wait_for("root@samurai", timeout=120)
+
     def serial_cmd(self, cmd: str, expect: str, timeout: float = 180.0) -> str:
+        # Prompt-race guard: a send during prompt rendering gets swallowed.
+        # Nudge the shell with a bare newline, let it settle, discard noise,
+        # then send the real command.
+        self.send("\n")
+        time.sleep(1.0)
+        self.serial_read(max_wait=1.0)
         self.send(cmd + "\n")
         return self.wait_for(expect, timeout=timeout)
 
@@ -147,9 +206,7 @@ class VM:
             return self.qga(timeout=10)
         except Exception:
             # via serial: log in if needed, start the agent, reconnect
-            self.wait_for("samurai login", timeout=240)
-            self.send("root\n")
-            self.wait_for("root@samurai", timeout=60)
+            self.login_root(timeout=240)
             self.send("systemctl start qemu-guest-agent.service\n")
             time.sleep(2)
             return self.qga()

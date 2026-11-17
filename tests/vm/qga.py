@@ -37,8 +37,47 @@ class GuestAgent:
         """Run /bin/sh -c 'cmdline' in the guest; returns (exit_code, stdout)."""
         r = self._call("guest-exec", path="/bin/sh", arg=["-c", cmdline], capture_output=True)
         if "error" in r:
+            desc = r["error"].get("desc", "")
+            if "capture-output" in desc or "unexpected" in desc:
+                # older qemu-ga: no capture-output; capture through a guest file
+                return self._exec_file_capture(cmdline, timeout, check)
             raise RuntimeError(f"guest-exec rejected: {r['error']}")
         pid = r["return"]["pid"]
+        return self._wait_pid(pid, cmdline, timeout, check)
+
+    def _exec_file_capture(self, cmdline: str, timeout: float, check: bool) -> tuple[int, str]:
+        import uuid
+        out_path = f"/tmp/.samurai-qga-{uuid.uuid4().hex[:8]}.out"
+        r = self._call("guest-exec", path="/bin/sh",
+                       arg=["-c", f"({cmdline}) >{out_path} 2>&1"])
+        if "error" in r:
+            raise RuntimeError(f"guest-exec rejected: {r['error']}")
+        code, _ = self._wait_pid(r["return"]["pid"], cmdline, timeout, check=False)
+        text = self._read_file(out_path)
+        self._call("guest-exec", path="/bin/sh", arg=["-c", f"rm -f {out_path}"])
+        if check and code != 0:
+            raise RuntimeError(f"guest command failed ({code}): {cmdline}\n{text}")
+        return code, text
+
+    def _read_file(self, path: str) -> str:
+        r = self._call("guest-file-open", path=path, mode="r")
+        if "error" in r:
+            raise RuntimeError(f"guest-file-open rejected: {r['error']}")
+        fh = r["return"]
+        chunks = []
+        while True:
+            r = self._call("guest-file-read", handle=fh, count=65536)
+            if "error" in r:
+                raise RuntimeError(f"guest-file-read rejected: {r['error']}")
+            chunks.append(base64.b64decode(
+                r["return"].get("data") or r["return"].get("buf-b64") or b""
+            ).decode("utf-8", "replace"))
+            if r["return"].get("eof") or not r["return"].get("data"):
+                break
+        self._call("guest-file-close", handle=fh)
+        return "".join(chunks)
+
+    def _wait_pid(self, pid: int, cmdline: str, timeout: float, check: bool) -> tuple[int, str]:
         deadline = time.time() + timeout
         while True:
             s = self._call("guest-exec-status", pid=pid)

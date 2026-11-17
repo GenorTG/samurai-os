@@ -37,7 +37,7 @@ def find_iso() -> pathlib.Path:
 
 
 @functools.cache
-def test_password_hash() -> str:
+def password_hash() -> str:  # not a test: helper returning the throwaway hash
     # sha-512 crypt hash of the throwaway password, generated on the host
     out = subprocess.run(
         ["openssl", "passwd", "-6", TEST_USER_PASSWORD], capture_output=True, text=True, check=True
@@ -67,12 +67,19 @@ class Mirror:
 @pytest.fixture(scope="module")
 def mirror():
     with Mirror() as m:
-        (m.dir / "profile-test.toml").write_text(
-            (REPO / "installer" / "profile-default.toml").read_text()
-            + f'\n[user]\nname = "samurai"\nshell = "bash"\n'
-            f'groups = ["wheel"]\npassword_hash = "{test_password_hash()}"\n'
+        import re as _re
+        import tomllib
+        default = (REPO / "installer" / "profile-default.toml").read_text()
+        # REPLACE the [user] table (appending a second one would be invalid TOML)
+        new_user = (
+            '[user]\nname = "samurai"\nshell = "bash"\ngroups = ["wheel"]\n'
+            f'password_hash = "{password_hash()}"\n'
         )
-        yield m
+        profile = _re.sub(r"\[user\].*?(?=\n\[|\Z)", new_user, default, flags=_re.S)
+        tomllib.loads(profile)  # must parse: belt and braces against duplicate tables
+        m.dir.mkdir(parents=True, exist_ok=True)
+        (m.dir / "profile-test.toml").write_text(profile)
+        yield m  # Mirror.__enter__ already started the server thread
 
 
 def test_iso_boot():
@@ -80,9 +87,7 @@ def test_iso_boot():
     vm.start()
     try:
         vm.serial_connect()
-        vm.wait_for("samurai login", timeout=300)
-        vm.send("root\n")
-        vm.wait_for("root@samurai", timeout=120)
+        vm.login_root()  # live ISO autologins; no login prompt may appear
         qga = vm.ensure_qga()
         _, out = qga.exec("cat /etc/hostname")
         assert out.strip() == "samurai"
@@ -97,21 +102,18 @@ def test_install_default(mirror):
     vm.start()
     try:
         vm.serial_connect()
-        vm.wait_for("samurai login", timeout=300)
-        vm.send("root\n")
-        vm.wait_for("root@samurai", timeout=120)
-        vm.serial_cmd(
+        vm.login_root()  # live ISO autologins; no login prompt may appear
+        acc = vm.serial_cmd(
             "curl -fsSL http://10.0.2.2:8966/profile-test.toml -o /tmp/profile-test.toml "
             "&& samurai-install --profile /tmp/profile-test.toml --disk /dev/vda --yes "
-            "> /dev/null 2>&1; echo INSTALL-RC=$?",
+            "2>&1 | tail -c 3000; echo INSTALL-\"RC\"=${pipestatus[1]}",
             "INSTALL-RC=", timeout=INSTALL_TIMEOUT,
         )
-        acc = vm.wait_for("INSTALL-RC=", timeout=10)
         assert "INSTALL-RC=0" in acc, f"installer failed:\n{acc[-1500:]}"
 
         # reboot from disk; qemu-guest-agent is enabled, so verify via QGA
         vm.reboot()
-        vm.wait_for("samurai login", timeout=300)  # installed prompt: "samurai-vm login:"
+        vm.wait_for("login:", timeout=300)  # installed prompt: "samurai-vm login:"
         qga = vm.qga()  # must already be up (enabled at install); no serial login needed
 
         _, out = qga.exec("hostname")
