@@ -38,3 +38,12 @@ proven in QEMU VMs on genorbox1.
 
 ## Blockers
 - Public repos / real build key: waiting for Genor's OK.
+## M0 done (2026-11-17)
+- `iso/`: archiso 92 releng profile, samurai-ified (name/label/publisher, hostname `samurai`,
+  motd + /etc/issue, `kernel_params_x86_64="console=tty1 console=ttyS0,115200"`, serial getty
+  autologin, pacman.conf with commented `[cachyos]`/`[chaotic-aur]`/`[samurai]` stubs — enabled at M1).
+- `ci/build-iso.sh`: archlinux:base-devel container, `--privileged` (pacstrap bind-mounts
+  proc/sys/dev — unprivileged fails), `pacman -Syu` FIRST (stale image openssl/pacman soname drift),
+  out_dir must be ABSOLUTE (relative arg = docker named volume!), work dir mounted for caching.
+- `ci/boot-vm.sh`: OVMF q35 + KVM, serial to build/serial.log, PASS = `root@samurai` on serial.
+- Verified: build/samurai-os-2026.11.17-x86_64.iso (1.3 GB) boots to root shell in OVMF VM. Boot ~40 s.

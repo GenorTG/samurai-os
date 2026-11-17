@@ -1,0 +1,4 @@
+Samurai OS \s \m (\l) - Arch-based live medium
+
+The installer and toolbox ship from M2/M7 on; see /root.
+For Wi-Fi use iwctl. Ethernet with DHCP works automatically.

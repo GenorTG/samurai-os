@@ -6,7 +6,7 @@ typing.
 
 | # | Milestone | Delivers | Exit criteria | Est. |
 |---|-----------|----------|---------------|------|
-| M0 | Build substrate | `ci/build-iso.sh` in an archlinux container; releng-derived profile with our `pacman.conf` stub (Arch + CachyOS + Chaotic); QEMU boot script | our ISO boots to a console on OVMF on genorbox1 | 1–2 days |
+| M0 ✅ 2026-11-17 | Build substrate | `ci/build-iso.sh` in an archlinux container; releng-derived profile with our `pacman.conf` stub (Arch + CachyOS + Chaotic); QEMU boot script | our ISO boots to a console on OVMF on genorbox1 | 1–2 days |
 | M1 | Signed repo | key runbook; `samurai-keyring`, `samurai-mirrorlist`, `samurai-release`; build+sign+publish workflow; `samurai-repo`; local mirror; upstream-release watcher for repackages | **spike**: a VM installs `samurai-release` from GitHub Releases with `SigLevel = Required`; CI checks for shadowing/epochs/unresolvable catalog entries fail on purpose | 2–4 days |
 | M2 | Profile + unattended install + harness | install-profile schema; `samurai-postinstall`; `samurai-install --profile`; `tests/vm` harness (QMP + guest agent) | `smoke` suite green from one command | 1 week |
 | M3 | Updates | `samurai update` stages, interventions, notifier, Arch news | `update-from-archive`, one `intervention-*` green | 1 week |

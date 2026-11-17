@@ -7,3 +7,4 @@ work/
 *.pkg.tar.zst.sig
 target/
 .tmp/
+build/
