@@ -30,8 +30,16 @@ while [ $# -gt 0 ]; do
     esac
 done
 : "${SKIP_MIRRORS:=0}"
+# headless runs (QGA, cron, SSH-less) have no TTY: pacman prompts would abort
+# the whole update on EOF. Interactive terminals still get prompts.
+if [ ! -t 0 ]; then
+    PACMAN_ARGS+=(--noconfirm)
+    HEADLESS=1
+else
+    HEADLESS=0
+fi
 
-log "samurai update $VERSION starting"
+log "samurai update $VERSION starting (headless=$HEADLESS)"
 
 ### Stage 0: preflight ###
 log "stage 0: preflight"
@@ -132,9 +140,11 @@ fi
 
 ### Stage 6: transaction ###
 log "stage 6: pacman -Syu"
-if ! pacman -Syu --needed "${PACMAN_ARGS[@]}" 2>&1 | tee -a "$LOG"; then
+pacman -Syu --needed "${PACMAN_ARGS[@]}" 2>&1 | tee -a "$LOG" || true
+rc=${PIPESTATUS[0]}
+if [ "$rc" -ne 0 ]; then
     snapid=$(snapper -c root list 2>/dev/null | tail -1 | awk '{print $1}')
-    log "pacman failed; pre snapshot id: ${snapid:-unknown}"
+    log "pacman failed (rc=$rc); pre snapshot id: ${snapid:-unknown}"
     echo "pacman failed — rollback with: samurai snap rollback ${snapid:-<id>}" >&2
     exit 12
 fi

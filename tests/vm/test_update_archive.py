@@ -13,7 +13,7 @@ from conftest import INSTALL_TIMEOUT, find_iso
 from vm import REPO, VM
 
 UPDATE_TIMEOUT = 3600
-ARCHIVE = "https://archive.archlinux.org/repos/2026/08/"
+ARCHIVE = "https://archive.archlinux.org/repos/2026/08/15"
 
 
 @pytest.fixture(scope="module")

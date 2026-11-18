@@ -176,7 +176,10 @@ PY
 )
 if [ "$ARCH_MIRROR" != "auto" ] && [ -n "$ARCH_MIRROR" ]; then
     log "mirrors: pinning to $ARCH_MIRROR"
-    printf 'Server = %s\n' "$ARCH_MIRROR" > /etc/pacman.d/mirrorlist
+    # strip a trailing slash and append $repo/os/$arch: pacman only expands
+    # those placeholders when the Server line contains them — a plain URL
+    # makes it fetch <server>/<repo>.db (the 404 we chased for an hour)
+    printf 'Server = %s\n' "${ARCH_MIRROR%/}/\$repo/os/\$arch" > /etc/pacman.d/mirrorlist
 fi
 pacman -Sy --noconfirm --needed archlinux-keyring 2>/dev/null || true
 pacstrap -K /mnt base "$KERNELS" linux-firmware mkinitcpio sudo fish python pciutils 2>&1 | tee -a "$LOG"
