@@ -173,6 +173,12 @@ fi
 log "services"
 systemctl enable qemu-guest-agent.service 2>/dev/null || true
 systemctl enable systemd-networkd.service systemd-resolved.service
+# network config lives on the ISO, not in the pacstrap'd target (learned: the
+# updater's preflight died on "no network"). Write the basic DHCP config:
+mkdir -p etc/systemd/network
+printf '[Match]\nName=en* eth* wl*\n\n[Network]\nDHCP=yes\n' > etc/systemd/network/20-samurai.network
+# resolved stub for DNS (only if absent: other resolvers may own this path)
+[ -e etc/resolv.conf ] || ln -s /run/systemd/resolve/stub-resolv.conf etc/resolv.conf
 
 ### fingerprint + install info ###
 mkdir -p /var/lib/samurai

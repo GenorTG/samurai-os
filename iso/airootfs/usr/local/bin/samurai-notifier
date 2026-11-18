@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# samurai-notifier — user-session update checker (spec 03).
+# Never installs anything: uses checkupdates (temp db copy) and reports counts.
+# Runs as a systemd USER timer (5 min after login, then every 6 h).
+set -euo pipefail
+
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/samurai"
+mkdir -p "$STATE_DIR"
+
+ARCH=0; SAMURAI=0; SECURITY=0; REBOOT=0
+mapfile -t updates < <(checkupdates 2>/dev/null || true)
+ARCH=${#updates[@]}
+for u in "${updates[@]}"; do
+    case "$u" in samurai-*) SAMURAI=$((SAMURAI+1)) ;; esac
+done
+if command -v arch-audit >/dev/null 2>&1 && [ "$ARCH" -gt 0 ]; then
+    SECURITY=$(printf '%s\n' "${updates[@]}" | awk '{print $1}' | arch-audit -u 2>/dev/null | wc -l)
+fi
+# reboot pending: compare the running kernel with the newest installed one
+RUNNING=$(uname -r)
+NEWEST=$(ls /usr/lib/modules 2>/dev/null | sort -V | tail -1)
+[ "$RUNNING" != "$NEWEST" ] && REBOOT=1
+
+printf 'arch=%s samurai=%s security=%s reboot=%s\n' "$ARCH" "$SAMURAI" "$SECURITY" "$REBOOT" \
+    > "$STATE_DIR/update-check"
+if [ "$ARCH" -gt 0 ]; then
+    msg="updates available: $ARCH"
+    [ "$SECURITY" -gt 0 ] && msg="$msg (SECURITY: $SECURITY)"
+    [ "$REBOOT" -eq 1 ] && msg="$msg; reboot pending"
+    command -v notify-send >/dev/null 2>&1 && notify-send -a "Samurai OS" "$msg" || printf '%s\n' "$msg"
+fi
+exit 0

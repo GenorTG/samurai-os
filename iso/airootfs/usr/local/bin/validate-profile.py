@@ -24,7 +24,7 @@ ALLOWED = {
     "boot": {"kernels", "bootloader"},
     "user": {"name", "shell", "groups", "root_locked", "password_hash"},
     "packages": {"install"},
-    "repos": {"samurai", "cachyos", "chaotic_aur"},
+    "repos": {"samurai", "cachyos", "chaotic_aur", "arch_mirror"},
     "security": {"firewall", "ssh_server"},
 }
 KNOWN_KERNELS = {"linux", "linux-lts", "linux-zen", "linux-cachyos", "linux-cachyos-lts"}
@@ -126,6 +126,9 @@ def validate(path: str) -> dict:
     sec = profile.get("security", {})
     if sec.get("firewall", "none") not in KNOWN_FIREWALLS:
         fail(f"unsupported firewall: {sec.get('firewall')!r}")
+    am = profile.get("repos", {}).get("arch_mirror", "auto")
+    if am != "auto" and not re.match(r"^https://[A-Za-z0-9./_-]+$", am):
+        fail(f"repos.arch_mirror must be 'auto' or an https URL, got {am!r}")
 
     return profile
 

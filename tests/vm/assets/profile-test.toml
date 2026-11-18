@@ -27,7 +27,7 @@ bootloader = "systemd-boot"  # M2 interim; Limine + snapper boot lands in M4 (AD
 name = "samurai"
 shell = "bash"
 groups = ["wheel"]
-password_hash = "$6$6MmFC8MKDYvKpVdT$GqnWCw.Zwf8.x059zOoRn46U72rJMh3mtVxY8pEuDaxzDq8J1.GmsSZw6.Q7A1l8fhgFgRNJsiC0TeZxaMJqD/"
+password_hash = "$6$6axK91LDmkbRmlTI$nnPJWTLhiAFzZcCvcjd9oNlBe1nBSAcxVyE18w/Po0ATDc.0zLGovDyOnvUktHr/DG2Q1Fw.BaQ4rvTwmwv.m."
 
 [packages]
 # M2 install set: enough for a booting, testable system. Desktop/gaming/dev
@@ -44,6 +44,8 @@ install = [
 samurai = true
 cachyos = false              # enabled at M1 keys on release profile; test set is Arch-only
 chaotic_aur = false
+arch_mirror = "auto"         # "auto" = live medium mirrors; or an https URL to pin
+                             # (spec 11: Arch archive for update-from-archive testing)
 
 [security]
 firewall = "none"            # firewalld arrives with M8; profile validated against allowlist

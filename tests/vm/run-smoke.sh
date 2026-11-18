@@ -8,4 +8,4 @@ iso="${1:-$(ls -t "$repo_root"/build/samurai-os-*.iso 2>/dev/null | head -1)}"
 
 cd "$repo_root/tests/vm"
 echo "==> smoke suite against $iso"
-python3 -m pytest -x -q test_smoke.py --iso "$iso" "$@"
+python3 -m pytest -x -q test_smoke.py test_update.py "$@"

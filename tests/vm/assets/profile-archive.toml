@@ -1,0 +1,52 @@
+# Samurai OS install profile — default (spec 08)
+# The single source of truth both installers produce and samurai-postinstall applies.
+# Validation: installer/validate-profile.py — strict allowlist; unknown or unsafe
+# values abort the install. Profiles must never carry free-form shell.
+
+version = 1
+
+[system]
+hostname = "samurai-vm"
+timezone = "UTC"
+locale = "en_US.UTF-8"
+keyboard = "us"
+
+[disk]
+device = "/dev/vda"          # validated: must be a block device path
+layout = "erase"             # erase | alongside | manual (M2: erase only)
+filesystem = "btrfs"
+encryption = true            # LUKS2, default on (spec 08 page 3)
+auto_unlock_keyfile = true   # TEST AFFORDANCE ONLY: keyfile on ESP for headless
+                             # boots. Real installs keep the passphrase prompt.
+
+[boot]
+kernels = ["linux"]          # M2 test set; default release profile: ["linux-cachyos", "linux-zen"]
+bootloader = "systemd-boot"  # M2 interim; Limine + snapper boot lands in M4 (ADR-0003)
+
+[user]
+name = "samurai"
+shell = "bash"
+groups = ["wheel"]
+password_hash = "$6$6axK91LDmkbRmlTI$nnPJWTLhiAFzZcCvcjd9oNlBe1nBSAcxVyE18w/Po0ATDc.0zLGovDyOnvUktHr/DG2Q1Fw.BaQ4rvTwmwv.m."
+
+[packages]
+# M2 install set: enough for a booting, testable system. Desktop/gaming/dev
+# packages arrive with their milestones (M6–M7); samurai-postinstall applies
+# whatever the profile lists, from repos the ISO trusts.
+install = [
+    "samurai-release",
+    "samurai-mirrorlist",
+    "samurai-keyring",
+    "qemu-guest-agent",
+]
+
+[repos]
+samurai = true
+cachyos = false              # enabled at M1 keys on release profile; test set is Arch-only
+chaotic_aur = false
+arch_mirror = "https://archive.archlinux.org/repos/2026/08/"         # "auto" = live medium mirrors; or an https URL to pin
+                             # (spec 11: Arch archive for update-from-archive testing)
+
+[security]
+firewall = "none"            # firewalld arrives with M8; profile validated against allowlist
+ssh_server = false

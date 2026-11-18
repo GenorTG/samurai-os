@@ -44,6 +44,8 @@ install = [
 samurai = true
 cachyos = false              # enabled at M1 keys on release profile; test set is Arch-only
 chaotic_aur = false
+arch_mirror = "auto"         # "auto" = live medium mirrors; or an https URL to pin
+                             # (spec 11: Arch archive for update-from-archive testing)
 
 [security]
 firewall = "none"            # firewalld arrives with M8; profile validated against allowlist

@@ -33,7 +33,16 @@ set -euo pipefail
 pacman-key --init >/dev/null 2>&1
 # The base-devel image is often stale vs the repos: upgrade everything
 # together first, then install archiso (openssl/pacman soname drift).
+# ALSO: pacman parallel libcurl downloads have been flaking against the
+# CDN (SSL_ERROR_SSL, errno 0) while a single curl works — switch to a
+# curl-based XferCommand with retries and reduce parallelism.
 pacman -Syu --noconfirm >/dev/null
+# pacman parallel libcurl downloads have been flaking against the CDN
+# (SSL_ERROR_SSL, errno 0) while a single curl works — switch to a curl-based
+# XferCommand with retries and reduce parallelism. (double-quoted seds: this
+# whole script sits inside single quotes)
+sed -i -e "s|^#XferCommand = /usr/bin/wget.*||" -e "s|^#XferCommand = /usr/bin/curl.*|XferCommand = /usr/bin/curl -L -C - -f --retry 8 --retry-delay 2 --retry-all-errors -o %o %u|" /etc/pacman.conf
+sed -i "s|^ParallelDownloads.*|ParallelDownloads = 2|" /etc/pacman.conf
 pacman -S --noconfirm --needed archiso >/dev/null
 mkarchiso -v -w /work -o /out /src/iso
 '

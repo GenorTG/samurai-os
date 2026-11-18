@@ -1,0 +1,204 @@
+#!/usr/bin/env bash
+# samurai update — one staged wrapper around pacman -Syu (spec 03, ADR-0002).
+# M3: bash implementation; the static self-updating binary replaces it at M5
+# (spec 03 "Why stage 1 is not a partial-upgrade hazard" adapts then).
+#
+# SECURITY POSTURE (Genor 2026-11-17): fail closed on every stage; no eval;
+# every substitution quoted; the profile never carries shell; interventions
+# ship signed in [samurai] and are allowlist-parsed (validate-interventions).
+set -euo pipefail
+
+export LC_ALL=C
+VERSION="0.1.0"
+LOG_DIR=/var/log/samurai
+mkdir -p "$LOG_DIR"
+LOG="$LOG_DIR/update-$(date +%Y%m%d-%H%M%S).log"
+
+log() { printf '%s %s\n' "$(date -Is)" "$*" | tee -a "$LOG" >&2; }
+die() { log "FATAL: $*"; printf 'FATAL: %s\n' "$*" >&2; exit "${2:-1}"; }
+
+NO_SNAPSHOT=0
+JSON=0
+PACMAN_ARGS=()
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --no-snapshot) NO_SNAPSHOT=1; shift ;;
+        --json) JSON=1; shift ;;
+        --skip-mirrors) SKIP_MIRRORS=1; shift ;;
+        --noconfirm) PACMAN_ARGS+=(--noconfirm); shift ;;
+        *) PACMAN_ARGS+=("$1"); shift ;;
+    esac
+done
+: "${SKIP_MIRRORS:=0}"
+
+log "samurai update $VERSION starting"
+
+### Stage 0: preflight ###
+log "stage 0: preflight"
+if findmnt -n -o SOURCE / | grep -q "subvolid=5"; then :; fi
+if grep -qs "subvol=/@\.snapshots" /proc/cmdline 2>/dev/null || \
+   findmnt -n -o SOURCE / 2>/dev/null | grep -qs '\.snapshots'; then
+    die "booted from a snapshot — run 'samurai snap rollback' instead, refusing to update" 4
+fi
+if ! curl -fsSI --max-time 8 https://geo.mirror.pkgbuild.com/ >/dev/null 2>&1; then
+    die "no network (mirror unreachable) — updates need mirrors" 5
+fi
+if pgrep -x pacman >/dev/null 2>&1; then
+    die "another pacman is running (lock in use)" 6
+fi
+[ -e /var/lib/pacman/db.lck ] && rm -f /var/lib/pacman/db.lck && log "removed stale pacman lock (no pacman process)"
+if ! timedatectl show -p NTPSynchronized --value 2>/dev/null | grep -q true; then
+    log "WARNING: clock not confirmed synced; continuing"
+fi
+avail_kb=$(df -Pk / | awk 'NR==2 {print $4}')
+[ "${avail_kb:-0}" -lt 4194304 ] && die "less than 4 GiB free on / — run 'samurai clean' first" 7
+
+### Stage 1: self-update ###
+log "stage 1: self-update"
+pacman -Sy --noconfirm >/dev/null 2>&1 || die "pacman -Sy failed" 8
+for p in samurai-update samurai-keyring archlinux-keyring; do
+    if pacman -Q "$p" >/dev/null 2>&1 && [ "$(pacman -Qu "$p" 2>/dev/null | grep -c "^$p ")" -gt 0 ]; then
+        log "self-update: $p has an update; installing it alone"
+        pacman -S --noconfirm --needed "$p" || die "self-update of $p failed" 9
+        if [ "$p" = samurai-update ]; then
+            log "re-executing the new updater"
+            exec "$(command -v samurai-update)" --no-snapshot=$NO_SNAPSHOT "${PACMAN_ARGS[@]}"
+        fi
+    fi
+done
+
+### Stage 2: mirrors ###
+log "stage 2: mirrors"
+if [ "$SKIP_MIRRORS" -eq 0 ]; then
+    if grep -qs archive.archlinux.org /etc/pacman.d/mirrorlist; then
+        # installed from a pinned archive snapshot: the first update moves to
+        # today's CDN mirrors (backup kept for reference)
+        cp /etc/pacman.d/mirrorlist /etc/pacman.d/mirrorlist.archive.bak
+        printf 'Server = %s\n' 'https://geo.mirror.pkgbuild.com/$repo/os/$arch' \
+            > /etc/pacman.d/mirrorlist
+        log "mirrors: replaced archive pin with the default CDN mirror"
+        pacman -Sy --noconfirm >/dev/null 2>&1 || die "pacman -Sy after mirror rewrite failed" 8
+    fi
+else
+    log "stage 2: mirrors skipped (--skip-mirrors)"
+fi
+
+### Stage 3: Arch news + unacknowledged intervention news ###
+log "stage 3: news"
+NEWS_LATEST=""
+NEWS_DIR=/var/lib/samurai/news
+if command -v curl >/dev/null 2>&1; then
+    mkdir -p "$NEWS_DIR"
+    NEWS_LATEST=$(curl -fsSL --max-time 15 'https://archlinux.org/feeds/news/' 2>/dev/null \
+        | grep -oE '<link>[^<]+</link>' | head -8 | sed 's/<\/*link>//g' || true)
+    printf '%s\n' "$NEWS_LATEST" > "$NEWS_DIR/latest.urls" 2>/dev/null || true
+fi
+PENDING_NEWS=0
+if [ -s "$NEWS_DIR/latest.urls" ] && [ -f "$NEWS_DIR/seen.urls" ]; then
+    PENDING_NEWS=$(comm -23 <(sort -u "$NEWS_DIR/latest.urls") <(sort -u "$NEWS_DIR/seen.urls") | wc -l)
+fi
+log "news: $PENDING_NEWS item(s) not marked seen"
+
+### Stage 4: pre interventions ###
+INTERVENTIONS_DIR=/usr/lib/samurai/interventions
+DONE_FILE=/var/lib/samurai/interventions.done
+touch "$DONE_FILE"
+log "stage 4: pre interventions"
+if [ -d "$INTERVENTIONS_DIR" ]; then
+    for it in "$INTERVENTIONS_DIR"/*.toml; do
+        [ -e "$it" ] || continue
+        id=$(basename "$it" .toml)
+        grep -q "^$id " "$DONE_FILE" 2>/dev/null && continue
+        phase=$(python3 -c "import tomllib;print(tomllib.load(open('$it','rb')).get('phase',''))" 2>/dev/null || echo "")
+        [ "$phase" = pre ] || continue
+        log "intervention $id: running"
+        script="${it%.toml}.sh"
+        if [ -f "$script" ]; then
+            bash "$script" || die "intervention $id failed — nothing changed yet" 10
+        fi
+        printf '%s %s\n' "$id" "$(date -Is)" >> "$DONE_FILE"
+        log "intervention $id: done"
+    done
+fi
+
+### Stage 5: snapshot ###
+log "stage 5: snapshot"
+if command -v snapper >/dev/null 2>&1 && [ "$NO_SNAPSHOT" -eq 0 ]; then
+    snapper -c root list >/dev/null 2>&1 || die "snapper unhealthy — run 'samurai snap repair' or pass --no-snapshot" 11
+    log "snapshot: snap-pac will pair pre/post around the transaction"
+elif [ "$NO_SNAPSHOT" -eq 1 ]; then
+    log "snapshot: skipped (--no-snapshot)"
+fi
+
+### Stage 6: transaction ###
+log "stage 6: pacman -Syu"
+if ! pacman -Syu --needed "${PACMAN_ARGS[@]}" 2>&1 | tee -a "$LOG"; then
+    snapid=$(snapper -c root list 2>/dev/null | tail -1 | awk '{print $1}')
+    log "pacman failed; pre snapshot id: ${snapid:-unknown}"
+    echo "pacman failed — rollback with: samurai snap rollback ${snapid:-<id>}" >&2
+    exit 12
+fi
+
+### Stage 7: post checks ###
+log "stage 7: post checks"
+REBOOT_NEEDED=0
+FAILED_UNITS=$(systemctl --failed --no-legend | wc -l)
+if [ "$FAILED_UNITS" -gt 0 ]; then
+    log "post check: $FAILED_UNITS failed unit(s)"
+    systemctl --failed --no-legend | tee -a "$LOG"
+fi
+if ls /var/lib/pacman/*.pacnew 2>/dev/null | grep -qs . || find /etc -name "*.pacnew" 2>/dev/null | grep -qs .; then
+    PACEW_COUNT=$(find /etc -name "*.pacnew" 2>/dev/null | wc -l)
+    log "post check: $PACEW_COUNT .pacnew file(s) pending merge"
+fi
+if grep -qsE "^upgraded (linux|linux-lts|linux-zen|linux-cachyos)" "$LOG"; then
+    REBOOT_NEEDED=1; log "post check: kernel updated — reboot required"
+fi
+if [ -d /lib/modules/$(uname -r) ]; then
+    log "post check: modules for running kernel present"
+else
+    log "post check: WARNING modules for running kernel missing"
+fi
+
+### Stage 8: post interventions ###
+log "stage 8: post interventions"
+if [ -d "$INTERVENTIONS_DIR" ]; then
+    for it in "$INTERVENTIONS_DIR"/*.toml; do
+        [ -e "$it" ] || continue
+        id=$(basename "$it" .toml)
+        grep -q "^$id " "$DONE_FILE" 2>/dev/null && continue
+        phase=$(python3 -c "import tomllib;print(tomllib.load(open('$it','rb')).get('phase',''))" 2>/dev/null || echo "")
+        [ "$phase" = post ] || continue
+        script="${it%.toml}.sh"
+        if [ -f "$script" ]; then
+            log "intervention $id: running"
+            bash "$script" || die "intervention $id failed (post phase)" 13
+        fi
+        printf '%s %s\n' "$id" "$(date -Is)" >> "$DONE_FILE"
+        log "intervention $id: done"
+    done
+fi
+
+### Stage 9: housekeeping ###
+log "stage 9: housekeeping"
+if command -v paccache >/dev/null 2>&1; then
+    paccache -rk3 2>&1 | tee -a "$LOG" || true
+    paccache -ruk0 2>&1 | tee -a "$LOG" || true
+fi
+ORPHANS=$( { pacman -Qdt 2>/dev/null || true; } | wc -l)
+log "housekeeping: $ORPHANS orphan(s) (informational only; never auto-removed)"
+
+### Stage 10: report ###
+printf '%s reboot_needed=%s failed_units=%s orphans=%s pending_news=%s\n' \
+    "samurai update $VERSION complete." "$REBOOT_NEEDED" "$FAILED_UNITS" "$ORPHANS" "$PENDING_NEWS" | tee -a "$LOG"
+if [ "$JSON" -eq 1 ]; then
+    python3 - "$REBOOT_NEEDED" "$FAILED_UNITS" "$ORPHANS" "$PENDING_NEWS" <<'PY'
+import json, sys
+print(json.dumps({"reboot_needed": bool(int(sys.argv[1])),
+                  "failed_units": int(sys.argv[2]),
+                  "orphans": int(sys.argv[3]),
+                  "pending_news": int(sys.argv[4])}))
+PY
+fi
+[ "$REBOOT_NEEDED" -eq 1 ] && exit 2
+exit 0

@@ -165,6 +165,19 @@ fi
 
 ### Base install ###
 log "pacstrap base + kernels"
+# archive-pinned installs (spec 11 update-from-archive): the profile's
+# repos.arch_mirror replaces the live mirrorlist so pacstrap AND the target
+# download from the pinned snapshot; the updater rewrites it on first update
+ARCH_MIRROR=$(python3 - "$PROFILE" <<'PY'
+import sys, tomllib
+p = tomllib.loads(open(sys.argv[1]).read())
+print(p.get("repos", {}).get("arch_mirror", "auto"))
+PY
+)
+if [ "$ARCH_MIRROR" != "auto" ] && [ -n "$ARCH_MIRROR" ]; then
+    log "mirrors: pinning to $ARCH_MIRROR"
+    printf 'Server = %s\n' "$ARCH_MIRROR" > /etc/pacman.d/mirrorlist
+fi
 pacman -Sy --noconfirm --needed archlinux-keyring 2>/dev/null || true
 pacstrap -K /mnt base "$KERNELS" linux-firmware mkinitcpio sudo fish python pciutils 2>&1 | tee -a "$LOG"
 [ -d /mnt/etc ] || die "pacstrap failed"
@@ -174,6 +187,10 @@ pacstrap -K /mnt base "$KERNELS" linux-firmware mkinitcpio sudo fish python pciu
 # baked [samurai] key/mirrorlist — the live ISO is not visible in the chroot)
 cp /usr/local/bin/samurai-postinstall /mnt/usr/local/bin/
 chmod 755 /mnt/usr/local/bin/samurai-postinstall
+cp /usr/local/bin/samurai-update /mnt/usr/local/bin/
+chmod 755 /mnt/usr/local/bin/samurai-update
+mkdir -p /mnt/usr/lib/samurai/interventions
+cp /usr/lib/samurai/interventions/* /mnt/usr/lib/samurai/interventions/ 2>/dev/null || true
 mkdir -p /mnt/usr/share/samurai
 cp /usr/share/samurai/build-key.txt /mnt/usr/share/samurai/ 2>/dev/null || true
 cp /usr/share/samurai/samurai-mirrorlist /mnt/usr/share/samurai/ 2>/dev/null || true

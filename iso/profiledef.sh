@@ -26,4 +26,6 @@ file_permissions=(
   ["/usr/local/bin/samurai-install"]="0:0:755"
   ["/usr/local/bin/samurai-postinstall"]="0:0:755"
   ["/usr/local/bin/validate-profile.py"]="0:0:755"
+  ["/usr/local/bin/samurai-update"]="0:0:755"
+  ["/usr/local/bin/samurai-notifier"]="0:0:755"
 )
