@@ -26,7 +26,7 @@ proven in QEMU VMs on genorbox1.
   `source=`. Arch python = 3.14.8, cuda 13.4, uv 0.13.
 - Local git only. **GitHub repos approved (public now)** — created at M1 with the signing key.
 
-## Next steps (updated 2026-11-17 after M2)
+## Next steps (updated 2026-11-18 after M3)
 1. M0: `ci/build-iso.sh` + VM boot on genorbox1 (QEMU/OVMF).
 2. M1 spike: pacman from GitHub Releases with a throwaway key; create both public repos + signing key.
 3. Check Otto/Scratchy licences before M7a; gpu-unlock hardware validation on stealth-dragon's 3090
@@ -89,3 +89,26 @@ proven in QEMU VMs on genorbox1.
   (use -x or kill by PID).
 - Debug-disk trick: mount the failed run's qcow2 via the LIVE ISO + QGA (vda1 = ESP, vda2 = LUKS,
   keyfile at /esp/keys/samurai.key) - found the missing FILES= line that way.
+## M3 done (2026-11-18)
+- `updates/samurai-update`: 11 stages per spec 03. Key fixes found by testing:
+  - HEADLESS detection: stdin not a TTY -> auto --noconfirm (pacman prompts abort on EOF);
+    interactive terminals still prompt.
+  - stage 6 failure detection: capture rc=${PIPESTATUS[0]} after pacman|tee (the pipeline masked
+    pacman failures — the updater reported success while nothing was installed).
+  - pacman -Qdt pipefail trap: an empty orphan query returned nonzero under `set -euo pipefail`
+    and killed the script in stage 9 — guard with `{ ... || true; } | wc -l`.
+  - preflight: use curl (ping/iputils is not in base).
+- Interventions: TOML + script + .done state, at-most-once; validator allowlist
+  (`updates/validate-interventions.py`); 0001 mechanism test green.
+- `updates/samurai-notifier` + user timer units (checkupdates, arch-audit security counts,
+  reboot-pending detection); never installs anything.
+- Installed-system networking: the pacstrap'd target has NO network config — postinstall writes
+  20-samurai.network (DHCP on en*/eth*/wl*) + the resolved stub. Without it the updater preflight
+  died on "no network".
+- Pinned mirrors (repos.arch_mirror profile key): pacman expands $repo/os/$arch ONLY when the
+  Server line contains them — a plain URL fetches <server>/core.db (404). Installer appends the
+  placeholders + strips a trailing slash. Archive layout: /repos/YYYY/MM/DD/ (FULL date).
+- ci/build-iso.sh: curl XferCommand with retries (pacman parallel libcurl downloads flaked against
+  the CDN); the container script is single-quoted — no apostrophes inside it ("pacman's" killed it).
+- Scenarios green: test_update.py (intervention fires once, idempotent) +
+  test_update_archive.py (2026/08/15 -> today, ~660 MiB backlog, boots healthy).
