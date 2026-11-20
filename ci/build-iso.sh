@@ -112,6 +112,18 @@ sed -i -e "s|^#XferCommand = /usr/bin/wget.*||" -e "s|^#XferCommand = /usr/bin/c
 # (GPGME No data on sync dbs — seen 2026-11-20 on the Arch CDN)
 sed -i "s|^ParallelDownloads.*|ParallelDownloads = 2|" /etc/pacman.conf
 pacman -S --noconfirm --needed archiso >/dev/null
+# the profile's [cachyos] db is signed by CachyOS keys: import their keyring
+# into the build container or the mkarchiso pacstrap fails on db sigs
+# (GPGME No data / invalid PGP signature — seen 2026-11-20)
+cat >> /etc/pacman.conf <<CYP
+
+[cachyos]
+Server = https://mirror.cachyos.org/repo/\$arch/\$repo
+SigLevel = Never
+CYP
+pacman -Sy >/dev/null
+pacman -Sw --noconfirm --cachedir /tmp cachyos-keyring >/dev/null
+pacman -U --noconfirm /tmp/cachyos-keyring-*.pkg.tar.zst >/dev/null
 mkarchiso -v -w /work -o /out /src/iso
 '
 
