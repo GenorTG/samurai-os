@@ -78,19 +78,22 @@ def test_attended_install(mirror):
         # backend: final gate + LUKS passphrase (masked reads)
         _answer(vm, "Proceed? [yes/no]", "yes")
         _answer(vm, "LUKS passphrase:", PASS)
-        _answer(vm, "again:", PASS)
+        _answer(vm, "passphrase (again):", PASS)
 
         acc = vm.wait_for("Install complete", timeout=INSTALL_TIMEOUT)
         assert "FATAL" not in acc, acc[-1500:]
 
-        # the installed profile: verify the wizard's choices are on disk
+        # the wizard's profile, from the LIVE session (the installed copy at
+        # /var/lib/samurai/... is asserted after the reboot — before the reboot
+        # the live medium obviously has no /var/lib/samurai yet)
         ga = vm.qga(timeout=60)
-        _, profile = ga.exec("cat /var/lib/samurai/install-profile.toml")
+        _, profile = ga.exec("cat /tmp/samurai-attended.toml")
         assert 'bootloader = "grub"' in profile, profile
         assert 'shell = "fish"' in profile, profile
         assert "auto_unlock_keyfile = false" in profile, profile
         assert "password_hash = " in profile, profile
         assert PASS not in profile, "plaintext password must never reach the profile"
+        ga.close()  # the QGA chardev accepts ONE host client: free the slot
 
         vm.screendump("attended-04-install-done")
         vm.eject_iso()
@@ -110,21 +113,39 @@ def test_attended_install(mirror):
         assert "Login incorrect" not in acc, acc[-800:]
 
         # in-system asserts: fish shell, GRUB config, LUKS, hostname
+        # in-system asserts: fish shell, GRUB config, LUKS, hostname. NOTE:
+        # /dev/mapper/samurai-root is the INSTALL-TIME name — at boot systemd
+        # maps the LUKS as luks-<uuid>, so assert the root FS via findmnt
         vm.send("echo SHELL=$(getent passwd samurai | cut -d: -f7); "
                 "test -f /boot/grub/grub.cfg && echo GRUB-OK; "
                 "cat /etc/hostname; "
-                "lsblk -no FSTYPE /dev/mapper/samurai-root\n")
+                "findmnt -no FSTYPE /\n")
         acc = vm.wait_for("btrfs", timeout=60)
         assert "SHELL=/bin/fish" in acc, acc[-800:]
         assert "GRUB-OK" in acc, acc[-800:]
         assert "samurai" in acc, acc[-800:]
 
-        ga2 = vm.qga(timeout=60)
-        _, out = ga2.exec(
-            "snapper --root / list 2>/dev/null | tail -3; "
-            "cryptsetup isLuks /dev/vda2 && echo LUKS-OK; "
-            "cat /var/log/samurai/install.log | tail -1"
-        )
+        # final agent asserts: the guest agent can be slow right after boot
+        # (post-boot churn on the fresh system); retry before believing it
+        # is dead (seen 2026-11-20: first guest-exec ack timed out at 60 s)
+        out = ""
+        for attempt in range(3):
+            try:
+                ga2 = vm.qga(timeout=120)
+                _, out = ga2.exec(
+                    "grep -E '\\[boot\\]|bootloader|shell =|auto_unlock' /var/lib/samurai/install-profile.toml; "
+                    "snapper --root / list 2>/dev/null | tail -3; "
+                    "cryptsetup isLuks /dev/vda2 && echo LUKS-OK; "
+                    "tail -1 /var/log/samurai/install.log"
+                )
+                ga2.close()
+                break
+            except (TimeoutError, RuntimeError):
+                if ga2 is not None:
+                    ga2.close()
+                    ga2 = None
+                time.sleep(15)
+        assert 'bootloader = "grub"' in out, out[-800:]
         assert "LUKS-OK" in out, out[-800:]
         assert "install-complete" in out or "DONE" in out, out[-800:]
 
