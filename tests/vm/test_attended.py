@@ -58,7 +58,7 @@ def test_attended_install(mirror):
         _answer(vm, "Hostname [samurai]:", "")
         _answer(vm, "Region number [UTC]:", "")          # UTC default
         _answer(vm, "LUKS2 disk encryption [Y/n]:", "")  # default: encrypted
-        _answer(vm, "Numbers, space-separated [3]:", "")  # linux (medium default)
+        _answer(vm, "Numbers, space-separated [1 2]:", "")  # cachyos+zen (release default)
         # Menu prints land in the SAME serial chunk as their Choice prompt:
         # waiting for the menu first discards the overshoot (already-read
         # "Choice [1]:") and deadlocks the run (seen 2026-11-20). Wait for the

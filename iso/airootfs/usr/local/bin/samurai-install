@@ -17,7 +17,13 @@ DISK_OVERRIDE=""
 ASSUME_YES=0
 LOG=/var/log/samurai/install.log
 
-log() { printf '%s %s\n' "$(date -Is)" "$*" | tee -a "$LOG"; }
+# tee-to-stdout deadlocks when stdout is an undrained tty (agent-launched
+# installs write to /dev/ttyS0 and nothing drains the host-side socket —
+# pacman blocked in anon_pipe_write at a fixed byte count, seen 2026-11-20).
+# Mirror to stdout only for a real terminal; otherwise log file only.
+TLOG() { if [ -t 1 ]; then tee -a "$1"; else cat >> "$1"; fi; }
+
+log() { printf '%s %s\n' "$(date -Is)" "$*" >> "$LOG"; [ -t 1 ] && printf '%s %s\n' "$(date -Is)" "$*" >&2 || true; }
 die() { log "FATAL: $*"; echo "FATAL: $*" >&2; exit 1; }
 
 mkdir -p /var/log/samurai
@@ -363,7 +369,10 @@ OFFLINE_DIR=/usr/share/samurai/pkg-cache
 OFFLINE_OK=0
 if [ "$DESKTOP" = kde ] && [ -d "$OFFLINE_DIR" ] && compgen -G "$OFFLINE_DIR/*.pkg.tar.zst" >/dev/null; then
     log "offline install: baked cache present — installing from files (no network)"
-    mkdir -p /mnt/var/lib/pacman
+    mkdir -p /mnt/var/lib/pacman /mnt/etc/pacman.d/gnupg
+    # pre-init the target keyring: archlinux/cachyos-keyring run --populate
+    # hooks on install, and an empty keyring would fail them (pacman exits 1)
+    pacman-key --gpgdir /mnt/etc/pacman.d/gnupg --init >/dev/null 2>&1 || true
     # signatures were verified when the cache was built; the ISO itself is
     # the trust anchor. -U needs no repos, no sync dbs, no mirrorlist.
     printf '[options]\nSigLevel = Never\nLocalFileSigLevel = Never\nArchitecture = auto\n' > /tmp/pacman-offline.conf
@@ -385,7 +394,7 @@ if [ "$DESKTOP" = kde ] && [ -d "$OFFLINE_DIR" ] && compgen -G "$OFFLINE_DIR/*.p
         PKG_LIST+=("$f")
     done
     set +e
-    pacman --config /tmp/pacman-offline.conf -r /mnt -U --noconfirm "${PKG_LIST[@]}" 2>&1 | tee -a "$LOG"
+    pacman --config /tmp/pacman-offline.conf -r /mnt -U --noconfirm "${PKG_LIST[@]}" 2>&1 | TLOG "$LOG"
     PACSTAT=${PIPESTATUS[0]}
     set -e
     if [ "$PACSTAT" -eq 0 ]; then
@@ -405,7 +414,7 @@ if [ "$DESKTOP" = kde ] && [ -d "$OFFLINE_DIR" ] && compgen -G "$OFFLINE_DIR/*.p
 fi
 if [ "$OFFLINE_OK" -ne 1 ]; then
     pacman -Sy --noconfirm --needed archlinux-keyring 2>/dev/null || true
-    pacstrap -K /mnt base "${KERNEL_ARR[@]}" linux-firmware mkinitcpio sudo fish python pciutils "${BLDR_PKGS[@]}" snapper snap-pac 2>&1 | tee -a "$LOG"
+    pacstrap -K /mnt base "${KERNEL_ARR[@]}" linux-firmware mkinitcpio sudo fish python pciutils "${BLDR_PKGS[@]}" snapper snap-pac 2>&1 | TLOG "$LOG"
 fi
 [ -d /mnt/etc ] || die "install failed (offline and network paths both)"
 
@@ -445,7 +454,7 @@ SAMURAI_AUTOKEY=$AUTOKEY
 EOF
 chmod 644 /mnt/etc/samurai-install-env
 log "running samurai-postinstall"
-arch-chroot /mnt env SAMURAI_CHROOT=1 SAMURAI_OFFLINE=$OFFLINE_OK /usr/local/bin/samurai-postinstall /var/lib/samurai/install-profile.toml 2>&1 | tee -a "$LOG"
+arch-chroot /mnt env SAMURAI_CHROOT=1 SAMURAI_OFFLINE=$OFFLINE_OK /usr/local/bin/samurai-postinstall /var/lib/samurai/install-profile.toml 2>&1 | TLOG "$LOG"
 
 ### first snapshot: install-complete (spec 06). Created LIVE-side: the install
 ### chroot has no snapper daemon (and "/" isn't a mountpoint there), so the
@@ -460,7 +469,7 @@ if [ -d /mnt/.snapshots ] && mountpoint -q /mnt/.snapshots; then
     NEXTID=$(( ${NEXTID:-0} + 1 ))
     log "snapshots: creating install-complete snapshot #$NEXTID"
     mkdir -p "/mnt/.snapshots/$NEXTID"
-    btrfs subvolume snapshot -r /mnt "/mnt/.snapshots/$NEXTID/snapshot" 2>&1 | tee -a "$LOG" \
+    btrfs subvolume snapshot -r /mnt "/mnt/.snapshots/$NEXTID/snapshot" 2>&1 | TLOG "$LOG" \
         || die "install-complete snapshot failed"
     cat > "/mnt/.snapshots/$NEXTID/info.xml" <<EOF
 <?xml version="1.0"?>
