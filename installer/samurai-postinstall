@@ -14,16 +14,33 @@ PROFILE="${1:?usage: samurai-postinstall /path/to/profile.toml}"
 log() { printf '%s %s\n' "$(date -Is)" "$*"; }
 log "samurai-postinstall starting"
 
-read -r HOSTNAME TZ LOCALE KB KERNELS BLDR \
+read -r HOSTNAME TZ LOCALE KB \
     < <(python3 - "$PROFILE" <<'PY'
 import sys, tomllib
 p = tomllib.loads(open(sys.argv[1]).read())
-s, b = p.get("system", {}), p.get("boot", {})
+s = p.get("system", {})
 print(s.get("hostname", "samurai"), s.get("timezone", "UTC"),
-      s.get("locale", "en_US.UTF-8"), s.get("keyboard", "us"),
-      " ".join(b.get("kernels", ["linux"])), b.get("bootloader", "limine"))
+      s.get("locale", "en_US.UTF-8"), s.get("keyboard", "us"))
 PY
 ) || exit 1
+# kernels word-split into an array: a multi-kernel default (cachyos+zen)
+# shifted every later field in the combined read ("unsupported bootloader:
+# bash limine" — same bug class as the pacstrap target quoting)
+read -r -a KERNEL_ARR \
+    < <(python3 - "$PROFILE" <<'PY'
+import sys, tomllib
+p = tomllib.loads(open(sys.argv[1]).read())
+print(" ".join(p.get("boot", {}).get("kernels", ["linux"])))
+PY
+) || exit 1
+read -r BLDR \
+    < <(python3 - "$PROFILE" <<'PY'
+import sys, tomllib
+p = tomllib.loads(open(sys.argv[1]).read())
+print(p.get("boot", {}).get("bootloader", "limine"))
+PY
+) || exit 1
+KERNELS="${KERNEL_ARR[*]}"
 read -r UNAME USHELL UPWHASH < <(python3 - "$PROFILE" <<'PY'
 import sys, tomllib
 p = tomllib.loads(open(sys.argv[1]).read())

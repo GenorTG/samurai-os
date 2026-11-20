@@ -39,13 +39,18 @@ def test_kde_install(mirror):
     try:
         vm.serial_connect()
         vm.login_root(timeout=280)
-        acc = vm.serial_cmd(
+        # install via the guest agent, not serial typing: a long serial-cmd
+        # got byte-corrupted mid-echo ("profil ee-kde.toml", "-- yyes") and
+        # the install never ran (qcow2 stayed 192 KB — seen 2026-11-20)
+        ga = vm.ensure_qga()
+        code, out = ga.exec(
             "curl -fsSL http://10.0.2.2:8966/profile-kde.toml -o /tmp/profile-kde.toml "
             "&& samurai-install --profile /tmp/profile-kde.toml --disk /dev/vda --yes "
-            ">/dev/null 2>&1; echo KDE-INSTALL-RC=$?",
-            "KDE-INSTALL-RC=", timeout=INSTALL_TIMEOUT,
+            ">/dev/null 2>&1; RC=$?; echo KDE-INSTALL-RC=$RC; "
+            "[ $RC = 0 ] || tail -c 2500 /var/log/samurai/install.log",
+            timeout=INSTALL_TIMEOUT,
         )
-        assert "KDE-INSTALL-RC=0" in acc, acc[-1500:]
+        assert "KDE-INSTALL-RC=0" in out, out[-3500:]
 
         vm.eject_iso()
         vm.reboot()

@@ -14,16 +14,33 @@ PROFILE="${1:?usage: samurai-postinstall /path/to/profile.toml}"
 log() { printf '%s %s\n' "$(date -Is)" "$*"; }
 log "samurai-postinstall starting"
 
-read -r HOSTNAME TZ LOCALE KB KERNELS BLDR \
+read -r HOSTNAME TZ LOCALE KB \
     < <(python3 - "$PROFILE" <<'PY'
 import sys, tomllib
 p = tomllib.loads(open(sys.argv[1]).read())
-s, b = p.get("system", {}), p.get("boot", {})
+s = p.get("system", {})
 print(s.get("hostname", "samurai"), s.get("timezone", "UTC"),
-      s.get("locale", "en_US.UTF-8"), s.get("keyboard", "us"),
-      " ".join(b.get("kernels", ["linux"])), b.get("bootloader", "limine"))
+      s.get("locale", "en_US.UTF-8"), s.get("keyboard", "us"))
 PY
 ) || exit 1
+# kernels word-split into an array: a multi-kernel default (cachyos+zen)
+# shifted every later field in the combined read ("unsupported bootloader:
+# bash limine" — same bug class as the pacstrap target quoting)
+read -r -a KERNEL_ARR \
+    < <(python3 - "$PROFILE" <<'PY'
+import sys, tomllib
+p = tomllib.loads(open(sys.argv[1]).read())
+print(" ".join(p.get("boot", {}).get("kernels", ["linux"])))
+PY
+) || exit 1
+read -r BLDR \
+    < <(python3 - "$PROFILE" <<'PY'
+import sys, tomllib
+p = tomllib.loads(open(sys.argv[1]).read())
+print(p.get("boot", {}).get("bootloader", "limine"))
+PY
+) || exit 1
+KERNELS="${KERNEL_ARR[*]}"
 read -r UNAME USHELL UPWHASH < <(python3 - "$PROFILE" <<'PY'
 import sys, tomllib
 p = tomllib.loads(open(sys.argv[1]).read())
@@ -76,15 +93,32 @@ if [ -f /usr/share/samurai/build-key.txt ]; then
     pacman-key --add /usr/share/samurai/build-key.txt
     pacman-key --lsign-key DFE8C148C042AA3C199AAEA08436E12731EDD3FA
 fi
+# [samurai] may already be present (offline -U copies the live medium's
+# conf, which bakes the section): idempotent insert
+if ! grep -q '^\[samurai\]' /etc/pacman.conf; then
 sed -i '/^\[core\]/i [samurai]\
 Server = https://github.com/GenorTG/samurai-repo/releases/download/x86_64\
 Server = https://repo.smart-samurai.pl/samurai/x86_64\
 SigLevel = Required DatabaseRequired' /etc/pacman.conf
-pacman -Syy
+fi
+if [ "${SAMURAI_OFFLINE:-0}" = 1 ]; then
+    log "repos: offline install — no repo sync in the target"
+else
+    pacman -Syy
+fi
 
 if [ "${#PACKAGES[@]}" -gt 0 ]; then
-    log "installing [samurai] packages: ${PACKAGES[*]}"
-    pacman -S --noconfirm --needed "${PACKAGES[@]}"
+    # offline -U installs already covered these; only fetch what is missing
+    MISSING=()
+    for p in "${PACKAGES[@]}"; do
+        pacman -Q "$p" >/dev/null 2>&1 || MISSING+=("$p")
+    done
+    if [ "${#MISSING[@]}" -gt 0 ]; then
+        log "installing missing [samurai] packages: ${MISSING[*]}"
+        pacman -S --noconfirm --needed "${MISSING[@]}"
+    else
+        log "[samurai] packages already present (offline cache path)"
+    fi
 fi
 
 ### desktop (spec 08: KDE Plasma default; alternatives opt-in) ###
@@ -129,6 +163,12 @@ EOF
         ;;
 esac
 [ -z "$DM" ] || { systemctl enable "$DM.service" && log "display manager: $DM enabled"; }
+
+# networking is a basic function (spec 09): NetworkManager always on when
+# the package is present (the baked offline set carries it)
+if pacman -Q networkmanager >/dev/null 2>&1; then
+    systemctl enable NetworkManager.service && log "network: NetworkManager enabled"
+fi
 
 ### brand the installed system (spec 14: welcome, not raw instructions) ###
 cat > /etc/motd <<'EOF'
