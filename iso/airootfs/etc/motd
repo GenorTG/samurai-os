@@ -1,3 +1,9 @@
-Samurai OS live medium (Arch-based, [core]/[extra] from Arch mirrors).
-The installer and toolbox ship from M2/M7 on; see /root for tools.
-For Wi-Fi use iwctl. Ethernet with DHCP works automatically.
+Welcome, ronin — this is Samurai OS. Arch in spirit, sharpened for you.
+
+Your blade is the `samurai` command:
+  samurai update       refresh the system — a snapshot is taken first, always
+  samurai snap         capture this moment before you act
+  samurai rescue       for when the path darkens
+  samurai toolbox      shape the machine to your hand
+
+Ethernet walks in on its own. Wi-Fi answers only to iwctl.

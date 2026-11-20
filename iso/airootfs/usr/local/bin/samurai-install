@@ -103,6 +103,16 @@ wizard() {
         *) die "invalid bootloader choice" ;;
     esac
 
+    # desktop (spec 08: KDE Plasma default; alternatives opt-in)
+    echo "  Desktop: 1) KDE Plasma (default)  2) GNOME  3) XFCE  4) LXQt  5) CLI only"
+    read -r -p "  Choice [1]: " dsel; dsel=${dsel:-1}
+    case "$dsel" in
+        1) WIZ_DESKTOP=kde ;; 2) WIZ_DESKTOP=gnome ;; 3) WIZ_DESKTOP=xfce ;; 4) WIZ_DESKTOP=lxqt ;; 5) WIZ_DESKTOP=none ;;
+        *) die "invalid desktop choice" ;;
+    esac
+    [ "$WIZ_DESKTOP" = none ] || [ "$memmb" -ge 7000 ] || \
+        echo "  note: a desktop feels best with >= 8 GiB RAM (this box has ${memmb} MiB)"
+
     # user
     read -r -p "  Username [samurai]: " WIZ_USER; WIZ_USER=${WIZ_USER:-samurai}
     echo "  Shell: 1) bash  2) fish  3) zsh"
@@ -126,6 +136,7 @@ wizard() {
     echo "  LUKS2:   $WIZ_ENC"
     echo "  host:    $WIZ_HOST | tz: $WIZ_TZ"
     echo "  kernels:$(echo $WIZ_KERNELS) | bootloader: $WIZ_BLDR"
+    echo "  desktop: $WIZ_DESKTOP"
     echo "  user:    $WIZ_USER ($WIZ_SHELL)"
     echo "  ---------------------------------------------"
     read -r -p "  Write this profile and continue? [yes/no]: " go
@@ -142,7 +153,8 @@ wizard() {
         printf '[user]\nname = "%s"\nshell = "%s"\ngroups = ["wheel"]\nroot_locked = true\n' \
             "$WIZ_USER" "$WIZ_SHELL"
         [ -n "$WIZ_PWHASH" ] && printf 'password_hash = "%s"\n' "$WIZ_PWHASH"
-        printf '\n[packages]\ninstall = [\n    "samurai-release",\n    "samurai-mirrorlist",\n    "samurai-keyring",\n    "qemu-guest-agent",\n]\n\n[repos]\nsamurai = true\ncachyos = false\nchaotic_aur = false\narch_mirror = "auto"\n\n[security]\nfirewall = "none"\nssh_server = false\n'
+        printf '\n[packages]\ndesktop = "%s"\ninstall = [\n    "samurai-release",\n    "samurai-mirrorlist",\n    "samurai-keyring",\n    "qemu-guest-agent",\n]\n\n[repos]\nsamurai = true\ncachyos = false\nchaotic_aur = false\narch_mirror = "auto"\n\n[security]\nfirewall = "none"\nssh_server = false\n' \
+            "$WIZ_DESKTOP"
     } > "$WIZ_PROFILE"
     chmod 600 "$WIZ_PROFILE"
     log "wizard wrote $WIZ_PROFILE (disk=$WIZ_DISK enc=$WIZ_ENC bldr=$WIZ_BLDR)"

@@ -30,6 +30,9 @@ groups = ["wheel"]
 root_locked = true
 
 [packages]
+# Desktop: KDE Plasma is the default face of Samurai OS (Genor 2026-11-20);
+# alternatives gnome/xfce/lxqt/none arrive via the wizard or the toolbox.
+desktop = "kde"
 # M2 install set: enough for a booting, testable system. Desktop/gaming/dev
 # packages arrive with their milestones (M6–M7); samurai-postinstall applies
 # whatever the profile lists, from repos the ISO trusts.

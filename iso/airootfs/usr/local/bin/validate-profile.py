@@ -23,12 +23,13 @@ ALLOWED = {
     "disk": {"device", "layout", "filesystem", "encryption", "auto_unlock_keyfile"},
     "boot": {"kernels", "bootloader"},
     "user": {"name", "shell", "groups", "root_locked", "password_hash"},
-    "packages": {"install"},
+    "packages": {"install", "desktop"},
     "repos": {"samurai", "cachyos", "chaotic_aur", "arch_mirror"},
     "security": {"firewall", "ssh_server"},
 }
 KNOWN_KERNELS = {"linux", "linux-lts", "linux-zen", "linux-cachyos", "linux-cachyos-lts"}
 KNOWN_BOOTLOADERS = {"limine", "grub", "systemd-boot", "refind"}
+KNOWN_DESKTOPS = {"kde", "gnome", "xfce", "lxqt", "none"}
 KNOWN_SHELLS = {"bash", "fish", "zsh"}
 KNOWN_LAYOUTS = {"erase"}
 KNOWN_FS = {"btrfs"}
@@ -122,6 +123,10 @@ def validate(path: str) -> dict:
         re.match(r"^[a-zA-Z0-9_.-]+$", p) for p in packages
     ):
         fail("packages.install must be a list of package names (no shell metacharacters)")
+
+    desktop = profile.get("packages", {}).get("desktop", "kde")
+    if desktop not in KNOWN_DESKTOPS:
+        fail(f"unsupported desktop: {desktop!r} (choose from {sorted(KNOWN_DESKTOPS)})")
 
     sec = profile.get("security", {})
     if sec.get("firewall", "none") not in KNOWN_FIREWALLS:

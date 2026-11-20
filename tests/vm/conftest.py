@@ -63,6 +63,11 @@ def mirror():
             f'password_hash = "{password_hash()}"\n'
         )
         profile = _re.sub(r"\[user\].*?(?=\n\[|\Z)", new_user, default, flags=_re.S)
+        # CLI tests stay lean: the default profile's desktop=kde would make
+        # every existing scenario install Plasma (Genor's KDE default is for
+        # release profiles; the harness overrides it to none explicitly)
+        profile = _re.sub(r'desktop = "kde"', 'desktop = "none"', profile)
+        assert 'desktop = "none"' in profile, "conftest lost its desktop override"
         tomllib.loads(profile)  # must parse: belt and braces against duplicate tables
         m.dir.mkdir(parents=True, exist_ok=True)
         (m.dir / "profile-test.toml").write_text(profile)

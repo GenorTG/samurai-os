@@ -66,6 +66,8 @@ def test_attended_install(mirror):
         vm.wait_for("Choice [1]:")                       # bootloader menu + prompt
         vm.screendump("attended-02-bootloader-menu")
         vm.send("2\n")                                   # GRUB (user selection path)
+        vm.wait_for("Choice [1]:")                       # desktop menu + prompt
+        vm.send("5\n")                                   # CLI only (KDE has its own test)
         _answer(vm, "Username [samurai]:", "")
         vm.wait_for("Choice [1]:")                       # shell menu + prompt
         vm.send("2\n")                                   # fish
@@ -90,6 +92,7 @@ def test_attended_install(mirror):
         _, profile = ga.exec("cat /tmp/samurai-attended.toml")
         assert 'bootloader = "grub"' in profile, profile
         assert 'shell = "fish"' in profile, profile
+        assert 'desktop = "none"' in profile, profile
         assert "auto_unlock_keyfile = false" in profile, profile
         assert "password_hash = " in profile, profile
         assert PASS not in profile, "plaintext password must never reach the profile"

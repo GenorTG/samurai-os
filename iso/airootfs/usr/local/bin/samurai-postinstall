@@ -44,6 +44,12 @@ p = tomllib.loads(open(sys.argv[1]).read())
 print(" ".join(p.get("packages", {}).get("install", [])))
 PY
 ) || exit 1
+read -r DESKTOP < <(python3 - "$PROFILE" <<'PY'
+import sys, tomllib
+p = tomllib.loads(open(sys.argv[1]).read())
+print(p.get("packages", {}).get("desktop", "kde"))
+PY
+) || exit 1
 
 ### identity ###
 log "identity: hostname=$HOSTNAME tz=$TZ locale=$LOCALE"
@@ -80,6 +86,65 @@ if [ "${#PACKAGES[@]}" -gt 0 ]; then
     log "installing [samurai] packages: ${PACKAGES[*]}"
     pacman -S --noconfirm --needed "${PACKAGES[@]}"
 fi
+
+### desktop (spec 08: KDE Plasma default; alternatives opt-in) ###
+DM=""
+case "$DESKTOP" in
+    kde)
+        log "desktop: KDE Plasma (Breeze Dark)"
+        pacman -S --noconfirm --needed plasma-meta plasma-wayland-session sddm konsole dolphin \
+            kwrite ark gwenview okular || { log "FATAL: KDE install failed"; exit 16; }
+        DM=sddm
+        # Breeze Dark default for every new user (Genor 2026-11-17)
+        install -d /etc/skel/.config
+        cat > /etc/skel/.config/kdeglobals <<'EOF'
+[KDE]
+widgetStyle=Breeze
+
+[General]
+LookAndFeelPackage=org.kde.breezedark.desktop
+EOF
+        ;;
+    gnome)
+        log "desktop: GNOME"
+        pacman -S --noconfirm --needed gnome gnome-tweaks gdm || { log "FATAL: GNOME install failed"; exit 16; }
+        DM=gdm
+        ;;
+    xfce)
+        log "desktop: XFCE"
+        pacman -S --noconfirm --needed xfce4 xfce4-goodies sddm || { log "FATAL: XFCE install failed"; exit 16; }
+        DM=sddm
+        ;;
+    lxqt)
+        log "desktop: LXQt"
+        pacman -S --noconfirm --needed lxqt sddm || { log "FATAL: LXQt install failed"; exit 16; }
+        DM=sddm
+        ;;
+    none)
+        log "desktop: none (CLI only)"
+        ;;
+    *)
+        log "FATAL: unsupported desktop: $DESKTOP"
+        exit 16
+        ;;
+esac
+[ -z "$DM" ] || { systemctl enable "$DM.service" && log "display manager: $DM enabled"; }
+
+### brand the installed system (spec 14: welcome, not raw instructions) ###
+cat > /etc/motd <<'EOF'
+Welcome home, ronin — this is your Samurai OS.
+
+Your blade is the `samurai` command:
+  samurai update       refresh the system — a snapshot is taken first, always
+  samurai snap         capture this moment before you act
+  samurai rescue       for when the path darkens
+  samurai toolbox      shape the machine to your hand
+EOF
+cat > /etc/issue <<'EOF'
+Samurai OS \s \m (\l)
+
+The blade awaits. Login:
+EOF
 
 ### users ###
 if ! id -u "$UNAME" >/dev/null 2>&1; then
