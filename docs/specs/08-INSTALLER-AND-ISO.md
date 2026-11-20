@@ -49,6 +49,7 @@ The app lists come from `catalog/`:
 | 3 | Disk | erase disk; **encryption on**; btrfs layout from spec 06 | alongside another OS (dual boot), replace partition, manual |
 | 4 | User | user in `wheel`; login shell **fish** (bash and zsh offered; bash always installed); hostname | root locked |
 | 5 | Kernels | **linux-cachyos** (default boot) + **linux-zen** | also `linux`, `linux-lts`, `linux-cachyos-lts` (spec 10) |
+| 5a | Bootloader | **Limine** (ADR-0003; snapshot boot + clean Secure Boot) | alternatives: **GRUB**, **systemd-boot**, **rEFInd**; same kernel cmdline contract; Secure Boot story best on Limine/systemd-boot, GRUB ships with Secure Boot off (sbctl follow-up) |
 | 6 | Desktop | **KDE Plasma**; GNOME, Hyprland, COSMIC, Xfce, Cinnamon, Sway, i3, none | only KDE gets our full setup and is tested; the others get upstream defaults plus our shell, tools and toolbox |
 | 6a | KDE setup (KDE only) | theme **Breeze Dark** (Otto, Scratchy offered), **monitor widgets on**, **reduced effects on**, panel layout top + bottom task bar | spec 14 |
 | 7 | Hardware | detected devices + recommended driver profiles (chwd); NVIDIA: **CUDA on** (Turing and newer); **gpu-unlock on** for each supported card, listed per card with its PCI address | spec 07; unsupported cards show why |
@@ -74,7 +75,9 @@ Runs in the target chroot, idempotent, every step logged to `/var/log/samurai/in
    `runuser` (uv tools, vendor installers), each shown in the log with its exact command.
 8. Desktop setup: theme, panel layout script, effects (spec 14) staged for first login.
 9. initramfs (systemd hooks, `sd-encrypt`, `btrfs-overlayfs`, NVIDIA + gpu-unlock modules),
-   Limine + `limine-snapper-sync` (ADR-0003), kernel command line via `samurai boot`.
+   bootloader install — **Limine + `limine-snapper-sync`** by default, or the profile's
+   `[boot].bootloader` choice (GRUB / systemd-boot / rEFInd; ADR-0003) — kernel command line via
+   `samurai boot` (same `rd.luks.uuid` / keyfile contract for every bootloader).
 10. Snapper, snap-pac, btrfs timers (spec 06); security baseline (spec 09).
 11. Write `hw-fingerprint`, `install-info.json`, `install-profile.toml`; first snapshot `install-complete`.
 

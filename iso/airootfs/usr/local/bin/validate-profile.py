@@ -28,7 +28,7 @@ ALLOWED = {
     "security": {"firewall", "ssh_server"},
 }
 KNOWN_KERNELS = {"linux", "linux-lts", "linux-zen", "linux-cachyos", "linux-cachyos-lts"}
-KNOWN_BOOTLOADERS = {"systemd-boot", "limine"}
+KNOWN_BOOTLOADERS = {"limine", "grub", "systemd-boot", "refind"}
 KNOWN_SHELLS = {"bash", "fish", "zsh"}
 KNOWN_LAYOUTS = {"erase"}
 KNOWN_FS = {"btrfs"}

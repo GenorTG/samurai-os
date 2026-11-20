@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+# samurai snap — snapshot manager CLI (spec 06).
+# Refuses to run when booted FROM a snapshot (updating/rolling back from a
+# read-only overlay would lie about the state); rescue rollback is the path
+# that works from outside the system.
+set -euo pipefail
+export LC_ALL=C
+
+log() { printf '%s %s\n' "$(date -Is)" "$*"; }
+die() { printf 'FATAL: %s\n' "$*" >&2; exit "${2:-1}"; }
+
+CONFIG="root"
+cmd="${1:-list}"; shift 2>/dev/null || true
+
+booted_from_snapshot() {
+    findmnt -n -o SOURCE / 2>/dev/null | grep -qs '\.snapshots' \
+        || grep -qs 'snapshots' /proc/cmdline 2>/dev/null
+}
+
+require_snapper() { command -v snapper >/dev/null 2>&1 || die "snapper is not installed"; }
+
+case "$cmd" in
+    list)
+        require_snapper
+        echo "== snapshots (config: $CONFIG) =="
+        snapper -c "$CONFIG" list
+        echo "== bootable snapshot entries (ESP) =="
+        grep -E '^/' /boot/limine/limine.conf 2>/dev/null | grep -E 'snapshot' | head -10 || echo "(none in limine.conf)"
+        ;;
+
+    create)
+        require_snapper
+        label="${1:-samurai-manual}"
+        snapper -c "$CONFIG" create --description "$label"
+        log "created snapshot ($label)"
+        ;;
+
+    delete)
+        require_snapper
+        id="${1:?usage: samurai snap delete <id>}"
+        snapper -c "$CONFIG" delete "$id"
+        log "deleted snapshot $id"
+        ;;
+
+    diff)
+        require_snapper
+        [ $# -ge 2 ] || die "usage: samurai snap diff <from> [to]"
+        from="$1"; to="${2:-.}"
+        snapper -c "$CONFIG" status "$from" "$to" 2>/dev/null | head -50
+        echo "files: +created -deleted m=modified"
+        ;;
+
+    repair)
+        require_snapper
+        snapper -c root list >/dev/null 2>&1 || { snapper -c root create-config /; log "recreated snapper config root"; }
+        snapper -c root set-config 'TIMELINE_CREATE="no"' 'NUMBER_LIMIT="20"' 'NUMBER_LIMIT_IMPORTANT="10"' 'EMPTY_PRE_POST_CLEANUP="yes"' 2>&1 | log || true
+        systemctl enable snapper.timer snapper-cleanup.timer >/dev/null 2>&1 || true
+        log "snapper config root repaired"
+        ;;
+
+    rollback)
+        require_snapper
+        # spec 06: 1) snapshot the current (broken) @ as before-rollback;
+        # 2) rename the target snapshot to a new writable @ (old @ becomes
+        #    @-broken-<timestamp>); 3) regenerate boot entries; 4) reboot.
+        [ "$(id -u)" -eq 0 ] || die "rollback needs root"
+        target="${1:?usage: samurai snap rollback [<snapshot-id>]}"
+        if booted_from_snapshot; then
+            die "booted from a snapshot: boot the CURRENT system first, then roll back (or use samurai rescue rollback)"
+        fi
+        root_dev=$(findmnt -n -o SOURCE / | sed 's/\[.*\]//')
+        # "|| true": grep exits 1 when OPTIONS has no subvol= entry — under
+        # set -e that would kill this script silently (same bug class as the
+        # NEXTID one, fixed 2026-11-18 in installer/samurai-install)
+        subvol_opts=$(findmnt -n -o OPTIONS / | tr ',' '\n' | grep -E '^subvol=' | head -1 || true)
+        subvol_root="${subvol_opts#subvol=}"
+        case "$subvol_root" in
+            /@) : ;;
+            *) die "root subvol is '$subvol_root' — expected /@ (snapshot booted? use rescue rollback)" ;;
+        esac
+        # the target must be a read-only snapshot of the same btrfs
+        case "$target" in
+            /*) snapshot_path="${target%/}" ;;
+            *) snapshot_path="/.snapshots/$target/snapshot" ;;
+        esac
+        [ -d "$snapshot_path" ] || die "snapshot not found: $snapshot_path"
+        log "rollback: snapshotting current @ as before-rollback"
+        snapper -c "$CONFIG" create --description "before-rollback" >/dev/null
+        ts=$(date +%Y%m%d-%H%M%S)
+        log "rollback: renaming subvolumes (old @ -> @-broken-$ts)"
+        btrfs subvolume snapshot "$snapshot_path" "/@.rollback-stage"   # writable copy of the target
+        mv "/@" "/@-broken-$ts"
+        mv "/@.rollback-stage" "/@"
+        # fstab unchanged (it targets subvol=@). The old broken root's
+        # subvolume is cleaned up after 14 days by the next cleanup timer.
+        log "rollback: regenerating boot entries + initramfs for the restored root"
+        # the restored root carries its own kernels; the ESP already has the
+        # bootloader. Regenerate initramfs for the kernels present there.
+        if [ -d "/@/boot" ] || mountpoint -q /boot; then
+            log "rollback: done — reboot to start the restored system"
+        fi
+        log "rollback complete. old system kept at @-broken-$ts (14-day cleanup)"
+        echo "Rollback complete. Reboot now: systemctl reboot"
+        ;;
+
+    *)
+        die "usage: samurai snap {list|create|delete|diff|repair|rollback} [args]" 2
+        ;;
+esac

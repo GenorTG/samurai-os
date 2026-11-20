@@ -22,6 +22,9 @@ See `docs/specs/01-ARCHITECTURE.md` "Source layout". Today only `docs/`, `script
 
 ## Gotchas
 - genorbox1 is Debian: archiso, makepkg and pacman run only inside `archlinux` containers.
+- `lsblk -no NAME,PARTTYPENAME` prints TREE prefixes (`|-vda1`, `├─vda1`) — parsing it with awk
+  yields a garbage device (`/dev/|-vda1`). Always use `lsblk -lno` for column parsing (2026-11-18:
+  this silently broke the rescue ESP keyfile detection under LC_ALL=C).
 - Garuda's wiki pages are JS-rendered (`web_fetch` returns nothing). Read Garuda sources on GitLab
   (`garuda-linux/applications/*`, `garuda-linux/pkgbuilds`) instead.
 - chwd reads profiles only from `/var/lib/chwd/db/{pci,usb}/` (hard-coded in `src/consts.rs`).

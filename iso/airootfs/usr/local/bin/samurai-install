@@ -55,14 +55,26 @@ print(s.get("hostname", "samurai"), s.get("timezone", "UTC"),
 PY
 ) || die "profile read failed"
 
-read -r KERNELS USER_NAME USER_SHELL < <(python3 - "$PROFILE" <<'PY'
+read -r KERNELS USER_NAME USER_SHELL BLDR < <(python3 - "$PROFILE" <<'PY'
 import sys, tomllib
 p = tomllib.loads(open(sys.argv[1]).read())
 print(" ".join(p.get("boot", {}).get("kernels", ["linux"])),
       p.get("user", {}).get("name", "samurai"),
-      p.get("user", {}).get("shell", "bash"))
+      p.get("user", {}).get("shell", "bash"),
+      p.get("boot", {}).get("bootloader", "limine"))
 PY
 ) || die "profile read failed"
+# bootloader package set: limine is default (ADR-0003); grub/systemd-boot/refind
+# opt-in via [boot].bootloader. snapper/snap-pac stay unconditional (snapshots
+# are core, not bootloader-bound).
+BLDR_PKG="limine"
+case "$BLDR" in
+    grub)         BLDR_PKG="grub os-prober efibootmgr" ;;
+    systemd-boot) BLDR_PKG="efibootmgr" ;;
+    refind)       BLDR_PKG="refind efibootmgr" ;;
+    limine)       BLDR_PKG="limine" ;;
+    *)            die "unsupported bootloader: $BLDR" ;;
+esac
 
 [ -b "$DISK" ] || die "not a block device: $DISK"
 
@@ -79,7 +91,7 @@ fi
 ### Partitioning (erase only in M2) ###
 log "partitioning $DISK"
 sgdisk -Z "$DISK"
-sgdisk -n 1:0:+1G -t 1:ef00 -c 1:esp "$DISK"   # ESP
+sgdisk -n 1:0:+2G -t 1:ef00 -c 1:esp "$DISK"   # ESP (2 GiB: kernels each snapshot entry needs, spec 06)
 sgdisk -n 2:0:0 -t 2:8304 -c 2:samurai-root "$DISK"  # Linux x86-64 root (/usr split ok)
 partprobe "$DISK"; sleep 1
 ESP="${DISK}1"; ROOTPART="${DISK}2"
@@ -182,7 +194,7 @@ if [ "$ARCH_MIRROR" != "auto" ] && [ -n "$ARCH_MIRROR" ]; then
     printf 'Server = %s\n' "${ARCH_MIRROR%/}/\$repo/os/\$arch" > /etc/pacman.d/mirrorlist
 fi
 pacman -Sy --noconfirm --needed archlinux-keyring 2>/dev/null || true
-pacstrap -K /mnt base "$KERNELS" linux-firmware mkinitcpio sudo fish python pciutils 2>&1 | tee -a "$LOG"
+pacstrap -K /mnt base "$KERNELS" linux-firmware mkinitcpio sudo fish python pciutils "$BLDR_PKG" snapper snap-pac 2>&1 | tee -a "$LOG"
 [ -d /mnt/etc ] || die "pacstrap failed"
 
 # the postinstall runs in the TARGET: bring it + its deps over first
@@ -191,6 +203,8 @@ pacstrap -K /mnt base "$KERNELS" linux-firmware mkinitcpio sudo fish python pciu
 cp /usr/local/bin/samurai-postinstall /mnt/usr/local/bin/
 chmod 755 /mnt/usr/local/bin/samurai-postinstall
 cp /usr/local/bin/samurai-update /mnt/usr/local/bin/
+cp /usr/local/bin/samurai /mnt/usr/local/bin/
+chmod 755 /mnt/usr/local/bin/samurai-update /mnt/usr/local/bin/samurai
 chmod 755 /mnt/usr/local/bin/samurai-update
 mkdir -p /mnt/usr/lib/samurai/interventions
 cp /usr/lib/samurai/interventions/* /mnt/usr/lib/samurai/interventions/ 2>/dev/null || true
@@ -219,7 +233,37 @@ SAMURAI_AUTOKEY=$AUTOKEY
 EOF
 chmod 644 /mnt/etc/samurai-install-env
 log "running samurai-postinstall"
-arch-chroot /mnt /usr/local/bin/samurai-postinstall /var/lib/samurai/install-profile.toml 2>&1 | tee -a "$LOG"
+arch-chroot /mnt env SAMURAI_CHROOT=1 /usr/local/bin/samurai-postinstall /var/lib/samurai/install-profile.toml 2>&1 | tee -a "$LOG"
+
+### first snapshot: install-complete (spec 06). Created LIVE-side: the install
+### chroot has no snapper daemon (and "/" isn't a mountpoint there), so the
+### snap-pac hooks fire during no transaction and a fresh install would have
+### ZERO snapshots — the rescue/rollback path (M4) depends on this one.
+### Layout matches snapper: /@snapshots/<num>/{info.xml,snapshot-subvol}.
+if [ -d /mnt/.snapshots ] && mountpoint -q /mnt/.snapshots; then
+    # NOTE: grep exits 1 when no numbered dirs exist (fresh install) — without
+    # "|| true" that status kills this set -e script silently (seen 2026-11-18:
+    # driver died right after postinstall with no message).
+    NEXTID=$(ls -1 /mnt/.snapshots 2>/dev/null | grep -E '^[0-9]+$' | sort -n | tail -1 || true)
+    NEXTID=$(( ${NEXTID:-0} + 1 ))
+    log "snapshots: creating install-complete snapshot #$NEXTID"
+    mkdir -p "/mnt/.snapshots/$NEXTID"
+    btrfs subvolume snapshot -r /mnt "/mnt/.snapshots/$NEXTID/snapshot" 2>&1 | tee -a "$LOG" \
+        || die "install-complete snapshot failed"
+    cat > "/mnt/.snapshots/$NEXTID/info.xml" <<EOF
+<?xml version="1.0"?>
+<snapshot>
+  <type>single</type>
+  <num>$NEXTID</num>
+  <date>$(date '+%Y-%m-%d %H:%M:%S')</date>
+  <uid>0</uid>
+  <desc>install-complete</desc>
+  <cleanup>number</cleanup>
+</snapshot>
+EOF
+else
+    log "WARNING: /mnt/.snapshots not mounted — skipping install-complete snapshot"
+fi
 
 log "install complete; unmounting"
 umount -R /mnt

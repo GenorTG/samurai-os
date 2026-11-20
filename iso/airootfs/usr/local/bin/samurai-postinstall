@@ -21,7 +21,7 @@ p = tomllib.loads(open(sys.argv[1]).read())
 s, b = p.get("system", {}), p.get("boot", {})
 print(s.get("hostname", "samurai"), s.get("timezone", "UTC"),
       s.get("locale", "en_US.UTF-8"), s.get("keyboard", "us"),
-      " ".join(b.get("kernels", ["linux"])), b.get("bootloader", "systemd-boot"))
+      " ".join(b.get("kernels", ["linux"])), b.get("bootloader", "limine"))
 PY
 ) || exit 1
 read -r UNAME USHELL UPWHASH < <(python3 - "$PROFILE" <<'PY'
@@ -108,18 +108,7 @@ EOF
 chmod 440 /etc/sudoers.d/10-wheel
 visudo -c -q || { rm -f /etc/sudoers.d/10-wheel; log "FATAL: sudoers check failed"; exit 1; }
 
-### mkinitcpio + bootloader ###
-HOOKS="base systemd autodetect modconf kms keyboard sd-vconsole block filesystems fsck"
-MODULES=""
-[ "$ENCRYPT" -eq 1 ] && HOOKS="base systemd autodetect modconf kms keyboard sd-vconsole sd-encrypt block filesystems fsck" && MODULES="vfat nls_cp437 nls_ascii"
-mkdir -p /etc/mkinitcpio.conf.d
-{
-    printf 'HOOKS=(%s)\n' "$HOOKS"
-    [ -n "$MODULES" ] && printf 'MODULES=(%s)\n' "$MODULES"
-    if [ "$ENCRYPT" -eq 1 ] && [ "$AUTOKEY" -eq 1 ]; then
-        printf 'FILES=(/etc/cryptsetup-keys.d/samurai-root.key)\n'
-    fi
-} > /etc/mkinitcpio.conf.d/10-samurai.conf
+### mkinitcpio (hooks are written pre-pacstrap by the driver) ###
 for k in $KERNELS; do
     log "mkinitcpio for $k"
     mkinitcpio --preset "$k" 2>&1 || log "mkinitcpio exited nonzero for $k"
@@ -138,11 +127,12 @@ ESP_UUID="${SAMURAI_ESP_UUID:-$ESP_UUID}"
 # no /etc/crypttab: the initramfs unlock (rd.luks.uuid + embedded keyfile)
 # names the mapper luks-<uuid> and the fstab addresses everything by UUID —
 # a crypttab re-open of the same device just produces a failed unit.
-if [ "$BLDR" = "systemd-boot" ]; then
-    log "bootloader: systemd-boot"
-    bootctl --esp-path=/boot install
-    mkdir -p /boot/loader/entries
-    printf 'timeout 5\ndefault %s.conf\n' "$(echo "$KERNELS" | head -1)" > /boot/loader/loader.conf
+if [ "$BLDR" = limine ]; then
+    log "bootloader: Limine (ADR-0003)"
+    # UEFI install via the firmware fallback path; the config lives next to
+    # the binary. boot(): inside the config refers to the ESP.
+    install -d /boot/EFI/BOOT /boot/limine
+    install -m644 /usr/share/limine/BOOTX64.EFI /boot/EFI/BOOT/BOOTX64.EFI
     kopts="root=UUID=$ROOT_UUID rw rootflags=subvol=@ console=tty1 console=ttyS0,115200"
     if [ "$ENCRYPT" -eq 1 ]; then
         # LUKS_UUID comes from the installer env file (cryptsetup luksUUID on
@@ -154,25 +144,148 @@ if [ "$BLDR" = "systemd-boot" ]; then
             kopts="$kopts rd.luks.key=/etc/cryptsetup-keys.d/samurai-root.key"
         fi
     fi
-    for k in $KERNELS; do
-        cat > "/boot/loader/entries/samurai-$k.conf" <<EOF
-title   Samurai OS ($k)
-sort-key samurai-01
-linux   /vmlinuz-$k
-initrd  /initramfs-$k.img
-options $kopts
-EOF
-        log "boot entry $(basename /boot/loader/entries/samurai-$k.conf): $(cat /boot/loader/entries/samurai-$k.conf | tr '\n' ' ')"
-    done
+    {
+        printf 'timeout: 3\n\n'
+        printf '# Samurai OS boot entries (managed by samurai; snapshot\n'
+        printf '# entries are added/removed by the snapshot boot sync)\n'
+        for k in $KERNELS; do
+            printf '/Samurai OS (%s)\n' "$k"
+            printf '    protocol: linux\n'
+            printf '    path: boot():/vmlinuz-%s\n' "$k"
+            printf '    cmdline: %s\n' "$kopts"
+            printf '    module_path: boot():/initramfs-%s.img\n' "$k"
+            printf '\n'
+        done
+    } > /boot/limine/limine.conf
+    log "limine.conf: $(tr '\n' ' ' < /boot/limine/limine.conf)"
     log "fstab: $(tr '\n' ' ' < /etc/fstab)"
+elif [ "$BLDR" = grub ]; then
+    log "bootloader: GRUB (user-selected)"
+    # ESP is mounted at /boot; kernel cmdline matches the Limine branch so the
+    # rescue/rollback path (rd.luks, embedded keyfile) behaves identically.
+    grub_opts="root=UUID=$ROOT_UUID rw rootflags=subvol=@ console=tty1 console=ttyS0,115200"
+    if [ "$ENCRYPT" -eq 1 ]; then
+        [ -n "$LUKS_UUID" ] && grub_opts="$grub_opts rd.luks.uuid=$LUKS_UUID"
+        if [ "$AUTOKEY" -eq 1 ]; then
+            grub_opts="$grub_opts rd.luks.key=/etc/cryptsetup-keys.d/samurai-root.key"
+        fi
+    fi
+    sed -i "s|^GRUB_CMDLINE_LINUX=.*|GRUB_CMDLINE_LINUX=\"$grub_opts\"|" /etc/default/grub
+    sed -i 's|^GRUB_TIMEOUT=.*|GRUB_TIMEOUT=3|' /etc/default/grub
+    grub-install --target=x86_64-efi --efi-directory=/boot \
+        --bootloader-id=SamuraiOS --recheck 2>&1 || { log "FATAL: grub-install failed"; exit 14; }
+    grub-mkconfig -o /boot/grub/grub.cfg 2>&1 | tail -3
+    log "grub.cfg written ($(grep -c menuentry /boot/grub/grub.cfg 2>/dev/null || echo '?') entries)"
+elif [ "$BLDR" = systemd-boot ]; then
+    log "bootloader: systemd-boot (user-selected)"
+    # kernel-install/bootctl: hand-written entries, same cmdline contract
+    bootctl install --esp-path=/boot --no-variables 2>&1 || { log "FATAL: bootctl install failed"; exit 14; }
+    sd_opts="root=UUID=$ROOT_UUID rw rootflags=subvol=@ console=tty1 console=ttyS0,115200"
+    if [ "$ENCRYPT" -eq 1 ]; then
+        [ -n "$LUKS_UUID" ] && sd_opts="$sd_opts rd.luks.uuid=$LUKS_UUID"
+        if [ "$AUTOKEY" -eq 1 ]; then
+            sd_opts="$sd_opts rd.luks.key=/etc/cryptsetup-keys.d/samurai-root.key"
+        fi
+    fi
+    printf 'timeout 3\ndefault @saved\n' > /boot/loader/loader.conf
+    install -d /boot/loader/entries
+    for k in $KERNELS; do
+        {
+            printf 'title   Samurai OS (%s)\n' "$k"
+            printf 'linux   /vmlinuz-%s\n' "$k"
+            printf 'initrd  /initramfs-%s.img\n' "$k"
+            printf 'options %s\n' "$sd_opts"
+        } > "/boot/loader/entries/samurai-$k.conf"
+    done
+    log "systemd-boot entries: $(ls /boot/loader/entries/)"
+elif [ "$BLDR" = refind ]; then
+    log "bootloader: rEFInd (user-selected)"
+    # refind-install in chroot targets the ESP at /boot; kernel autodetect
+    # plus our refind_linux.conf carrying the same cmdline contract
+    refind-install --yes 2>&1 || { log "FATAL: refind-install failed"; exit 14; }
+    rf_opts="root=UUID=$ROOT_UUID rw rootflags=subvol=@ console=tty1 console=ttyS0,115200"
+    if [ "$ENCRYPT" -eq 1 ]; then
+        [ -n "$LUKS_UUID" ] && rf_opts="$rf_opts rd.luks.uuid=$LUKS_UUID"
+        if [ "$AUTOKEY" -eq 1 ]; then
+            rf_opts="$rf_opts rd.luks.key=/etc/cryptsetup-keys.d/samurai-root.key"
+        fi
+    fi
+    printf '%s\n%s\n%s\n' \
+        "\"Boot Samurai OS\" \"$rf_opts\"" \
+        "\"Boot Samurai OS (fallback)\" \"$rf_opts nomodeset\"" \
+        "\"Boot to EFI shell\" \"\"" > /boot/refind_linux.conf
+    log "refind_linux.conf: $(tr '\n' ' ' < /boot/refind_linux.conf)"
 else
-    log "bootloader $BLDR lands with milestone M4 (Limine); systemd-boot kept as M2 fallback"
+    log "bootloader $BLDR is not supported (Limine is the one per ADR-0003)"
+    exit 14
 fi
 
 ### services ###
 log "services"
 systemctl enable qemu-guest-agent.service 2>/dev/null || true
 systemctl enable systemd-networkd.service systemd-resolved.service
+
+### snapshots (spec 06): snapper + snap-pac + maintenance timers ###
+log "snapshots: snapper root config + snap-pac"
+# @snapshots is pre-mounted at /.snapshots by the driver (spec 06 layout: it
+# must survive root-subvol replacement).
+if [ "${SAMURAI_CHROOT:-0}" != 1 ]; then
+    # real system (toolbox-driven re-run): "/" is the @ mountpoint and the
+    # snapper daemon owns the system — swap @snapshots out, create-config,
+    # delete the subvol it makes, remount ours (fstab is authoritative).
+    SWAP_SNAPSHOTS=0
+    if mountpoint -q /.snapshots; then
+        log "snapshots: /.snapshots pre-mounted (@snapshots) — swapping out for create-config"
+        umount /.snapshots || { log "FATAL: cannot unmount /.snapshots"; exit 15; }
+        rmdir /.snapshots
+        SWAP_SNAPSHOTS=1
+    fi
+    if ! snapper -c root create-config / 2>&1; then
+        log "FATAL: snapper create-config failed — no rollback support"
+        exit 15
+    fi
+    if [ "$SWAP_SNAPSHOTS" -eq 1 ]; then
+        btrfs subvolume delete /.snapshots 2>&1 | log || true  # the redundant one snapper just made
+        mkdir -p /.snapshots
+        mount /.snapshots || { log "FATAL: remount of @snapshots failed"; exit 15; }
+    fi
+    snapper -c root set-config 'TIMELINE_CREATE="no"' \
+        'NUMBER_LIMIT="20"' 'NUMBER_LIMIT_IMPORTANT="10"' \
+        'EMPTY_PRE_POST_CLEANUP="yes"' || log "WARNING: snapper set-config failed"
+else
+    # chroot (install): NEVER use `snapper create-config` here. Three layers
+    # of failure observed 2026-11-18: (1) "/" is not a mountpoint in the
+    # kernel's view inside a chroot; (2) --root + --no-dbus still detects the
+    # live env's overlay fstype and refuses; (3) even with the right
+    # mountpoint passed, the CLI stores configs in the LIVE /etc, not the
+    # target. A snapper config is a plain key-value file: write it from the
+    # shipped template. @snapshots stays mounted — no swap.
+    if [ ! -f /etc/snapper/configs/root ]; then
+        log "snapshots: writing root config from template (chroot-safe)"
+        mkdir -p /etc/snapper/configs
+        sed -e 's|^FSTYPE=.*|FSTYPE="btrfs"|' \
+            -e 's|^SUBVOLUME=.*|SUBVOLUME="/"|' \
+            -e 's|^TIMELINE_CREATE=.*|TIMELINE_CREATE="no"|' \
+            -e 's|^NUMBER_LIMIT=.*|NUMBER_LIMIT="20"|' \
+            -e 's|^NUMBER_LIMIT_IMPORTANT=.*|NUMBER_LIMIT_IMPORTANT="10"|' \
+            -e 's|^EMPTY_PRE_POST_CLEANUP=.*|EMPTY_PRE_POST_CLEANUP="yes"|' \
+            /usr/share/snapper/config-templates/default > /etc/snapper/configs/root \
+            || { log "FATAL: cannot write snapper root config"; exit 15; }
+    fi
+    [ -d /.snapshots ] || mkdir -p /.snapshots
+    mountpoint -q /.snapshots \
+        || log "WARNING: /.snapshots not mounted in-chroot (fstab mounts @snapshots at boot)"
+fi
+# snap-pac 3.x discovers snapper configs on its own (no /etc/snap-pac.conf)
+# pacman transactions: the important ones (kernel/systemd/glibc) get marked
+# important so their pre/post pairs survive cleanup (spec 06)
+install -d /etc/pacman.d/hooks
+printf '%s\n' '[Trigger]' 'Operation = Install' 'Operation = Upgrade' \
+    'Type = Package' 'Target = linux*' 'Target = systemd' 'Target = glibc' '' \
+    '[Action]' 'When = PreTransaction' 'Exec = /usr/bin/sh -c "snapper -c root set-description $(snapper -c root list | awk "END{print $1}") important 2>/dev/null || true"' \
+    > /etc/pacman.d/hooks/10-samurai-important-snap.hook
+systemctl enable snapper.timer snapper-cleanup.timer 2>&1 | log || true
+systemctl enable fstrim.timer 2>&1 | log || true
 # network config lives on the ISO, not in the pacstrap'd target (learned: the
 # updater's preflight died on "no network"). Write the basic DHCP config:
 mkdir -p etc/systemd/network

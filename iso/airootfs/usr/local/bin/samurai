@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# samurai — CLI dispatcher (spec 01/04/06: one entry point, subcommand tools).
+# M4: thin shim over the stage tools; the Rust CLI (M5+) replaces this file
+# with the real binary behind the same interface.
+set -euo pipefail
+
+cmd="${1:-help}"; shift 2>/dev/null || true
+
+case "$cmd" in
+    snap)    exec /usr/local/bin/samurai-snap "$@" ;;
+    rescue)  exec /usr/local/bin/samurai-rescue "$@" ;;
+    update)  exec /usr/local/bin/samurai-update "$@" ;;
+    version) printf 'samurai (shim) 0.1.0\n' ;;
+    help|*)
+        cat <<'EOF'
+usage: samurai <command> [args]
+
+  update      staged system update (spec 03)
+  snap        snapshot manager (spec 06): list/create/delete/diff/repair/rollback
+  rescue      recovery tool (spec 06): mount/chroot/bootloader/initramfs/kernel/rollback
+  version     print the CLI version
+EOF
+        [ "$cmd" = help ] && exit 0 || exit 2
+        ;;
+esac

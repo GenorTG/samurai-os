@@ -1,0 +1,279 @@
+#!/usr/bin/env bash
+# samurai rescue — recovery tool for the installed system AND the live ISO
+# (spec 06). Runs from the live ISO: finds our install, unlocks LUKS, mounts
+# the subvolume layout, chroots with the toolbox available.
+#
+# RULE (spec 06): rescue never formats anything and never writes outside the
+# selected install's partitions.
+set -euo pipefail
+export LC_ALL=C
+
+MOUNT_DIR=/mnt
+log() { printf '%s %s\n' "$(date -Is)" "$*"; }
+die() { printf 'FATAL: %s\n' "$*" >&2; exit "${2:-1}"; }
+
+cmd="${1:-mount}"; shift 2>/dev/null || true
+
+find_install() {
+    # find the Samurai root: btrfs with a /@ subvolume, LUKS container optional.
+    # An encrypted install hides its btrfs until unlocked — so when we find a
+    # LUKS candidate and no bare btrfs, unlock it HERE (ESP keyfile affordance,
+    # then passphrase) and use the mapper. Before this fix the scan ran before
+    # any unlock and always died with "no btrfs install found" on encrypted
+    # disks (seen 2026-11-18 in the M4 rollback scenario).
+    local cand
+    for cand in /dev/vd*[0-9] /dev/nvme*n*[0-9] /dev/sd*[0-9]; do
+        [ -b "$cand" ] || continue
+        if cryptsetup isLuks "$cand" 2>/dev/null; then
+            CRYPT_DEV="$cand"
+        elif btrfs filesystem show "$cand" >/dev/null 2>&1; then
+            BTRFS_DEV="$cand"
+        fi
+    done
+    if [ -n "${CRYPT_DEV:-}" ] && [ -z "${BTRFS_DEV:-}" ]; then
+        if cryptsetup status samurai-root >/dev/null 2>&1; then
+            BTRFS_DEV=/dev/mapper/samurai-root
+        else
+            espdev=$(find_esp)
+            keyfile=""
+            if [ -n "${espdev:-}" ]; then
+                mkdir -p /esp
+                # /esp may still be mounted from an earlier rescue mount in
+                # this session: a plain remount fails with EBUSY, silently
+                # emptying keyfile and leaving cryptsetup prompting on the
+                # console forever under QGA (2026-11-20, rollback flake)
+                mountpoint -q /esp || mount "/dev/$espdev" /esp 2>/dev/null || true
+                [ -f /esp/keys/samurai.key ] && keyfile=/esp/keys/samurai.key
+            fi
+            if [ -n "$keyfile" ] && [ -f "$keyfile" ]; then
+                cryptsetup open "$CRYPT_DEV" samurai-root --key-file "$keyfile" \
+                    || cryptsetup open "$CRYPT_DEV" samurai-root || die "LUKS unlock failed"
+            else
+                cryptsetup open "$CRYPT_DEV" samurai-root || die "LUKS unlock failed"
+            fi
+            BTRFS_DEV=/dev/mapper/samurai-root
+        fi
+    fi
+    [ -n "${BTRFS_DEV:-}" ] || die "no btrfs install found (is the disk attached?)"
+    log "btrfs install: $BTRFS_DEV (LUKS container: ${CRYPT_DEV:-none})"
+}
+
+# Resolve the ESP device: the EFI partition on the same disk as the install.
+# For encrypted installs probe the LUKS CONTAINER (CRYPT_DEV — a partition, so
+# lsblk PKNAME works); the mapper device has an EMPTY PKNAME, which made
+# parent="" and the next lsblk target "/dev/" — a failing lsblk under
+# `set -euo pipefail` then killed the script silently (2026-11-18: rollback
+# died right after "remounting the restored root"). Every lsblk is guarded.
+find_esp() {
+    local probe parent esp
+    if [ -n "${CRYPT_DEV:-}" ]; then
+        probe="$CRYPT_DEV"
+    else
+        probe="${ROOTDEV:-}"
+    fi
+    [ -n "$probe" ] || return 0
+    # Anchor the PKNAME lookup on the device's own row: with -l, a freshly
+    # unlocked LUKS container also lists its dm child, and head -1 grabbed
+    # that row instead (parent=vda2 → no EFI child → empty ESP, 2026-11-18).
+    # NOTE: match the BASENAME — lsblk's NAME column has no /dev/ prefix.
+    parent=$(lsblk -lno NAME,PKNAME "$probe" 2>/dev/null \
+        | awk -v p="${probe##*/}" '$1==p {print $2; exit}' || true)
+    [ -n "$parent" ] || return 0
+    esp=$(lsblk -lno NAME,PARTTYPENAME "/dev/$parent" 2>/dev/null | awk '$2 ~ /EFI/ {print $1; exit}' || true)
+    printf '%s' "$esp"
+}
+
+mount_install() {
+    find_install
+    if [ -n "${CRYPT_DEV:-}" ]; then
+        if cryptsetup status samurai-root >/dev/null 2>&1; then :; else
+            # the ESP may carry the unlock key (VM-test affordance / first-boot
+            # state before TPM enrolment). Try it before asking for a passphrase.
+            espdev=$(find_esp)
+            keyfile=""
+            if [ -n "${espdev:-}" ]; then
+                mkdir -p /esp
+                # same /esp-already-mounted guard as in find_install: a silent
+                # EBUSY here empties keyfile and cryptsetup prompts forever
+                mountpoint -q /esp || mount "/dev/$espdev" /esp 2>/dev/null || true
+                [ -f /esp/keys/samurai.key ] && keyfile=/esp/keys/samurai.key
+            fi
+            if [ -n "$keyfile" ] && [ -f "$keyfile" ]; then
+                cryptsetup open "$CRYPT_DEV" samurai-root --key-file "$keyfile" \
+                    || cryptsetup open "$CRYPT_DEV" samurai-root || die "LUKS unlock failed"
+            else
+                cryptsetup open "$CRYPT_DEV" samurai-root || die "LUKS unlock failed"
+            fi
+        fi
+        ROOTDEV=/dev/mapper/samurai-root
+    else
+        ROOTDEV="$BTRFS_DEV"
+    fi
+    mkdir -p "$MOUNT_DIR"
+    mount -o subvol=@,compress=zstd:1,noatime "$ROOTDEV" "$MOUNT_DIR"
+    for sub in home root srv cache log tmp containers vm; do
+        mkdir -p "$MOUNT_DIR"/var/"$sub" "$MOUNT_DIR"/.snapshots 2>/dev/null || true
+    done
+    mount -o subvol=@home,compress=zstd:1,noatime "$ROOTDEV" "$MOUNT_DIR"/home 2>/dev/null || true
+    mount -o subvol=@root,noatime "$ROOTDEV" "$MOUNT_DIR"/root 2>/dev/null || true
+    mount -o subvol=@cache,noatime "$ROOTDEV" "$MOUNT_DIR"/var/cache 2>/dev/null || true
+    mount -o subvol=@log,noatime "$ROOTDEV" "$MOUNT_DIR"/var/log 2>/dev/null || true
+    mount -o subvol=@tmp,noatime "$ROOTDEV" "$MOUNT_DIR"/var/tmp 2>/dev/null || true
+    mount -o subvol=@containers,noatime "$ROOTDEV" "$MOUNT_DIR"/var/lib/docker 2>/dev/null || true
+    mount -o subvol=@vm,nodatacow,noatime "$ROOTDEV" "$MOUNT_DIR"/var/lib/libvirt/images 2>/dev/null || true
+    mount -o subvol=@snapshots,noatime "$ROOTDEV" "$MOUNT_DIR"/.snapshots 2>/dev/null || true
+    # the ESP: same disk as the install (see find_esp for why this is not
+    # derived from the mapper's PKNAME)
+    esp=$(find_esp)
+    [ -n "$esp" ] && mount "/dev/$esp" "$MOUNT_DIR"/boot 2>/dev/null || true
+    log "install mounted at $MOUNT_DIR"
+}
+
+case "$cmd" in
+    mount)
+        mount_install
+        echo "install is at $MOUNT_DIR (use 'samurai rescue chroot' to enter it)"
+        ;;
+    unmount|umount)
+        umount -R "$MOUNT_DIR" 2>/dev/null || true
+        cryptsetup close samurai-root 2>/dev/null || true
+        log "unmounted"
+        ;;
+    chroot)
+        mountpoint -q "$MOUNT_DIR"/etc 2>/dev/null || mount_install
+        # the toolbox + rescue tools are available inside (staged on the ESP or
+        # in the target's /usr/local/bin from the install)
+        log "entering chroot at $MOUNT_DIR (exit to return to the live env)"
+        exec arch-chroot "$MOUNT_DIR"
+        ;;
+    bootloader)
+        mount_install
+        # bootloader-aware reinstall: the profile's choice decides the fix
+        # (limine default per ADR-0003; grub/systemd-boot/refind opt-in)
+        if [ -f "$MOUNT_DIR"/boot/limine/limine.conf ]; then
+            log "rescue: reinstalling Limine to the ESP"
+            install -d "$MOUNT_DIR"/boot/EFI/BOOT "$MOUNT_DIR"/boot/limine
+            install -m644 /usr/share/limine/BOOTX64.EFI "$MOUNT_DIR"/boot/EFI/BOOT/BOOTX64.EFI \
+                || die "Limine binary missing from the live env (install the limine package)"
+            log "bootloader reinstalled (config kept; regenerate with 'samurai rescue initramfs' + entry sync)"
+        elif [ -d "$MOUNT_DIR"/boot/grub ] || [ -f "$MOUNT_DIR"/boot/grub/grub.cfg ]; then
+            log "rescue: reinstalling GRUB (target's choice)"
+            arch-chroot "$MOUNT_DIR" bash -c 'grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=SamuraiOS --recheck && grub-mkconfig -o /boot/grub/grub.cfg' \
+                || die "GRUB reinstall failed inside the target"
+        elif [ -d "$MOUNT_DIR"/boot/loader/entries ] || [ -f "$MOUNT_DIR"/boot/loader/loader.conf ]; then
+            log "rescue: reinstalling systemd-boot (target's choice)"
+            arch-chroot "$MOUNT_DIR" bootctl install --esp-path=/boot --no-variables \
+                || die "bootctl install failed inside the target"
+            log "entries kept: $(ls "$MOUNT_DIR"/boot/loader/entries/ 2>/dev/null | tr '\n' ' ')"
+        elif [ -d "$MOUNT_DIR"/boot/EFI/refind ] || [ -f "$MOUNT_DIR"/boot/refind_linux.conf ]; then
+            log "rescue: reinstalling rEFInd (target's choice)"
+            arch-chroot "$MOUNT_DIR" refind-install --yes \
+                || die "refind-install failed inside the target"
+        else
+            die "no recognizable bootloader on the ESP (limine.conf/grub/loader/entries/refind) — install manually"
+        fi
+        ;;
+    initramfs)
+        mount_install
+        log "rescue: regenerating initramfs for every kernel in the target"
+        arch-chroot "$MOUNT_DIR" bash -c 'for p in /etc/mkinitcpio.d/*.preset; do mkinitcpio --preset "$(basename "${p%.preset}")" || true; done'
+        ;;
+    kernel)
+        mount_install
+        log "rescue: reinstalling kernel packages from the target's cache"
+        arch-chroot "$MOUNT_DIR" bash -c '
+            for p in $(grep -E "^Install = " /etc/samurai-install-env 2>/dev/null | cut -d= -f2); do :; done
+            cache=/var/cache/pacman/pkg
+            for k in linux linux-lts linux-zen linux-cachyos; do
+                pkgs=$(ls $cache/$k-*-x86_64.pkg.tar.zst 2>/dev/null | tail -1) || true
+                [ -n "$pkgs" ] && pacman --noconfirm -U "$pkgs" || true
+            done
+        ' || log "kernel reinstall from cache failed; run 'samurai rescue chroot' for manual repair"
+        ;;
+    rollback)
+        mount_install
+        log "rescue: snapshot rollback from outside the system (spec 06)"
+        target="${1:?usage: samurai rescue rollback <snapshot-id>}"
+        snap_path="$MOUNT_DIR/.snapshots/$target/snapshot"
+        [ -d "$snap_path" ] || die "snapshot not found: $snap_path"
+        # Renaming subvolumes needs the btrfs TOPOLOGY view: @ is mounted AT
+        # $MOUNT_DIR, so /mnt/@ does not exist as a path (mv failed with
+        # "cannot stat '/mnt/@'", 2026-11-18). Mount the top-level (id 5)
+        # where @, @snapshots etc. are plain dirs.
+        umount -R "$MOUNT_DIR" 2>/dev/null || true
+        mount -o subvolid=5 "$ROOTDEV" "$MOUNT_DIR" || die "cannot mount btrfs top-level"
+        log "rescue: snapshotting current @ as before-rollback"
+        btrfs subvolume snapshot "$MOUNT_DIR/@" "$MOUNT_DIR/@.before-rollback" 2>/dev/null || true
+        ts=$(date +%Y%m%d-%H%M%S)
+        mv "$MOUNT_DIR/@" "$MOUNT_DIR/@-broken-$ts"
+        # NOTE: under the top-level view the snapshots subvol is "@snapshots"
+        # (".snapshots" is only the mountpoint INSIDE @, torn down by the
+        # umount above — using it made the source vanish: "Could not statfs:
+        # No such file or directory", 2026-11-18). Snapshot of an RO source
+        # inherits read-only — clear the flag so the restored system is RW.
+        btrfs subvolume snapshot "$MOUNT_DIR/@snapshots/$target/snapshot" "$MOUNT_DIR/@.rollback-stage"
+        btrfs property set "$MOUNT_DIR/@.rollback-stage" ro false 2>/dev/null \
+            || log "WARNING: could not clear read-only flag on the rollback stage"
+        mv "$MOUNT_DIR/@.rollback-stage" "$MOUNT_DIR/@"
+        log "rescue: remounting the restored root + regenerating its initramfs"
+        umount "$MOUNT_DIR"   # drop the top-level mount before remounting @
+        mount -o subvol=@,compress=zstd:1,noatime "$ROOTDEV" "$MOUNT_DIR"
+        mount -o subvol=@home,compress=zstd:1,noatime "$ROOTDEV" "$MOUNT_DIR"/home 2>/dev/null || true
+        mount -o subvol=@log,noatime "$ROOTDEV" "$MOUNT_DIR"/var/log 2>/dev/null || true
+        mount -o subvol=@cache,noatime "$ROOTDEV" "$MOUNT_DIR"/var/cache 2>/dev/null || true
+        mount -o subvol=@tmp,noatime "$ROOTDEV" "$MOUNT_DIR"/var/tmp 2>/dev/null || true
+        mount -o subvol=@root,noatime "$ROOTDEV" "$MOUNT_DIR"/root 2>/dev/null || true
+        mount -o subvol=@snapshots,noatime "$ROOTDEV" "$MOUNT_DIR"/.snapshots 2>/dev/null || true
+        espdev=$(find_esp)
+        log "rollback: espdev=${espdev:-NONE} (CRYPT_DEV=${CRYPT_DEV:-unset})"
+        if [ -n "$espdev" ]; then
+            mount "/dev/$espdev" "$MOUNT_DIR"/boot 2>/dev/null || true
+        fi
+        if mountpoint -q "$MOUNT_DIR"/boot; then
+            log "rollback: ESP mounted at /mnt/boot"
+        else
+            log "WARNING: rollback: ESP NOT mounted at /mnt/boot — the initramfs regen would write into the root subvol and the restored boot would fail"
+        fi
+        # the ESP is NOT rolled back (kernels/initramfs live there): regenerate
+        # the initramfs for the restored root so the boot matches it (spec 06
+        # step 3). stderr stays visible: its progress/errors land in the
+        # caller's capture (the pytest ROLLBACK-OUT forensics).
+        arch-chroot "$MOUNT_DIR" bash -c 'mkinitcpio --preset linux' \
+            || log "WARNING: initramfs regeneration failed — boot may still be broken"
+        # mkinitcpio writes <img>.tmp then renames; if anything interrupted the
+        # rename, the stale (possibly zeroed) img survives next to the good
+        # .tmp — recover the good image and verify the magic (a zeroed ESP
+        # initramfs made the restored boot panic: Limine refuses to load it,
+        # 2026-11-20)
+        for tmpf in "$MOUNT_DIR"/boot/*.img.tmp; do
+            [ -e "$tmpf" ] || break
+            log "rollback: recovering $(basename "$tmpf") over the stale image"
+            mv "$tmpf" "${tmpf%.tmp}" || log "WARNING: rollback: recovery of $tmpf failed"
+        done
+        magic=$(head -c 4 "$MOUNT_DIR"/boot/initramfs-linux.img 2>/dev/null | od -An -tx1 | tr -d ' \n')
+        case "$magic" in
+            *28b52ffd*|*fd2fb528*) log "rollback: initramfs OK (zstd magic $magic)" ;;
+            *) log "WARNING: rollback: initramfs magic unexpected: ${magic:-none} — the restored boot will fail; run 'samurai rescue initramfs' from the live ISO" ;;
+        esac
+        log "rescue: rollback staged (@-broken-$ts kept). Unmount and reboot."
+        umount -R "$MOUNT_DIR" 2>/dev/null || true
+        cryptsetup close samurai-root 2>/dev/null || true
+        echo "Rollback staged. Reboot now."
+        ;;
+    *)
+        cat <<'EOF'
+usage: samurai rescue {mount|chroot|bootloader|initramfs|kernel|rollback|unmount} [args]
+
+  mount                 find the install, unlock LUKS, mount all subvolumes + ESP
+  chroot                mount + arch-chroot into the install
+  bootloader            reinstall Limine to the ESP (binary; config kept)
+  initramfs             regenerate all initramfs images in the install
+  kernel                reinstall kernel packages from the target's cache
+  rollback <id>         snapshot rollback from outside the system
+  unmount               unmount everything and close the LUKS container
+
+Rule: rescue never formats anything and never writes outside the
+selected install's partitions.
+EOF
+        ;;
+esac

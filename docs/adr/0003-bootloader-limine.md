@@ -14,6 +14,15 @@
 Limine, with kernels on a 2 GiB FAT32 ESP mounted at `/boot`. Snapshot boot via
 `limine-snapper-sync`. Secure Boot via sbctl signing Limine plus `limine-enroll-config`.
 
+## Amendment (2026-11-18): bootloader is a user choice
+
+The installer exposes `[boot].bootloader`: `limine` (default), `grub`, `systemd-boot`, `refind`
+("more modern ones if someone wants" — Genor). All four get the same kernel command line contract
+(`rd.luks.uuid`, embedded keyfile), so rescue/rollback and snapshot boot keep working; only
+`limine-snapper-sync` (snapshot entries in the boot menu) is Limine-exclusive. Secure Boot: best on
+Limine, good on systemd-boot (UKIs later), off by default on GRUB/rEFInd until their signing story
+is worked out. `samurai rescue bootloader` is bootloader-aware (detects the target's config).
+
 ## Why
 It is the only option that gives both snapshot boot (which we copy from Garuda) and a clean Secure
 Boot chain, and CachyOS has proven the combination in daily use.

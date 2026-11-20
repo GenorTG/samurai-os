@@ -1,7 +1,7 @@
 alsa-utils
 amd-ucode
-arch-install-scripts
 archinstall
+arch-install-scripts
 b43-fwcutter
 base
 bcachefs-tools
@@ -50,6 +50,7 @@ less
 lftp
 libfido2
 libusb-compat
+limine
 linux
 linux-firmware
 linux-firmware-marvell
@@ -77,11 +78,11 @@ nilfs-utils
 nmap
 ntfsprogs
 nvme-cli
-open-iscsi
-open-vm-tools
 openconnect
+open-iscsi
 openpgp-card-tools
 openssh
+open-vm-tools
 openvpn
 partclone
 parted
@@ -100,6 +101,8 @@ sdparm
 sequoia-sq
 sg3_utils
 smartmontools
+snap-pac
+snapper
 sof-firmware
 squashfs-tools
 sudo

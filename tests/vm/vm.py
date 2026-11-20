@@ -262,12 +262,26 @@ class VM:
 
     def stop(self) -> None:
         if self.proc:
+            # Graceful first: ACPI powerdown lets the guest unmount + flush.
+            # An abrupt QMP quit killed the guest mid-write-lifecycle and left
+            # the ESP's vfat dirty/inconsistent (a broken cluster chain on the
+            # regen's initramfs, a stale dirty flag, a wrong free-cluster
+            # summary) — the flake behind the rollback regen's "missing"
+            # initramfs and the verify boot's panic (2026-11-20). Panicked or
+            # hung guests ignore ACPI and fall through to quit after the wait.
             try:
-                self.qmp_command("quit")
+                self.qmp_command("system_powerdown")
             except Exception:
-                self.proc.terminate()
+                pass
             try:
-                self.proc.wait(timeout=10)
+                self.proc.wait(timeout=25)
             except subprocess.TimeoutExpired:
-                self.proc.kill()
+                try:
+                    self.qmp_command("quit")
+                except Exception:
+                    self.proc.terminate()
+                try:
+                    self.proc.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    self.proc.kill()
             self.proc = None

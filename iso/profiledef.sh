@@ -28,4 +28,7 @@ file_permissions=(
   ["/usr/local/bin/validate-profile.py"]="0:0:755"
   ["/usr/local/bin/samurai-update"]="0:0:755"
   ["/usr/local/bin/samurai-notifier"]="0:0:755"
+  ["/usr/local/bin/samurai"]="0:0:755"
+  ["/usr/local/bin/samurai-snap"]="0:0:755"
+  ["/usr/local/bin/samurai-rescue"]="0:0:755"
 )

@@ -15,6 +15,25 @@ image="archlinux:base-devel"
 container="samurai-iso-build-$$"
 
 mkdir -p "$out_dir"
+# Sync the live-side tooling into the ISO airootfs. The airootfs files are
+# plain copies; without this step they silently drift from installer/ and
+# updates/ (same stale-state bug class as stale mkarchiso stamps, stale repo
+# db, stale qcow2 — a build would happily ship yesterday's installer).
+bin_dir="$repo_root/iso/airootfs/usr/local/bin"
+lib_dir="$repo_root/iso/airootfs/usr/lib/samurai"
+mkdir -p "$bin_dir" "$lib_dir"
+for f in samurai-install samurai-postinstall validate-profile.py; do
+    cp -f "$repo_root/installer/$f" "$bin_dir/$f"
+done
+for f in samurai samurai-notifier samurai-rescue samurai-snap samurai-update; do
+    cp -f "$repo_root/updates/$f" "$bin_dir/$f"
+done
+for f in samurai-notifier.service samurai-notifier.timer; do
+    cp -f "$repo_root/updates/$f" "$lib_dir/$f"
+done
+chmod 755 "$bin_dir"/samurai-install "$bin_dir"/samurai-postinstall \
+    "$bin_dir"/validate-profile.py "$bin_dir"/samurai "$bin_dir"/samurai-notifier \
+    "$bin_dir"/samurai-rescue "$bin_dir"/samurai-snap "$bin_dir"/samurai-update
 # mkarchiso skips every stamped step when the work dir holds stamps from a
 # previous build — a reused work dir "succeeds" in 2 s and produces NO ISO.
 # (Same bug class: stale repo db in build-repo.sh, stale qcow2 in tests/vm.)

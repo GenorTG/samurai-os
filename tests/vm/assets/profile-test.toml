@@ -21,13 +21,13 @@ auto_unlock_keyfile = true   # TEST AFFORDANCE ONLY: keyfile on ESP for headless
 
 [boot]
 kernels = ["linux"]          # M2 test set; default release profile: ["linux-cachyos", "linux-zen"]
-bootloader = "systemd-boot"  # M2 interim; Limine + snapper boot lands in M4 (ADR-0003)
+bootloader = "limine"        # ADR-0003: Limine + snapshot boot (M4); spike pending for Secure Boot
 
 [user]
 name = "samurai"
 shell = "bash"
 groups = ["wheel"]
-password_hash = "$6$4Po3VQNpDhFEYF5P$SRPzfj/2EPwJiYPDSYaeps918SwaClvNhGwjjzPHN0LP6UoJKrOpiDQ4x7kV7lXLZe5wi3k7fy.dyu7ab0Q7t0"
+password_hash = "$6$dkLqiMB0cNUPvfXu$0cgTfPQGMB2JE5GIfcPUId67LqbnvKIV5.u3tWAAgEiCAROCkFGaji2c/wXvg5ULz8OtTdWP812qWfSl26McE."
 
 [packages]
 # M2 install set: enough for a booting, testable system. Desktop/gaming/dev
