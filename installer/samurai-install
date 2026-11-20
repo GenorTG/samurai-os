@@ -376,22 +376,17 @@ if [ "$DESKTOP" = kde ] && [ -d "$OFFLINE_DIR" ] && compgen -G "$OFFLINE_DIR/*.p
     # signatures were verified when the cache was built; the ISO itself is
     # the trust anchor. -U needs no repos, no sync dbs, no mirrorlist.
     printf '[options]\nSigLevel = Never\nLocalFileSigLevel = Never\nArchitecture = auto\n' > /tmp/pacman-offline.conf
-    # kernel selection: drop baked kernels not chosen in this profile (and
-    # their -headers) so the target only gets what the profile asked for;
-    # the union would install every baked kernel otherwise
+    # kernel selection: drop UNCHOSEN kernels (and their -headers) from the
+    # list; match the exact kernel package names only — a blanket "linux-*"
+    # case would eat linux-firmware and friends (seen 2026-11-20)
     PKG_LIST=()
     for f in "$OFFLINE_DIR"/*.pkg.tar.zst; do
-        b=$(basename "$f")
-        case "$b" in
-            linux-*)
-                keep=0
-                for k in "${KERNEL_ARR[@]}"; do
-                    case "$b" in "$k"-[0-9]*|"$k"-headers-[0-9]*) keep=1 ;; esac
-                done
-                [ "$keep" = 1 ] || continue
-                ;;
-        esac
-        PKG_LIST+=("$f")
+        b=$(basename "$f"); keep=1
+        for k in linux linux-lts linux-zen linux-cachyos linux-cachyos-lts; do
+            case " ${KERNEL_ARR[*]} " in *" $k "*) continue ;; esac
+            case "$b" in "$k"-[0-9]*|"$k"-headers-[0-9]*) keep=0 ;; esac
+        done
+        [ "$keep" = 1 ] && PKG_LIST+=("$f")
     done
     set +e
     pacman --config /tmp/pacman-offline.conf -r /mnt -U --noconfirm "${PKG_LIST[@]}" 2>&1 | TLOG "$LOG"

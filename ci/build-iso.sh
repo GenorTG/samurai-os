@@ -67,10 +67,12 @@ Server = https://repo.smart-samurai.pl/samurai/x86_64
 REPOS
 sed -i "s|^SigLevel.*|SigLevel = Never|" /etc/pacman.conf
 pacman -Sy >/dev/null
-mkdir -p /b/offline-pkgs
-# NO --needed here: the -U target is empty, so the closure must include even
-# packages the container itself already has (bash, glibc, ...)
-pacman -Sw --noconfirm --cachedir /b/offline-pkgs \
+mkdir -p /b/offline-pkgs /tmp/freshdb
+# resolve against an EMPTY db: pacman -Sw skips installed packages, so a
+# plain -Sw would miss everything the build container already has (glibc,
+# bash, coreutils — the -U target is empty and needs them all)
+pacman --dbpath /tmp/freshdb -Sy >/dev/null
+pacman --dbpath /tmp/freshdb -Sw --noconfirm --cachedir /b/offline-pkgs \
     base linux-cachyos linux-zen linux linux-lts linux-firmware mkinitcpio \
     sudo fish zsh python pciutils snapper snap-pac \
     grub limine refind efibootmgr os-prober \
