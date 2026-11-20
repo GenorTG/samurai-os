@@ -197,15 +197,20 @@ print(" ".join(p.get("boot", {}).get("kernels", ["linux"])),
       p.get("boot", {}).get("bootloader", "limine"))
 PY
 ) || die "profile read failed"
+# word-split the kernels string into an array: "$KERNELS" quoted would pass
+# "linux zen" as ONE pacstrap target (same bug class as BLDR_PKG below)
+read -r -a KERNEL_ARR <<< "$KERNELS"
 # bootloader package set: limine is default (ADR-0003); grub/systemd-boot/refind
 # opt-in via [boot].bootloader. snapper/snap-pac stay unconditional (snapshots
-# are core, not bootloader-bound).
-BLDR_PKG="limine"
+# are core, not bootloader-bound). ARRAY on purpose: a quoted multi-word
+# string made pacstrap look for a package literally named "grub os-prober
+# efibootmgr" (seen 2026-11-20, first GRUB-path install).
+BLDR_PKGS=(limine)
 case "$BLDR" in
-    grub)         BLDR_PKG="grub os-prober efibootmgr" ;;
-    systemd-boot) BLDR_PKG="efibootmgr" ;;
-    refind)       BLDR_PKG="refind efibootmgr" ;;
-    limine)       BLDR_PKG="limine" ;;
+    grub)         BLDR_PKGS=(grub os-prober efibootmgr) ;;
+    systemd-boot) BLDR_PKGS=(efibootmgr) ;;
+    refind)       BLDR_PKGS=(refind efibootmgr) ;;
+    limine)       BLDR_PKGS=(limine) ;;
     *)            die "unsupported bootloader: $BLDR" ;;
 esac
 
@@ -327,7 +332,7 @@ if [ "$ARCH_MIRROR" != "auto" ] && [ -n "$ARCH_MIRROR" ]; then
     printf 'Server = %s\n' "${ARCH_MIRROR%/}/\$repo/os/\$arch" > /etc/pacman.d/mirrorlist
 fi
 pacman -Sy --noconfirm --needed archlinux-keyring 2>/dev/null || true
-pacstrap -K /mnt base "$KERNELS" linux-firmware mkinitcpio sudo fish python pciutils "$BLDR_PKG" snapper snap-pac 2>&1 | tee -a "$LOG"
+pacstrap -K /mnt base "${KERNEL_ARR[@]}" linux-firmware mkinitcpio sudo fish python pciutils "${BLDR_PKGS[@]}" snapper snap-pac 2>&1 | tee -a "$LOG"
 [ -d /mnt/etc ] || die "pacstrap failed"
 
 # the postinstall runs in the TARGET: bring it + its deps over first
@@ -399,6 +404,10 @@ else
 fi
 
 log "install complete; unmounting"
+# keep the install log on the installed system too (spec 08 forensics: the
+# log previously lived only on the live medium and vanished after reboot)
+mkdir -p /mnt/var/log/samurai
+cp "$LOG" /mnt/var/log/samurai/install.log
 umount -R /mnt
 [ "$DEVICE_ENCRYPT" -eq 1 ] && cryptsetup close "$ROOTMAP"
 log "DONE"

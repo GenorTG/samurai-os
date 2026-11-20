@@ -147,7 +147,7 @@ def test_attended_install(mirror):
                 time.sleep(15)
         assert 'bootloader = "grub"' in out, out[-800:]
         assert "LUKS-OK" in out, out[-800:]
-        assert "install-complete" in out or "DONE" in out, out[-800:]
+        assert "install complete" in out or "DONE" in out, out[-800:]
 
         vm.stop()
     except BaseException:
