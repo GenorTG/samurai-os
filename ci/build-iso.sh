@@ -34,6 +34,48 @@ done
 chmod 755 "$bin_dir"/samurai-install "$bin_dir"/samurai-postinstall \
     "$bin_dir"/validate-profile.py "$bin_dir"/samurai "$bin_dir"/samurai-notifier \
     "$bin_dir"/samurai-rescue "$bin_dir"/samurai-snap "$bin_dir"/samurai-update
+
+### Offline install cache (Genor 2026-11-20): bake the default release
+### profile's full package closure + sync dbs into the ISO, so the default
+### install runs WITHOUT network ("a base version installable without a lot
+### of curls"). Downloaded with SigLevel Never: the ISO itself is the trust
+### anchor (signatures were verified upstream when these repos built).
+### This MUST run before mkarchiso: the cache is injected into the airootfs.
+echo "==> downloading offline install cache (release default set)"
+docker run --rm -v "$out_dir":/b -v "$repo_root":/src:ro "$image" bash -c '
+set -euo pipefail
+pacman-key --init >/dev/null 2>&1
+pacman -Syu --noconfirm >/dev/null
+sed -i -e "s|^#XferCommand = /usr/bin/wget.*||" -e "s|^#XferCommand = /usr/bin/curl.*|XferCommand = /usr/bin/curl -L -C - -f --retry 8 --retry-delay 2 --retry-all-errors -o %o %u|" /etc/pacman.conf
+sed -i "s|^ParallelDownloads.*|ParallelDownloads = 2|" /etc/pacman.conf
+cat >> /etc/pacman.conf <<REPOS
+
+[cachyos]
+Server = https://cdn.cachyos.org/repo/x86_64_v3/\$repo
+
+[samurai]
+Server = https://github.com/GenorTG/samurai-repo/releases/download/x86_64
+Server = https://repo.smart-samurai.pl/samurai/x86_64
+REPOS
+sed -i "s|^SigLevel.*|SigLevel = Never|" /etc/pacman.conf
+pacman -Sy >/dev/null
+mkdir -p /b/offline-pkgs
+# NO --needed here: the -U target is empty, so the closure must include even
+# packages the container itself already has (bash, glibc, ...)
+pacman -Sw --noconfirm --cachedir /b/offline-pkgs \
+    base linux-cachyos linux-zen linux linux-lts linux-firmware mkinitcpio \
+    sudo fish zsh python pciutils snapper snap-pac \
+    grub limine refind efibootmgr os-prober \
+    networkmanager wpa_supplicant qemu-guest-agent archlinux-keyring cachyos-keyring \
+    plasma-meta plasma-wayland-session sddm konsole dolphin kwrite ark gwenview okular \
+    samurai-release samurai-mirrorlist samurai-keyring
+cp /var/lib/pacman/sync/*.db /b/offline-pkgs/
+'
+rm -rf "$repo_root/iso/airootfs/usr/share/samurai/pkg-cache"
+mkdir -p "$repo_root/iso/airootfs/usr/share/samurai/pkg-cache"
+find "$out_dir/offline-pkgs" -maxdepth 1 -type f ! -name '*.sig' \
+    -exec cp {} "$repo_root/iso/airootfs/usr/share/samurai/pkg-cache/" \;
+echo "==> offline cache: $(ls "$repo_root/iso/airootfs/usr/share/samurai/pkg-cache" | wc -l) files"
 # mkarchiso skips every stamped step when the work dir holds stamps from a
 # previous build — a reused work dir "succeeds" in 2 s and produces NO ISO.
 # (Same bug class: stale repo db in build-repo.sh, stale qcow2 in tests/vm.)

@@ -3,6 +3,8 @@ out/
 work/
 *.iso
 *.qcow2
+# baked offline package cache — downloaded at build time, 2+ GB of data
+iso/airootfs/usr/share/samurai/pkg-cache/
 *.pkg.tar.zst
 *.pkg.tar.zst.sig
 target/

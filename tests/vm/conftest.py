@@ -68,6 +68,10 @@ def mirror():
         # release profiles; the harness overrides it to none explicitly)
         profile = _re.sub(r'desktop = "kde"', 'desktop = "none"', profile)
         assert 'desktop = "none"' in profile, "conftest lost its desktop override"
+        # same for kernels: the release default is cachyos+zen; tests stay on
+        # the plain linux kernel
+        profile = _re.sub(r'kernels = \["linux-cachyos", "linux-zen"\]', 'kernels = ["linux"]', profile)
+        assert 'kernels = ["linux"]' in profile, "conftest lost its kernels override"
         tomllib.loads(profile)  # must parse: belt and braces against duplicate tables
         m.dir.mkdir(parents=True, exist_ok=True)
         (m.dir / "profile-test.toml").write_text(profile)

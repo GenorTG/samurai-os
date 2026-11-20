@@ -77,11 +77,11 @@ wizard() {
     read -r -p "  LUKS2 disk encryption [Y/n]: " enc
     case "$enc" in n|N) WIZ_ENC=false ;; *) WIZ_ENC=true ;; esac
 
-    # kernels (multi-select). Default = linux only: it is what THIS medium
-    # can install (Arch repos; CachyOS/zen keys arrive on the release ISO —
-    # flip the default to "1 2" then, matching the release profile).
+    # kernels (multi-select). Default = the release default (ADR-0001):
+    # linux-cachyos + linux-zen — the ISO now ships the [cachyos] repo and
+    # the baked offline cache covers both
     echo "  Kernels: 1) linux-cachyos  2) linux-zen  3) linux  4) linux-lts  5) linux-cachyos-lts"
-    read -r -p "  Numbers, space-separated [3]: " ksel; ksel=${ksel:-3}
+    read -r -p "  Numbers, space-separated [1 2]: " ksel; ksel=${ksel:-1 2}
     WIZ_KERNELS=""
     for k in $ksel; do
         case "$k" in
@@ -153,7 +153,7 @@ wizard() {
         printf '[user]\nname = "%s"\nshell = "%s"\ngroups = ["wheel"]\nroot_locked = true\n' \
             "$WIZ_USER" "$WIZ_SHELL"
         [ -n "$WIZ_PWHASH" ] && printf 'password_hash = "%s"\n' "$WIZ_PWHASH"
-        printf '\n[packages]\ndesktop = "%s"\ninstall = [\n    "samurai-release",\n    "samurai-mirrorlist",\n    "samurai-keyring",\n    "qemu-guest-agent",\n]\n\n[repos]\nsamurai = true\ncachyos = false\nchaotic_aur = false\narch_mirror = "auto"\n\n[security]\nfirewall = "none"\nssh_server = false\n' \
+        printf '\n[packages]\ndesktop = "%s"\ninstall = [\n    "samurai-release",\n    "samurai-mirrorlist",\n    "samurai-keyring",\n    "qemu-guest-agent",\n    "networkmanager",\n    "wpa_supplicant",\n]\n\n[repos]\nsamurai = true\ncachyos = true\nchaotic_aur = false\narch_mirror = "auto"\n\n[security]\nfirewall = "none"\nssh_server = false\n' \
             "$WIZ_DESKTOP"
     } > "$WIZ_PROFILE"
     chmod 600 "$WIZ_PROFILE"
@@ -326,7 +326,7 @@ if [ "$DEVICE_ENCRYPT" -eq 1 ] && [ "$AUTOKEY" -eq 1 ]; then
 fi
 
 ### Base install ###
-log "pacstrap base + kernels"
+log "installing base system"
 # archive-pinned installs (spec 11 update-from-archive): the profile's
 # repos.arch_mirror replaces the live mirrorlist so pacstrap AND the target
 # download from the pinned snapshot; the updater rewrites it on first update
@@ -343,9 +343,66 @@ if [ "$ARCH_MIRROR" != "auto" ] && [ -n "$ARCH_MIRROR" ]; then
     # makes it fetch <server>/<repo>.db (the 404 we chased for an hour)
     printf 'Server = %s\n' "${ARCH_MIRROR%/}/\$repo/os/\$arch" > /etc/pacman.d/mirrorlist
 fi
-pacman -Sy --noconfirm --needed archlinux-keyring 2>/dev/null || true
-pacstrap -K /mnt base "${KERNEL_ARR[@]}" linux-firmware mkinitcpio sudo fish python pciutils "${BLDR_PKGS[@]}" snapper snap-pac 2>&1 | tee -a "$LOG"
-[ -d /mnt/etc ] || die "pacstrap failed"
+
+# Desktop choice decides the offline path: the baked cache covers the KDE
+# release default set (Genor 2026-11-20: base version installable without
+# network). Other choices fall back to the network.
+read -r DESKTOP < <(python3 - "$PROFILE" <<'PY'
+import sys, tomllib
+p = tomllib.loads(open(sys.argv[1]).read())
+print(p.get("packages", {}).get("desktop", "kde"))
+PY
+) || die "desktop read failed"
+
+OFFLINE_DIR=/usr/share/samurai/pkg-cache
+OFFLINE_OK=0
+if [ "$DESKTOP" = kde ] && [ -d "$OFFLINE_DIR" ] && compgen -G "$OFFLINE_DIR/*.pkg.tar.zst" >/dev/null; then
+    log "offline install: baked cache present — installing from files (no network)"
+    mkdir -p /mnt/var/lib/pacman
+    # signatures were verified when the cache was built; the ISO itself is
+    # the trust anchor. -U needs no repos, no sync dbs, no mirrorlist.
+    printf '[options]\nSigLevel = Never\nLocalFileSigLevel = Never\nArchitecture = auto\n' > /tmp/pacman-offline.conf
+    # kernel selection: drop baked kernels not chosen in this profile (and
+    # their -headers) so the target only gets what the profile asked for;
+    # the union would install every baked kernel otherwise
+    PKG_LIST=()
+    for f in "$OFFLINE_DIR"/*.pkg.tar.zst; do
+        b=$(basename "$f")
+        case "$b" in
+            linux-*)
+                keep=0
+                for k in "${KERNEL_ARR[@]}"; do
+                    case "$b" in "$k"-[0-9]*|"$k"-headers-[0-9]*) keep=1 ;; esac
+                done
+                [ "$keep" = 1 ] || continue
+                ;;
+        esac
+        PKG_LIST+=("$f")
+    done
+    set +e
+    pacman --config /tmp/pacman-offline.conf -r /mnt -U --noconfirm "${PKG_LIST[@]}" 2>&1 | tee -a "$LOG"
+    PACSTAT=${PIPESTATUS[0]}
+    set -e
+    if [ "$PACSTAT" -eq 0 ]; then
+        OFFLINE_OK=1
+        # -U carries no config: copy the live medium's repo config over so
+        # the installed system updates from the same repos (cachyos + samurai,
+        # ADR-0007)
+        cp /etc/pacman.conf /mnt/etc/pacman.conf
+        mkdir -p /mnt/etc/pacman.d
+        cp -a /etc/pacman.d/. /mnt/etc/pacman.d/ 2>/dev/null || true
+        log "offline install: closure installed from baked cache"
+    else
+        log "offline cache incomplete for this set — falling back to network install over the partial target"
+        # no deletion: pacstrap --needed over the partial -U target completes
+        # whatever the cache missed
+    fi
+fi
+if [ "$OFFLINE_OK" -ne 1 ]; then
+    pacman -Sy --noconfirm --needed archlinux-keyring 2>/dev/null || true
+    pacstrap -K /mnt base "${KERNEL_ARR[@]}" linux-firmware mkinitcpio sudo fish python pciutils "${BLDR_PKGS[@]}" snapper snap-pac 2>&1 | tee -a "$LOG"
+fi
+[ -d /mnt/etc ] || die "install failed (offline and network paths both)"
 
 # the postinstall runs in the TARGET: bring it + its deps over first
 # (same bug class as above: the target has neither the script nor the
@@ -383,7 +440,7 @@ SAMURAI_AUTOKEY=$AUTOKEY
 EOF
 chmod 644 /mnt/etc/samurai-install-env
 log "running samurai-postinstall"
-arch-chroot /mnt env SAMURAI_CHROOT=1 /usr/local/bin/samurai-postinstall /var/lib/samurai/install-profile.toml 2>&1 | tee -a "$LOG"
+arch-chroot /mnt env SAMURAI_CHROOT=1 SAMURAI_OFFLINE=$OFFLINE_OK /usr/local/bin/samurai-postinstall /var/lib/samurai/install-profile.toml 2>&1 | tee -a "$LOG"
 
 ### first snapshot: install-complete (spec 06). Created LIVE-side: the install
 ### chroot has no snapper daemon (and "/" isn't a mountpoint there), so the
