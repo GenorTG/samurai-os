@@ -7,7 +7,7 @@ terminal guided installers fed by Garuda's app catalog, a dev environment (Pytho
 conda, Docker, AI CLIs), GPU setup (CUDA + local gpu-unlock build), and a customised KDE. Everything
 proven in QEMU VMs on genorbox1.
 
-## State (2026-11-17)
+## State (2026-11-20)
 - Specs 00–14, ADR-0001…0008, OPEN-QUESTIONS: **all 11 remaining questions answered** (Genor,
   native form 2026-11-17). Decisions applied to the specs: name Samurai OS confirmed; toolbox
   Qt6/QML; source repo public now (both repos at M1); KDE theme default **Breeze Dark** (Otto,
@@ -26,18 +26,17 @@ proven in QEMU VMs on genorbox1.
   `source=`. Arch python = 3.14.8, cuda 13.4, uv 0.13.
 - Local git only. **GitHub repos approved (public now)** — created at M1 with the signing key.
 
-## Next steps (updated 2026-11-18 after M3)
-1. M0: `ci/build-iso.sh` + VM boot on genorbox1 (QEMU/OVMF).
-2. M1 spike: pacman from GitHub Releases with a throwaway key; create both public repos + signing key.
-3. Check Otto/Scratchy licences before M7a; gpu-unlock hardware validation on stealth-dragon's 3090
-   (fork recipes too) to retire the "untested" labels.
+## Next steps (updated 2026-11-20 after M4)
+1. M5: Rust CLI (`samurai` dispatcher) replacing the shell shim; keep `updates/` shell scripts as its executors until each is ported.
+2. M6/M7: KDE + catalog packages -> then the in-desktop walkthrough (menus, visuals, toolbox) Genor asked for.
+3. Check Otto/Scratchy licences before M7a; gpu-unlock hardware validation on stealth-dragon's 3090 (fork recipes too) to retire the "untested" labels.
 
 ## Commands
 - `bash scripts/install-hooks.sh` (per-commit build number).
 - `python3 -I scripts/import-garuda-catalog.py <setup-wizard.data.ts> catalog/garuda-setup-wizard.toml`
 
 ## Blockers
-- Public repos / real build key: waiting for Genor's OK.
+- None currently. Public repos + signing key live since M1.
 ## M0 done (2026-11-17)
 - `iso/`: archiso 92 releng profile, samurai-ified (name/label/publisher, hostname `samurai`,
   motd + /etc/issue, `kernel_params_x86_64="console=tty1 console=ttyS0,115200"`, serial getty
@@ -112,3 +111,24 @@ proven in QEMU VMs on genorbox1.
   the CDN); the container script is single-quoted — no apostrophes inside it ("pacman's" killed it).
 - Scenarios green: test_update.py (intervention fires once, idempotent) +
   test_update_archive.py (2026/08/15 -> today, ~660 MiB backlog, boots healthy).
+
+## M4 done (2026-11-20)
+- Rollback scenario GREEN: unattended install -> initramfs corrupted (verified) -> boot fails ->
+  live-ISO `samurai rescue rollback <snap>` -> reboot -> healthy system, `1 passed in 548.76s`.
+  Root cause of the earlier flakes: abrupt QMP `quit` killed guests mid-write; `vm.stop()` now does
+  ACPI `system_powerdown`, waits for flush, falls back to quit/kill. Rescue script also got an
+  /esp already-mounted guard, `.img.tmp` recovery and a zstd magic gate.
+- Attended (guided) installer GREEN: `samurai-install` with no --profile runs the wizard —
+  requirements, disk pick (lsblk TYPE=disk only), hostname, two-level timezone, LUKS2 on/off,
+  kernel multi-select (default = linux until the release ISO ships CachyOS keys), bootloader
+  choice (limine/grub/systemd-boot/refind), user + shell + password (openssl passwd -6 hash only).
+  Falls through to the validated unattended backend unchanged. `test_attended_install 1 passed
+  in 327.81s`: wizard -> LUKS2 passphrase -> GRUB install -> boot passphrase -> fish login as the
+  created user -> hostname/GRUB/btrfs/LUKS/profile/log asserts.
+- Bugs the test cycle caught: pacstrap quoted multi-word targets ("grub os-prober efibootmgr"),
+  CD-ROM offered as an erase target, install log only on the live medium (now copied into the
+  target), QGA chardev single-client (close GuestAgent objects or connect() hangs).
+- vm.py gained `screendump()` (QMP VGA -> PNG) for install-flow screenshots.
+- Commits: 2586cde (rollback GREEN), 7e9a54d (wizard WIP), 622272f (test-cycle fixes), 9a3527c (attended GREEN).
+- Next milestone (M5): the real Rust CLI replacing the shell shim; then M6/M7 desktop + toolbox GUI —
+  the KDE/menus/visuals walkthrough Genor wants needs those packages first.
