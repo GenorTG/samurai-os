@@ -115,10 +115,11 @@ sed -i -e "s|^#XferCommand = /usr/bin/wget.*||" -e "s|^#XferCommand = /usr/bin/c
 # (GPGME No data on sync dbs — seen 2026-11-20 on the Arch CDN)
 sed -i "s|^ParallelDownloads.*|ParallelDownloads = 2|" /etc/pacman.conf
 pacman -S --noconfirm --needed archiso >/dev/null
-# NOTE: no cachyos keyring import here — with SigLevel Required
-# DatabaseOptional the db sig is tolerated when absent, and the TARGET gets
-# its package-verification keys from the baked cachyos-keyring package
-# (a desynced mirror 404s the keyring download — seen 2026-11-20)
+# the cachyos db IS signed: a present sig from an unknown key fails even
+# under DatabaseOptional, and mkarchiso cannot answer the import prompt.
+# Import the keyring from the offline cache (already downloaded via the
+# 4-server fallback — the mirror desyncs, seen 2026-11-20)
+pacman -U --noconfirm /src/build/offline-pkgs/cachyos-keyring-*.pkg.tar.zst >/dev/null
 mkarchiso -v -w /work -o /out /src/iso
 '
 

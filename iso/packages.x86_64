@@ -9,6 +9,7 @@ bind
 bolt
 brltty
 btrfs-progs
+cachyos-keyring
 clonezilla
 cloud-init
 cryptsetup
