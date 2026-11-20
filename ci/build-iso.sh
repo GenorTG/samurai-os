@@ -42,16 +42,21 @@ chmod 755 "$bin_dir"/samurai-install "$bin_dir"/samurai-postinstall \
 ### anchor (signatures were verified upstream when these repos built).
 ### This MUST run before mkarchiso: the cache is injected into the airootfs.
 echo "==> downloading offline install cache (release default set)"
+# stale-state rule: a reused download dir would keep two versions of one
+# package and pacman -U would refuse the pair — purge first
+docker run --rm -v "$out_dir":/b alpine sh -c 'rm -rf /b/offline-pkgs'
 docker run --rm -v "$out_dir":/b -v "$repo_root":/src:ro "$image" bash -c '
 set -euo pipefail
 pacman-key --init >/dev/null 2>&1
 pacman -Syu --noconfirm >/dev/null
-sed -i -e "s|^#XferCommand = /usr/bin/wget.*||" -e "s|^#XferCommand = /usr/bin/curl.*|XferCommand = /usr/bin/curl -L -C - -f --retry 8 --retry-delay 2 --retry-all-errors -o %o %u|" /etc/pacman.conf
+# NOTE: no XferCommand override here — curl -C - (resume) corrupts downloads
+# on the CachyOS CDN ("Unrecognized archive format" on cachyos.db, seen
+# 2026-11-20); the pacman internal downloader fetched it clean in the probe.
 sed -i "s|^ParallelDownloads.*|ParallelDownloads = 2|" /etc/pacman.conf
 cat >> /etc/pacman.conf <<REPOS
 
 [cachyos]
-Server = https://cdn.cachyos.org/repo/x86_64_v3/\$repo
+Server = https://mirror.cachyos.org/repo/\$arch/\$repo
 
 [samurai]
 Server = https://github.com/GenorTG/samurai-repo/releases/download/x86_64
@@ -67,7 +72,7 @@ pacman -Sw --noconfirm --cachedir /b/offline-pkgs \
     sudo fish zsh python pciutils snapper snap-pac \
     grub limine refind efibootmgr os-prober \
     networkmanager wpa_supplicant qemu-guest-agent archlinux-keyring cachyos-keyring \
-    plasma-meta plasma-wayland-session sddm konsole dolphin kwrite ark gwenview okular \
+    plasma-meta sddm konsole dolphin kwrite ark gwenview okular \
     samurai-release samurai-mirrorlist samurai-keyring
 cp /var/lib/pacman/sync/*.db /b/offline-pkgs/
 '
@@ -102,7 +107,9 @@ pacman -Syu --noconfirm >/dev/null
 # (SSL_ERROR_SSL, errno 0) while a single curl works — switch to a curl-based
 # XferCommand with retries and reduce parallelism. (double-quoted seds: this
 # whole script sits inside single quotes)
-sed -i -e "s|^#XferCommand = /usr/bin/wget.*||" -e "s|^#XferCommand = /usr/bin/curl.*|XferCommand = /usr/bin/curl -L -C - -f --retry 8 --retry-delay 2 --retry-all-errors -o %o %u|" /etc/pacman.conf
+sed -i -e "s|^#XferCommand = /usr/bin/wget.*||" -e "s|^#XferCommand = /usr/bin/curl.*|XferCommand = /usr/bin/curl -L -f --retry 8 --retry-delay 2 --retry-all-errors -o %o %u|" /etc/pacman.conf
+# no -C - (resume) in the XferCommand: resumed offsets corrupt files mid-retry
+# (GPGME No data on sync dbs — seen 2026-11-20 on the Arch CDN)
 sed -i "s|^ParallelDownloads.*|ParallelDownloads = 2|" /etc/pacman.conf
 pacman -S --noconfirm --needed archiso >/dev/null
 mkarchiso -v -w /work -o /out /src/iso
