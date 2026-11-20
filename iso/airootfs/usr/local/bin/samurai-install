@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
-# samurai-install — unattended install driver (spec 08). Terminal/Calamares UIs
-# produce the same profile and call this (M2: --profile mode; TUI comes at M5/M7).
+# samurai-install — install driver (spec 08). Attended (guided) mode when run
+# without --profile: asks the profile's questions, writes a validated TOML,
+# then runs the SAME backend. Terminal/Calamares UIs produce the same profile
+# and call this (GUI wrapper comes at M5/M7).
 #
-# Usage: samurai-install --profile FILE [--disk /dev/...] [--yes]
+# Usage: samurai-install [--profile FILE] [--disk /dev/...] [--yes]
+#   no --profile  => attended guided wizard (writes /tmp/samurai-attended.toml)
 # Security posture (Genor 2026-11-17): strict profile validation before any disk
 # is touched; no eval; every value quoted; all output logged for post-mortem.
+# Passwords never enter the profile in plaintext (crypt hash only, or the
+# postinstall generated-password path).
 set -euo pipefail
 
 PROFILE=""
@@ -18,6 +23,132 @@ die() { log "FATAL: $*"; echo "FATAL: $*" >&2; exit 1; }
 mkdir -p /var/log/samurai
 log "samurai-install starting: $*"
 
+### Attended guided wizard (spec 08 Guided mode) ###
+# Asks exactly the questions the profile schema supports; everything it does
+# not ask keeps the profile default. Writes /tmp/samurai-attended.toml and
+# falls through to the validated unattended backend unchanged.
+wizard() {
+    echo
+    echo "  Samurai OS — guided install"
+    echo "  ==========================="
+
+    # requirements (spec 08 page 1): UEFI mandatory; RAM advisory at this set
+    [ -d /sys/firmware/efi/efivars ] || die "attended install requires UEFI boot (this medium booted legacy/BIOS)"
+    memmb=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)
+    [ "$memmb" -lt 3500 ] && die "needs >= 4 GiB RAM (found ${memmb} MiB)"
+    echo "  UEFI boot: yes | RAM: ${memmb} MiB"
+
+    # disk pick: real fixed disks only — lsblk TYPE=="disk" excludes cdrom
+    # (rom), loop, ram and device-mapper; major-number filters are
+    # kernel-dependent (virtio-blk and dm swap major 254; seen 2026-11-20:
+    # -e 254 wiped out /dev/vda itself => "no disks found")
+    echo
+    echo "  Available disks:"
+    mapfile -t disks < <(lsblk -dpno NAME,SIZE,TYPE,MODEL | awk '$3 == "disk"')
+    [ ${#disks[@]} -gt 0 ] || die "no disks found"
+    i=1; for d in "${disks[@]}"; do printf '    %d) %s\n' "$i" "$d"; i=$((i+1)); done
+    read -r -p "  Disk to ERASE [1-${#disks[@]}]: " dnum
+    case "$dnum" in ''|*[!0-9]*) die "invalid disk choice" ;; esac
+    [ "$dnum" -ge 1 ] && [ "$dnum" -le ${#disks[@]} ] || die "invalid disk choice"
+    WIZ_DISK=${disks[$((dnum-1))]%% *}
+    echo "  -> $WIZ_DISK will be ERASED (all data lost)"
+
+    # identity
+    read -r -p "  Hostname [samurai]: " WIZ_HOST; WIZ_HOST=${WIZ_HOST:-samurai}
+    echo "  Timezone regions:"
+    mapfile -t tzregions < <(find /usr/share/zoneinfo -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort)
+    i=1; for r in "${tzregions[@]}"; do printf '    %d) %s\n' "$i" "$r"; i=$((i+1)); done
+    printf '    %d) UTC\n' "$i"; nregions=$i
+    read -r -p "  Region number [UTC]: " trn
+    WIZ_TZ=UTC
+    if [ -n "$trn" ] && [ "$trn" -ge 1 ] && [ "$trn" -lt "$nregions" ]; then
+        region=${tzregions[$((trn-1))]}
+        mapfile -t tzcities < <(find "/usr/share/zoneinfo/$region" -type f -printf '%P\n' | sort)
+        j=1; for c in "${tzcities[@]}"; do printf '    %d) %s\n' "$j" "$c"; j=$((j+1)); done
+        read -r -p "  City number: " cnum
+        case "$cnum" in ''|*[!0-9]*) die "invalid city choice" ;; esac
+        [ "$cnum" -ge 1 ] && [ "$cnum" -le ${#tzcities[@]} ] || die "invalid city choice"
+        WIZ_TZ="$region/${tzcities[$((cnum-1))]}"
+    fi
+    [ -f "/usr/share/zoneinfo/$WIZ_TZ" ] || [ "$WIZ_TZ" = UTC ] || die "bad timezone: $WIZ_TZ"
+
+    # encryption: on by default (spec 08 page 3). The LUKS passphrase itself is
+    # asked later by the backend (masked, confirmed) — the wizard never sees it.
+    read -r -p "  LUKS2 disk encryption [Y/n]: " enc
+    case "$enc" in n|N) WIZ_ENC=false ;; *) WIZ_ENC=true ;; esac
+
+    # kernels (multi-select). Default = linux only: it is what THIS medium
+    # can install (Arch repos; CachyOS/zen keys arrive on the release ISO —
+    # flip the default to "1 2" then, matching the release profile).
+    echo "  Kernels: 1) linux-cachyos  2) linux-zen  3) linux  4) linux-lts  5) linux-cachyos-lts"
+    read -r -p "  Numbers, space-separated [3]: " ksel; ksel=${ksel:-3}
+    WIZ_KERNELS=""
+    for k in $ksel; do
+        case "$k" in
+            1) WIZ_KERNELS="$WIZ_KERNELS linux-cachyos" ;;
+            2) WIZ_KERNELS="$WIZ_KERNELS linux-zen" ;;
+            3) WIZ_KERNELS="$WIZ_KERNELS linux" ;;
+            4) WIZ_KERNELS="$WIZ_KERNELS linux-lts" ;;
+            5) WIZ_KERNELS="$WIZ_KERNELS linux-cachyos-lts" ;;
+            *) die "invalid kernel choice: $k" ;;
+        esac
+    done
+    [ -n "$WIZ_KERNELS" ] || die "pick at least one kernel"
+
+    # bootloader (spec 08 page 5a; Limine default per ADR-0003)
+    echo "  Bootloader: 1) Limine (default)  2) GRUB  3) systemd-boot  4) rEFInd"
+    read -r -p "  Choice [1]: " bsel; bsel=${bsel:-1}
+    case "$bsel" in
+        1) WIZ_BLDR=limine ;; 2) WIZ_BLDR=grub ;; 3) WIZ_BLDR=systemd-boot ;; 4) WIZ_BLDR=refind ;;
+        *) die "invalid bootloader choice" ;;
+    esac
+
+    # user
+    read -r -p "  Username [samurai]: " WIZ_USER; WIZ_USER=${WIZ_USER:-samurai}
+    echo "  Shell: 1) bash  2) fish  3) zsh"
+    read -r -p "  Choice [1]: " ssel; ssel=${ssel:-1}
+    case "$ssel" in 1) WIZ_SHELL=bash ;; 2) WIZ_SHELL=fish ;; 3) WIZ_SHELL=zsh ;; *) die "invalid shell" ;; esac
+    # password: hashed with openssl passwd -6 immediately; plaintext never
+    # reaches the profile file. Empty twice => postinstall generates one and
+    # drops it in /root/initial-credentials (0600).
+    read -r -s -p "  User password (Enter = generate): " p1; echo
+    read -r -s -p "  again: " p2; echo
+    WIZ_PWHASH=""
+    if [ -n "$p1" ]; then
+        [ "$p1" = "$p2" ] || die "passwords do not match"
+        WIZ_PWHASH=$(openssl passwd -6 "$p1")
+    fi
+
+    # summary + last-chance confirm (the backend asks its own Proceed? too)
+    echo
+    echo "  ---------------------------------------------"
+    echo "  ERASE:   $WIZ_DISK (all data lost)"
+    echo "  LUKS2:   $WIZ_ENC"
+    echo "  host:    $WIZ_HOST | tz: $WIZ_TZ"
+    echo "  kernels:$(echo $WIZ_KERNELS) | bootloader: $WIZ_BLDR"
+    echo "  user:    $WIZ_USER ($WIZ_SHELL)"
+    echo "  ---------------------------------------------"
+    read -r -p "  Write this profile and continue? [yes/no]: " go
+    [ "$go" = yes ] || die "aborted at summary"
+
+    WIZ_PROFILE=/tmp/samurai-attended.toml
+    {
+        printf 'version = 1\n\n[system]\nhostname = "%s"\ntimezone = "%s"\nlocale = "en_US.UTF-8"\nkeyboard = "us"\n\n' \
+            "$WIZ_HOST" "$WIZ_TZ"
+        printf '[disk]\ndevice = "%s"\nlayout = "erase"\nfilesystem = "btrfs"\nencryption = %s\nauto_unlock_keyfile = false\n\n' \
+            "$WIZ_DISK" "$WIZ_ENC"
+        printf '[boot]\nkernels = [%s]\nbootloader = "%s"\n\n' \
+            "$(printf '"%s", ' $WIZ_KERNELS | sed 's/, $//')" "$WIZ_BLDR"
+        printf '[user]\nname = "%s"\nshell = "%s"\ngroups = ["wheel"]\nroot_locked = true\n' \
+            "$WIZ_USER" "$WIZ_SHELL"
+        [ -n "$WIZ_PWHASH" ] && printf 'password_hash = "%s"\n' "$WIZ_PWHASH"
+        printf '\n[packages]\ninstall = [\n    "samurai-release",\n    "samurai-mirrorlist",\n    "samurai-keyring",\n    "qemu-guest-agent",\n]\n\n[repos]\nsamurai = true\ncachyos = false\nchaotic_aur = false\narch_mirror = "auto"\n\n[security]\nfirewall = "none"\nssh_server = false\n'
+    } > "$WIZ_PROFILE"
+    chmod 600 "$WIZ_PROFILE"
+    log "wizard wrote $WIZ_PROFILE (disk=$WIZ_DISK enc=$WIZ_ENC bldr=$WIZ_BLDR)"
+    PROFILE=$WIZ_PROFILE
+}
+
 while [ $# -gt 0 ]; do
     case "$1" in
         --profile) PROFILE="${2:?}"; shift 2 ;;
@@ -26,7 +157,9 @@ while [ $# -gt 0 ]; do
         *) die "unknown argument: $1" ;;
     esac
 done
-[ -n "$PROFILE" ] || die "usage: samurai-install --profile FILE [--disk /dev/...] [--yes]"
+if [ -z "$PROFILE" ]; then
+    wizard
+fi
 [ -f "$PROFILE" ] || die "profile not found: $PROFILE"
 
 validator=/usr/local/bin/validate-profile.py

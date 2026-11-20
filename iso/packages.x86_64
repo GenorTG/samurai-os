@@ -28,6 +28,7 @@ ethtool
 exfatprogs
 f2fs-tools
 fatresize
+findutils
 foot-terminfo
 fsarchiver
 ghostty-terminfo
@@ -82,6 +83,7 @@ openconnect
 open-iscsi
 openpgp-card-tools
 openssh
+openssl
 open-vm-tools
 openvpn
 partclone

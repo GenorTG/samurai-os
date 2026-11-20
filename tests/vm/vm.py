@@ -201,6 +201,24 @@ class VM:
         self.send(cmd + "\n")
         return self.wait_for(expect, timeout=timeout)
 
+    def screendump(self, name: str, shots_dir: str | None = None) -> str:
+        """Capture the VGA console as PNG (host-side QMP screendump + convert).
+
+        Note: captures tty1; the serial wizard UI itself lives in the serial
+        log. Returns the PNG path.
+        """
+        import subprocess
+        ppm = str(WORK / f"{name}.ppm")
+        self.qmp_command("screendump", filename=ppm)
+        target_dir = shots_dir or str(pathlib.Path.home() / ".openclaw/workspace/samurai-shots")
+        pathlib.Path(target_dir).mkdir(parents=True, exist_ok=True)
+        png = str(pathlib.Path(target_dir) / f"{name}.png")
+        subprocess.run(
+            ["ffmpeg", "-y", "-loglevel", "error", "-i", ppm, png],
+            check=True, timeout=30,
+        )
+        return png
+
     # --- guest agent ---
     def qga(self, timeout: float = 120.0):
         from qga import GuestAgent  # noqa: local import for sys.path simplicity
