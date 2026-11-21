@@ -14,7 +14,7 @@ snapshots, guided updates and repairs). Website: <https://genortg.github.io/samu
 | Installer | Size | Network during install |
 |-----------|------|------------------------|
 | `samurai-os-<date>-online-x86_64.iso` | ~1.3 GB | required: pulls current packages from the mirrors |
-| `samurai-os-<date>-offline-x86_64.iso` | ~4.3 GB, in parts | none: KDE, kernels and GPU drivers are on the ISO |
+| `samurai-os-<date>-offline-x86_64.iso` | ~4.6 GB, in three parts | none: KDE, kernels and GPU drivers are on the ISO |
 
 GitHub limits release files to 2 GiB, so the offline ISO ships in parts. Put every part and
 `SHA256SUMS` in one folder:

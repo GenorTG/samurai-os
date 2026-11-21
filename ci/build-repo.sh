@@ -78,7 +78,10 @@ for src in /src/pkgbuilds/*/; do
     fi
     chown -R builder "$pkg"
     echo "==> makepkg $pkg"
-    su builder -c "cd /build/$pkg && makepkg -sf --noconfirm"
+    # --nodeps: runtime depends on our own packages (samurai-release ->
+    # samurai-tools) cannot be installed from a repo this very run creates;
+    # none of these packages compile anything, so build deps are not needed
+    su builder -c "cd /build/$pkg && makepkg -df --noconfirm"
     set -- /build/$pkg/*.pkg.tar.zst   # .sig files are created below, in the signing step
     cp -v "$@" "$out64/"
 done

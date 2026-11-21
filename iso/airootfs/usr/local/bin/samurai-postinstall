@@ -205,15 +205,22 @@ case "$FW" in
         [ "$DESKTOP" = kde ] && FW_PKGS+=(plasma-firewall)
         pac -S --noconfirm --needed "${FW_PKGS[@]}" || { log "FATAL: firewall install failed"; exit 17; }
         if [ "$FW" = firewalld ]; then
-            # offline config: firewall-offline-cmd works without the daemon (chroot)
-            firewall-offline-cmd --set-default-zone=public >/dev/null
+            # offline config: firewall-offline-cmd works without the daemon (chroot).
+            # It exits non-zero for no-ops (16 ZONE_ALREADY_SET, 11
+            # ALREADY_ENABLED), so each call is tolerated and the RESULT is checked.
+            fwo() { firewall-offline-cmd "$@" >/dev/null 2>&1 || true; }
+            fwo --set-default-zone=public
             for svc in $(firewall-offline-cmd --zone=public --list-services); do
-                [ "$svc" = dhcpv6-client ] || firewall-offline-cmd --zone=public --remove-service="$svc" >/dev/null
+                [ "$svc" = dhcpv6-client ] || fwo --zone=public --remove-service="$svc"
             done
-            firewall-offline-cmd --zone=public --add-service=dhcpv6-client >/dev/null
-            [ "$SSHD" = yes ] && firewall-offline-cmd --zone=public --add-service=ssh >/dev/null
+            fwo --zone=public --add-service=dhcpv6-client
+            if [ "$SSHD" = yes ]; then fwo --zone=public --add-service=ssh; fi
+            FW_ZONE=$(firewall-offline-cmd --get-default-zone)
+            FW_SVCS=$(firewall-offline-cmd --zone=public --list-services)
+            [ "$FW_ZONE" = public ] || { log "FATAL: firewalld default zone is $FW_ZONE"; exit 17; }
+            case " $FW_SVCS " in *" dhcpv6-client "*) ;; *) log "FATAL: firewalld zone lacks dhcpv6-client"; exit 17 ;; esac
             systemctl enable firewalld.service
-            log "firewall: firewalld, zone public: $(firewall-offline-cmd --zone=public --list-services)"
+            log "firewall: firewalld, zone public: $FW_SVCS"
         else
             ufw default deny incoming >/dev/null 2>&1 || true
             ufw default allow outgoing >/dev/null 2>&1 || true
