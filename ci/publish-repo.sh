@@ -31,7 +31,9 @@ fi
 for pair in "samurai.db.tar.gz samurai.db" "samurai.db.tar.gz.sig samurai.db.sig" \
             "samurai.files.tar.gz samurai.files" "samurai.files.tar.gz.sig samurai.files.sig"; do
     set -- $pair
-    [ -f "$1" ] && cp -f "$1" "$2"
+    # repo-add leaves samurai.db etc. as SYMLINKS to the archives; cp onto the
+    # symlink is "the same file" and fails. Replace the link with a real copy.
+    if [ -f "$1" ]; then rm -f "$2"; cp -f "$1" "$2"; fi
 done
 
 # sanity: db csize must equal the asset file size for every package
@@ -59,7 +61,7 @@ PY
 
 # packages + sigs first (stale ones removed), db/files LAST
 keep=(*.pkg.tar.zst *.pkg.tar.zst.sig)
-existing=$(gh release view "$channel" --repo "$gh_repo" -q '.assets[].name')
+existing=$(gh release view "$channel" --repo "$gh_repo" --json assets -q '.assets[].name')
 for a in $existing; do
     case " ${keep[*]} " in
         *" $a "*) : ;;
