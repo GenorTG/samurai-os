@@ -1,11 +1,113 @@
 # Samurai OS install catalog: our choices on top of catalog/garuda-setup-wizard.toml (spec 08).
 # The graphical installer, the terminal installer, the setup assistant and the toolbox all read
-# these two files. Merge rule: an [[override]] changes fields of a Garuda app by id; [[app]]
-# adds new entries; [[choice]] defines single-select or multi-select groups.
+# these two files; `samurai apps` implements the merge (tests/unit/test_apps_catalog.py).
+# Merge rules:
+#   1. every Garuda [[app]] is loaded as-is (origin garuda; source "repo" = whichever enabled
+#      repository has the package);
+#   2. [[app]] here adds a new entry; reusing an existing id is an error (use [[override]]);
+#   3. [[override]] with an id changes fields of that app (any field except id/origin); an
+#      [[override]] with only a category changes every app of that category; an override that
+#      matches nothing is an error;
+#   4. [[choice]] defines single-select or multi-select groups (installer pages);
+#   5. [[toggle]] defines the installer's default-on sets; [[bundle]] groups apps and toggles
+#      for `samurai apps install @<bundle>` and the install-profile key `[packages] apps`;
+#   6. [[category]] gives display names and order; [package_hints] names the repository a
+#      package needs when it does not resolve (so the message can say "needs [multilib]").
+# Unknown fields or tables are errors: a typo can never silently change what gets installed.
 #
 # source = where the package comes from, checked by CI against the live repos:
 #   arch | multilib | cachyos | chaotic | samurai | flatpak | local-build | user-script
 # Package names were checked against Arch, AUR and Chaotic-AUR on 2026-10-27.
+
+# ---------------------------------------------------------------- categories (display order)
+[[category]]
+id = "browsers"
+name = "Browsers"
+
+[[category]]
+id = "communication"
+name = "Communication"
+
+[[category]]
+id = "mail"
+name = "Mail"
+
+[[category]]
+id = "office"
+name = "Office"
+
+[[category]]
+id = "development"
+name = "Development"
+
+[[category]]
+id = "ai-cli"
+name = "AI command-line tools"
+
+[[category]]
+id = "ai-local"
+name = "Local AI"
+
+[[category]]
+id = "gaming-tools"
+name = "Gaming tools"
+
+[[category]]
+id = "gaming"
+name = "Games"
+
+[[category]]
+id = "graphics"
+name = "Graphics & 3D"
+
+[[category]]
+id = "craft"
+name = "Craft suite"
+
+[[category]]
+id = "video"
+name = "Video"
+
+[[category]]
+id = "audio"
+name = "Audio"
+
+[[category]]
+id = "multimedia"
+name = "Multimedia tools"
+
+[[category]]
+id = "internet"
+name = "Internet & file sharing"
+
+[[category]]
+id = "utilities"
+name = "System utilities"
+
+[[category]]
+id = "virtualization"
+name = "Virtualization"
+
+[[category]]
+id = "pkgmngrs"
+name = "Software stores & package tools"
+
+[[category]]
+id = "inputMethod"
+name = "Input methods"
+
+[[category]]
+id = "other"
+name = "Other"
+
+[[category]]
+id = "kernels"
+name = "Kernels"
+
+[package_hints]
+steam = "multilib"
+lib32-gamemode = "multilib"
+lib32-mangohud = "multilib"
 
 # ---------------------------------------------------------------- single/multi choices
 [[choice]]
@@ -133,7 +235,9 @@ id = "gaming"
 default = true
 packages = [
   "steam", "heroic-games-launcher-bin", "gamemode", "lib32-gamemode", "mangohud", "lib32-mangohud",
-  "gamescope", "protontricks", "umu-launcher", "samurai-proton-ge", "proton-cachyos", "samurai-wine",
+  "gamescope", "protontricks", "umu-launcher", "samurai-proton-ge", "proton-cachyos-slr", "samurai-wine",
+  # proton-cachyos-slr: CachyOS split proton-cachyos into -native/-slr (checked 2026-11-21);
+  # the Steam Linux Runtime build is the one Steam lists as a compatibility tool.
 ]
 
 # ---------------------------------------------------------------- new categories
@@ -266,6 +370,142 @@ packages = ["ollama"]          # ollama-cuda / ollama-rocm substituted by the ha
 services = ["ollama.service"]
 source = "arch"
 
+# ---------------------------------------------------------------- samurai additions (2026-11-21, `samurai apps`)
+# Every package below was resolved against core/extra/cachyos/chaotic-aur on 2026-11-21.
+[[app]]
+category = "gaming-tools"
+id = "lutris"
+name = "Lutris (game launcher for Wine, emulators, native games)"
+packages = ["lutris"]
+source = "arch"
+
+[[app]]
+category = "gaming-tools"
+id = "goverlay"
+name = "GOverlay (MangoHud / vkBasalt settings)"
+packages = ["goverlay"]
+source = "arch"
+
+[[app]]
+category = "gaming-tools"
+id = "protonup-qt"
+name = "ProtonUp-Qt (manage Proton/Wine builds)"
+packages = ["protonup-qt"]
+source = "cachyos"
+
+[[app]]
+category = "gaming-tools"
+id = "bottles"
+name = "Bottles (Windows apps in Wine prefixes)"
+packages = ["bottles"]
+source = "chaotic"
+
+[[app]]
+category = "gaming-tools"
+id = "sober"
+name = "Sober (Roblox client)"
+flatpak = "org.vinegarhq.Sober"
+source = "flatpak"
+description = "Flatpak-only upstream; needs Flatpak (samurai apps install flatpak)."
+
+[[app]]
+category = "development"
+id = "neovim"
+name = "Neovim"
+packages = ["neovim"]
+source = "arch"
+
+[[app]]
+category = "development"
+id = "github-cli"
+name = "GitHub CLI (gh)"
+packages = ["github-cli"]
+source = "arch"
+
+[[app]]
+category = "development"
+id = "lazygit"
+name = "lazygit (terminal UI for git)"
+packages = ["lazygit"]
+source = "arch"
+
+[[app]]
+category = "development"
+id = "distrobox"
+name = "Distrobox (other distros in containers)"
+packages = ["distrobox"]
+source = "arch"
+
+[[app]]
+category = "development"
+id = "uv"
+name = "uv (Python packages, tools and versions)"
+packages = ["uv"]
+source = "arch"
+
+[[app]]
+category = "video"
+id = "mpv"
+name = "mpv"
+packages = ["mpv"]
+source = "arch"
+
+[[app]]
+category = "video"
+id = "obs-vkcapture"
+name = "OBS Vulkan/OpenGL game capture"
+packages = ["obs-vkcapture", "lib32-obs-vkcapture"]
+source = "cachyos"
+
+[[app]]
+category = "video"
+id = "v4l2loopback"
+name = "v4l2loopback (OBS virtual camera)"
+packages = ["v4l2loopback-dkms", "v4l2loopback-utils"]
+source = "arch"
+
+[[app]]
+category = "video"
+id = "streamlink"
+name = "Streamlink (watch streams in your player)"
+packages = ["streamlink"]
+source = "arch"
+
+[[app]]
+category = "audio"
+id = "easyeffects"
+name = "EasyEffects (PipeWire audio effects)"
+packages = ["easyeffects"]
+source = "arch"
+
+[[app]]
+category = "utilities"
+id = "htop"
+name = "htop (process viewer)"
+packages = ["htop"]
+source = "arch"
+
+[[app]]
+category = "utilities"
+id = "btop"
+name = "btop (resource monitor)"
+packages = ["btop"]
+source = "arch"
+
+[[app]]
+category = "utilities"
+id = "nvtop"
+name = "nvtop (GPU monitor)"
+packages = ["nvtop"]
+source = "arch"
+
+[[app]]
+category = "pkgmngrs"
+id = "flatpak"
+name = "Flatpak (needed for Flatpak-only apps)"
+packages = ["flatpak"]
+source = "arch"
+
 # ---------------------------------------------------------------- overrides of Garuda entries
 [[override]]
 id = "firefox"
@@ -278,3 +518,97 @@ default = true   # also covered by the docker toggle
 [[override]]
 category = "kernels"
 hidden = true    # the whole Garuda kernels category: kernels come from the "kernels" choice instead
+note = "kernels come from the installer's kernel choice and `samurai kernel`"
+
+# Data fixes found by `samurai apps check` against core/extra/cachyos/chaotic-aur (2026-11-21).
+[[override]]
+id = "intellijIdea"
+name = "IntelliJ IDEA (open-source build)"
+packages = ["intellij-idea-oss"]   # Arch renamed intellij-idea-community-edition
+
+[[override]]
+id = "xtreme"
+packages = ["xdman"]               # xdman-beta-bin is gone; [cachyos] ships xdman
+
+[[override]]
+id = "asian"
+packages = ["noto-fonts-cjk", "adobe-source-han-sans-otc-fonts", "adobe-source-han-serif-otc-fonts", "wqy-zenhei"]
+# asian-fonts is a Garuda-repo meta package; these are its Arch equivalents
+
+[[override]]
+id = "virtualBox"
+packages = ["virtualbox", "virtualbox-host-dkms", "virtualbox-guest-iso"]
+# virtualbox-meta is Garuda-repo only; -dkms because our default kernels are cachyos/zen
+
+[[override]]
+id = "virtManager"
+packages = ["virt-manager", "qemu-desktop", "libvirt", "dnsmasq", "edk2-ovmf", "swtpm"]
+# virt-manager-meta is Garuda-repo only
+
+[[override]]
+id = "genymotion"
+packages = ["genymotion", "virtualbox", "virtualbox-host-dkms"]   # virtualbox-meta: see above
+
+[[override]]
+id = "luanti"
+packages = ["luanti", "luanti-server"]   # Arch [extra] ships Luanti; -git builds are dev snapshots
+
+[[override]]
+id = "firedragonCatppuccin"
+hidden = true
+note = "firedragon-catppuccin is only in Garuda's own repository"
+
+[[override]]
+id = "wire"
+hidden = true
+note = "wire-desktop is no longer packaged in Arch or Chaotic-AUR"
+
+[[override]]
+id = "nitroshare"
+hidden = true
+note = "nitroshare is AUR-only (not built by Chaotic-AUR)"
+
+[[override]]
+id = "bauh"
+hidden = true
+note = "bauh is AUR-only (not built by Chaotic-AUR)"
+
+# ---------------------------------------------------------------- bundles (`samurai apps install @<id>`)
+# Members that are not available on this system are skipped with a warning, never silently.
+[[bundle]]
+id = "gaming"
+name = "Gaming"
+description = "The installer's gaming set (Steam, Heroic, GameMode, MangoHud, gamescope, Proton) plus Lutris, GOverlay and ProtonUp-Qt."
+toggles = ["gaming"]
+apps = ["lutris", "goverlay", "protonup-qt"]
+
+[[bundle]]
+id = "dev"
+name = "Development"
+description = "Docker + Compose + buildx (installer default set), VS Code (OSS), Neovim, GitHub CLI, lazygit, Distrobox, uv."
+toggles = ["docker"]
+apps = ["visualStudioCodeOss", "neovim", "github-cli", "lazygit", "distrobox", "uv"]
+
+[[bundle]]
+id = "creative"
+name = "Creative"
+description = "Painting, photo, vector, 3D, video and audio editing."
+apps = ["krita", "gimp", "inkscape", "blender", "darktable", "kdenlive", "audacity"]
+
+[[bundle]]
+id = "office"
+name = "Office"
+description = "LibreOffice, Thunderbird, Obsidian, KeePassXC."
+apps = ["libreOfficeFresh", "thunderbird", "obsidian", "keepassXc"]
+
+[[bundle]]
+id = "media"
+name = "Media"
+description = "Video and music players plus HandBrake."
+apps = ["vlc", "mpv", "strawberryPlayer", "handbrake"]
+
+[[bundle]]
+id = "streaming"
+name = "Streaming"
+description = "OBS Studio with game capture and virtual camera, EasyEffects, Streamlink."
+apps = ["obsStudio", "obs-vkcapture", "v4l2loopback", "easyeffects", "streamlink"]

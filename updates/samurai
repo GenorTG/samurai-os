@@ -10,12 +10,14 @@ case "$cmd" in
     snap)    exec /usr/local/bin/samurai-snap "$@" ;;
     rescue)  exec /usr/local/bin/samurai-rescue "$@" ;;
     update)  exec /usr/local/bin/samurai-update "$@" ;;
+    apps)    exec /usr/local/bin/samurai-apps "$@" ;;
     version) printf 'samurai (shim) 0.1.0\n' ;;
     help|*)
         cat <<'EOF'
 usage: samurai <command> [args]
 
   update      staged system update (spec 03)
+  apps        optional apps from the catalog: list/search/info/install/remove/bundles
   snap        snapshot manager (spec 06): list/create/delete/diff/repair/rollback
   rescue      recovery tool (spec 06): mount/chroot/bootloader/initramfs/kernel/rollback
   version     print the CLI version

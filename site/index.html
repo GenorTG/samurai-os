@@ -1,0 +1,689 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Samurai OS — plain Arch Linux with a sharpened edge</title>
+  <meta name="description" content="Samurai OS is a personal Arch Linux based distribution: Arch packages unchanged, a thin signed layer on top, an encrypted btrfs installer, staged pacman updates, snapshots and rescue rollback. Early, VM-tested.">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#ece3d1" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0e1119" media="(prefers-color-scheme: dark)">
+  <link rel="canonical" href="https://genortg.github.io/samurai-os/">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="preload" href="fonts/shippori-mincho-latin-700-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="fonts/ibm-plex-sans-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="styles.css">
+
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Samurai OS">
+  <meta property="og:title" content="Samurai OS — plain Arch Linux with a sharpened edge">
+  <meta property="og:description" content="A personal Arch-based distro: Arch packages unchanged, a thin signed layer on top, encrypted btrfs installs, staged pacman updates and rescue rollback. Early and VM-tested.">
+  <meta property="og:url" content="https://genortg.github.io/samurai-os/">
+  <meta property="og:image" content="https://genortg.github.io/samurai-os/og.jpg">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Samurai OS: an ink ensō crossed by a katana on washi paper">
+  <meta name="twitter:card" content="summary_large_image">
+</head>
+<body>
+  <a class="skip w-btn w-btn-primary" href="#main">Skip to content</a>
+
+  <!-- Inline mark: follows the page's ink and vermilion. -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+    <defs>
+      <filter id="brush" x="-10%" y="-10%" width="120%" height="120%">
+        <feTurbulence type="fractalNoise" baseFrequency="0.06 0.18" numOctaves="2" seed="3"/>
+        <feDisplacementMap in="SourceGraphic" scale="2.6"/>
+      </filter>
+      <symbol id="mark" viewBox="0 0 100 100">
+        <g fill="none" stroke="var(--w-ink)" stroke-linecap="round">
+          <path d="M75 19 A36 36 0 1 0 86 46" stroke-width="8"/>
+          <path d="M75 19 A36 36 0 0 0 56 13" stroke-width="3.5" opacity=".75"/>
+        </g>
+        <path d="M30 70 Q60 44 89 11 Q64 48 33 74 Z" fill="var(--w-accent)" stroke="var(--cut, var(--w-bg))" stroke-width="2.5" paint-order="stroke" stroke-linejoin="round"/>
+        <path d="M28 75 L15 88" stroke="var(--cut, var(--w-bg))" stroke-width="8" stroke-linecap="round"/>
+        <path d="M28 75 L15 88" stroke="var(--w-ink)" stroke-width="4.5" stroke-linecap="round"/>
+        <ellipse cx="30.5" cy="72.5" rx="6.5" ry="2.5" transform="rotate(45 30.5 72.5)" fill="var(--w-accent)" stroke="var(--cut, var(--w-bg))" stroke-width="1.6"/>
+      </symbol>
+      <symbol id="mark-brush" viewBox="0 0 100 100">
+        <g fill="none" stroke="var(--w-ink)" stroke-linecap="round" filter="url(#brush)">
+          <path d="M75 19 A36 36 0 1 0 86 46" stroke-width="8"/>
+          <path d="M75 19 A36 36 0 0 0 56 13" stroke-width="3.5" opacity=".75"/>
+        </g>
+        <path d="M30 70 Q60 44 89 11 Q64 48 33 74 Z" fill="var(--w-accent)" stroke="var(--cut, var(--w-bg))" stroke-width="2.5" paint-order="stroke" stroke-linejoin="round"/>
+        <path d="M28 75 L15 88" stroke="var(--cut, var(--w-bg))" stroke-width="8" stroke-linecap="round"/>
+        <path d="M28 75 L15 88" stroke="var(--w-ink)" stroke-width="4.5" stroke-linecap="round"/>
+        <ellipse cx="30.5" cy="72.5" rx="6.5" ry="2.5" transform="rotate(45 30.5 72.5)" fill="var(--w-accent)" stroke="var(--cut, var(--w-bg))" stroke-width="1.6"/>
+      </symbol>
+    </defs>
+  </svg>
+
+  <div class="status" role="note" aria-label="Project status">
+    <div class="w-container">
+      <strong>Early · personal</strong>
+      <span>One person's daily-driver project. Every feature listed as available passes a VM test; nothing is proven on physical hardware yet. Try it in a VM or on a spare machine.</span>
+    </div>
+  </div>
+
+  <header class="w-header">
+    <div class="w-container bar">
+      <a class="brand" href="#top" aria-label="Samurai OS, back to top">
+        <svg aria-hidden="true"><use href="#mark"/></svg>
+        <span>Samurai OS</span>
+      </a>
+      <nav class="nav-links" aria-label="Main navigation">
+        <a href="#what">What it is</a>
+        <a href="#features">Features</a>
+        <a href="#install">Install</a>
+        <a href="#apps">Apps</a>
+        <a href="#security">Security</a>
+        <a href="#faq">FAQ</a>
+        <a href="#roadmap">Roadmap</a>
+        <a class="w-btn w-btn-primary" href="#download">Download</a>
+      </nav>
+      <details class="nav-menu">
+        <summary class="w-btn w-btn-subtle"><span class="open-label">Menu</span><span class="close-label">Close</span></summary>
+        <nav aria-label="Main navigation (mobile)">
+          <ul>
+            <li><a href="#what">What it is</a></li>
+            <li><a href="#features">Features</a></li>
+            <li><a href="#download">Download</a></li>
+            <li><a href="#install">Install</a></li>
+            <li><a href="#apps">Apps</a></li>
+            <li><a href="#security">Security</a></li>
+            <li><a href="#faq">FAQ</a></li>
+            <li><a href="#roadmap">Roadmap</a></li>
+          </ul>
+        </nav>
+      </details>
+    </div>
+  </header>
+
+  <main id="main">
+    <!-- ============================================================ hero -->
+    <section id="top" class="hero" aria-labelledby="hero-title">
+      <div class="w-grid-lines" aria-hidden="true"></div>
+      <div class="w-container hero-grid">
+        <div>
+          <p class="w-eyebrow">Arch Linux, sharpened</p>
+          <h1 id="hero-title" class="w-display">
+            <span class="name">Samurai OS</span>
+            <span class="tag">Plain Arch with a <span class="w-stroke">keen</span> edge.</span>
+          </h1>
+          <p class="lead">A personal Arch-based distribution. Arch's own packages, untouched, with a thin
+            signed layer on top: an installer that encrypts by default, updates that run through pacman
+            and take a snapshot first, and a rescue path you can walk from the USB stick.</p>
+          <p class="verse">The steel is Arch's. We only fold the edge, oil the blade, and keep a spare in the sheath.</p>
+          <div class="btn-row">
+            <a class="w-btn w-btn-primary" href="#download">
+              <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 20h16"/></svg>
+              Download
+            </a>
+            <a class="w-btn w-btn-subtle" href="#install">Install guide</a>
+            <a class="w-btn w-btn-subtle" href="https://github.com/GenorTG/samurai-os" rel="noopener">Source on GitHub</a>
+          </div>
+          <dl class="facts">
+            <div><dt>0</dt><dd>Arch packages rebuilt or patched</dd></div>
+            <div><dt>2</dt><dd>kernels by default: linux-cachyos + linux-zen</dd></div>
+            <div><dt>LUKS2</dt><dd>full-root encryption, on by default</dd></div>
+            <div><dt>8</dt><dd>VM test scenarios, from boot to rollback</dd></div>
+          </dl>
+        </div>
+
+        <figure class="print-fig">
+          <div class="w-enso" aria-hidden="true"></div>
+          <div class="w-print">
+            <div class="print-sheet">
+              <svg class="mark" role="img" aria-label="The Samurai OS mark: a brushed ensō circle crossed by a katana"><use href="#mark-brush"/></svg>
+              <span class="hanko" aria-hidden="true">VM<br>tested</span>
+              <p class="print-title" aria-hidden="true">Samurai OS</p>
+            </div>
+          </div>
+          <figcaption>Ensō and blade: the circle is Arch, the edge is the thin layer on top.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <!-- ============================================================ what -->
+    <section id="what" class="w-section" aria-labelledby="what-title">
+      <div class="w-container">
+        <div class="section-head">
+          <p class="w-eyebrow">The way</p>
+          <h2 id="what-title" class="w-display">A thin layer on plain Arch</h2>
+          <p class="lead">Upstream does most of the work. Samurai OS configures what Arch and its
+            neighbours already ship, and packages only the few things that are its own.</p>
+        </div>
+        <div class="grid grid-2 mt-l">
+          <article class="w-card w-card-accent" aria-labelledby="is-title">
+            <p class="kind">What it is</p>
+            <h3 id="is-title" class="w-display">Arch underneath, ours on top</h3>
+            <ul class="w-dash">
+              <li>Arch's repositories, unchanged. Kernels, Mesa, NVIDIA and KDE come straight from Arch mirrors.</li>
+              <li>The CachyOS repository for <code>linux-cachyos</code> and its prebuilt NVIDIA modules, placed <em>after</em> Arch's repos, so it can add packages but never replace Arch's.</li>
+              <li>Chaotic-AUR is planned the same way, below Arch (ADR-0007). It arrives with the app catalog and is off in today's installer.</li>
+              <li>One signed repository of our own, <code>[samurai]</code>, built by GitHub Actions and served from GitHub Releases with <code>SigLevel = Required DatabaseRequired</code>. It holds only our tools, configs and meta-packages.</li>
+              <li>pacman is the updater. <code>samurai update</code> wraps one <code>pacman -Syu</code> that takes Arch packages and ours in the same transaction.</li>
+            </ul>
+          </article>
+          <article class="w-card" aria-labelledby="isnot-title">
+            <p class="kind">What it is not</p>
+            <h3 id="isnot-title" class="w-display">No forks, no second path</h3>
+            <ul class="w-dash no">
+              <li>Not a custom kernel. Not a fork or rebuild of Arch packages, and no package ever shadows an Arch one.</li>
+              <li>Not a second package manager, a store or a separate GitHub downloader: partial upgrades are how Arch systems break, so everything goes through pacman.</li>
+              <li>Not an image-based or immutable OS. A classic mutable Arch system, with snapshots.</li>
+              <li>Not for BIOS machines. x86_64 UEFI only.</li>
+              <li>Not finished, and not yet tested on real hardware.</li>
+            </ul>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ======================================================== features -->
+    <section id="features" class="w-section" aria-labelledby="features-title">
+      <div class="w-container">
+        <div class="section-head">
+          <p class="w-eyebrow">The blade today</p>
+          <h2 id="features-title" class="w-display">What already works</h2>
+          <p class="lead">Every item here is exercised by a scenario in the QEMU/KVM test suite before it
+            counts as done. Spec'd but unbuilt work lives in the <a class="w-link" href="#roadmap">Roadmap</a>.</p>
+        </div>
+
+        <ul class="grid grid-3 mt-l">
+          <li>
+            <article class="w-card w-card-accent" aria-labelledby="f-luks">
+              <div class="card-head"><p class="kind">Installer</p><span class="w-seal">VM-tested</span></div>
+              <h3 id="f-luks" class="w-display">Encrypted btrfs by default</h3>
+              <p class="w-muted">LUKS2 full-root encryption, on unless you say no. Inside it, btrfs with a flat
+                subvolume layout: <code>@</code>, <code>@home</code>, <code>@cache</code>, <code>@log</code>,
+                <code>@snapshots</code> and more, so rolling back the system never rolls back your files or logs.
+                A 2 GiB FAT32 ESP is mounted at <code>/boot</code>.</p>
+            </article>
+          </li>
+          <li>
+            <article class="w-card" aria-labelledby="f-guided">
+              <div class="card-head"><p class="kind">Installer</p><span class="w-seal">VM-tested</span></div>
+              <h3 id="f-guided" class="w-display">Guided, or from a profile</h3>
+              <p class="w-muted"><code>samurai-install</code> asks for disk, hostname, timezone, encryption,
+                kernels, bootloader, desktop, user and shell, then writes one validated
+                <code>install-profile.toml</code>. Feed that file back with <code>--profile</code> to install the
+                next machine the same way. A copy stays at <code>/var/lib/samurai/install-profile.toml</code>.</p>
+            </article>
+          </li>
+          <li>
+            <article class="w-card" aria-labelledby="f-kde">
+              <div class="card-head"><p class="kind">Desktop</p><span class="w-seal">VM-tested</span></div>
+              <h3 id="f-kde" class="w-display">KDE Plasma by default</h3>
+              <p class="w-muted">Plasma with SDDM, Konsole, Dolphin, Kate, Ark, Gwenview and Okular, Breeze Dark
+                as the default theme. GNOME, Xfce, LXQt or no desktop can be picked in the wizard, but only KDE is
+                tested.</p>
+            </article>
+          </li>
+          <li>
+            <article class="w-card" aria-labelledby="f-kernels">
+              <div class="card-head"><p class="kind">Boot</p><span class="w-seal">VM-tested</span></div>
+              <h3 id="f-kernels" class="w-display">Two kernels, two sources</h3>
+              <p class="w-muted"><code>linux-cachyos</code> from CachyOS boots by default, <code>linux-zen</code>
+                from Arch sits beside it: one bad upstream release cannot take out both. <code>linux</code>,
+                <code>linux-lts</code> and <code>linux-cachyos-lts</code> are options. Bootloader: Limine by default
+                or GRUB, both tested; systemd-boot and rEFInd are selectable but not yet VM-tested.</p>
+            </article>
+          </li>
+          <li>
+            <article class="w-card" aria-labelledby="f-offline">
+              <div class="card-head"><p class="kind">Installer</p><span class="w-seal">VM-tested</span></div>
+              <h3 id="f-offline" class="w-display">Offline install</h3>
+              <p class="w-muted">The offline ISO carries the whole default package set: KDE Plasma, both kernels
+                and the driver stacks. The test points the package mirror at an address that does not exist,
+                installs anyway, reboots and checks the result, including both kernel and initramfs pairs in
+                <code>/boot</code>.</p>
+            </article>
+          </li>
+          <li>
+            <article class="w-card" aria-labelledby="f-gpu">
+              <div class="card-head"><p class="kind">Hardware</p><span class="w-seal">VM: packages only</span></div>
+              <h3 id="f-gpu" class="w-display">GPU driver stacks</h3>
+              <p class="w-muted">Mesa with Vulkan for AMD and Intel (plus Intel VA-API), Nouveau Vulkan, and the
+                NVIDIA open kernel modules matched to each selected kernel, with <code>nvidia-utils</code>. The
+                suite asserts the packages; no physical GPU has been tested yet.</p>
+            </article>
+          </li>
+          <li>
+            <article class="w-card" aria-labelledby="f-update">
+              <div class="card-head"><p class="kind">Updates</p><span class="w-seal">VM-tested</span></div>
+              <h3 id="f-update" class="w-display">Staged updates and a notifier</h3>
+              <p class="w-muted"><code>samurai update</code> runs preflight checks, refreshes mirrors, shows Arch
+                news and stops on unhandled manual-intervention items, runs scripted fixes (interventions), takes a
+                snapshot, then one <code>pacman -Syu</code>, then checks DKMS, initramfs and boot entries. The
+                notifier, a systemd user timer, counts updates with <code>checkupdates</code> and never installs
+                anything itself.</p>
+            </article>
+          </li>
+          <li>
+            <article class="w-card" aria-labelledby="f-snap">
+              <div class="card-head"><p class="kind">Recovery</p><span class="w-seal">VM-tested</span></div>
+              <h3 id="f-snap" class="w-display">Snapshots and rescue rollback</h3>
+              <p class="w-muted">snapper with snap-pac takes a pre/post pair around every pacman transaction.
+                <code>samurai rescue</code> runs from the live ISO: mount, chroot, reinstall bootloader, rebuild
+                initramfs, reinstall kernels, roll back. The test breaks the initramfs, boots the ISO, rolls back
+                and boots the restored system.</p>
+            </article>
+          </li>
+          <li>
+            <article class="w-card" aria-labelledby="f-vm">
+              <div class="card-head"><p class="kind">Process</p><span class="w-seal">8 scenarios</span></div>
+              <h3 id="f-vm" class="w-display">Proven in a VM first</h3>
+              <p class="w-muted">A headless QEMU/KVM + OVMF harness drives the ISO over serial and the guest
+                agent: ISO boot, default install, guided install, KDE, offline install, rollback, update from an
+                Arch archive snapshot, and an update with an intervention.</p>
+            </article>
+          </li>
+        </ul>
+
+        <div class="grid grid-2 mt-l">
+          <div>
+            <h3 class="w-display" style="font-size:1.35rem">One command, a few subcommands</h3>
+            <p class="w-muted mt-s">The <code>samurai</code> CLI is a small shell dispatcher today; the Rust CLI
+              replaces it behind the same interface (spec 04).</p>
+          </div>
+          <div class="code" data-copy>
+<pre><code><span class="prompt">$ </span>samurai help
+usage: samurai &lt;command&gt; [args]
+
+  update      staged system update
+  snap        list/create/delete/diff/repair/rollback
+  rescue      mount/chroot/bootloader/initramfs/kernel/rollback
+  version     print the CLI version</code></pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ======================================================== download -->
+    <section id="download" class="w-section" aria-labelledby="download-title">
+      <div class="w-container">
+        <div class="section-head">
+          <p class="w-eyebrow">Choose your blade</p>
+          <h2 id="download-title" class="w-display">Download</h2>
+          <p class="lead">Two installers, both x86_64 UEFI. Both are on the
+            <a class="w-link" href="https://github.com/GenorTG/samurai-os/releases/latest" rel="noopener">latest GitHub release</a>,
+            next to a <code>SHA256SUMS</code> file.</p>
+        </div>
+
+        <div class="grid grid-2 mt-l">
+          <article class="w-card dl-card" aria-labelledby="dl-online">
+            <div class="card-head"><p class="kind">Netinstall</p><span class="w-seal quiet">needs network</span></div>
+            <h3 id="dl-online" class="w-display">Online ISO</h3>
+            <p class="size">The smaller download.</p>
+            <ul class="w-dash">
+              <li>Live system plus the installer; packages are fetched during the install.</li>
+              <li>You start on today's versions from Arch, CachyOS and <code>[samurai]</code>.</li>
+              <li>Ethernet connects on its own; Wi-Fi is set up with <code>iwctl</code> in the live console.</li>
+            </ul>
+            <p class="best">Best when the machine has a good connection.</p>
+            <div class="btn-row">
+              <a class="w-btn w-btn-primary" href="https://github.com/GenorTG/samurai-os/releases/latest" rel="noopener">Get the online ISO</a>
+            </div>
+          </article>
+
+          <article class="w-card w-card-accent dl-card" aria-labelledby="dl-offline">
+            <div class="card-head"><p class="kind">Full desktop</p><span class="w-seal">no network needed</span></div>
+            <h3 id="dl-offline" class="w-display">Offline ISO</h3>
+            <p class="size">Several GB, shipped in parts.</p>
+            <ul class="w-dash">
+              <li>KDE Plasma, <code>linux-cachyos</code> + <code>linux-zen</code> and the AMD, Intel, Nouveau and NVIDIA driver packages baked in.</li>
+              <li>Installs with no network at all; run <code>samurai update</code> afterwards.</li>
+              <li>Split into parts because GitHub limits a release file to 2 GiB. Join them before writing.</li>
+            </ul>
+            <p class="best">Best for slow, metered or missing networks.</p>
+            <div class="btn-row">
+              <a class="w-btn w-btn-primary" href="https://github.com/GenorTG/samurai-os/releases/latest" rel="noopener">Get the offline parts</a>
+            </div>
+          </article>
+        </div>
+
+        <div class="grid grid-2 mt-l">
+          <div>
+            <h3 class="w-display" style="font-size:1.35rem">Join the offline parts</h3>
+            <p class="w-muted mt-s">Download every <code>…offline-x86_64.iso.0*</code> part and
+              <code>SHA256SUMS</code> into one folder. The shell sorts the parts in order.</p>
+            <div class="code" data-copy>
+<pre><code>cat samurai-os-*-offline-x86_64.iso.0* &gt; samurai-os-offline-x86_64.iso</code></pre>
+            </div>
+          </div>
+          <div>
+            <h3 class="w-display" style="font-size:1.35rem">Verify before you trust</h3>
+            <p class="w-muted mt-s">Check what you downloaded against the release's checksums.
+              <code>--ignore-missing</code> skips files listed there that you did not download.</p>
+            <div class="code" data-copy>
+<pre><code>sha256sum -c --ignore-missing SHA256SUMS</code></pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================================= install -->
+    <section id="install" class="w-section" aria-labelledby="install-title">
+      <div class="w-container">
+        <div class="section-head">
+          <p class="w-eyebrow">Draw the blade</p>
+          <h2 id="install-title" class="w-display">Install guide</h2>
+          <p class="lead">Requirements: an x86_64 machine booting in UEFI mode, at least 4 GiB of RAM, and a
+            disk you are willing to erase (the guided install wipes the whole disk you pick).</p>
+        </div>
+
+        <ol class="steps mt-l">
+          <li>
+            <h3 class="w-display">Download and verify</h3>
+            <p>Take the online or offline ISO from the <a class="w-link" href="#download">Download</a> section,
+              join the offline parts if you chose that one, and run <code>sha256sum -c</code>.</p>
+          </li>
+          <li>
+            <h3 class="w-display">Write it to a USB stick</h3>
+            <p>Samurai OS is built with archiso, so the ISO is a hybrid image: write it raw to the stick, not as
+              a file. This erases the stick. Find its name with <code>lsblk</code> first.</p>
+            <div class="code" data-copy>
+<pre><code><span class="prompt">$ </span>sudo dd if=samurai-os-offline-x86_64.iso of=/dev/sdX bs=4M status=progress oflag=sync</code></pre>
+            </div>
+            <p class="note">Replace <code>/dev/sdX</code> with the stick, never a partition like <code>/dev/sdX1</code>
+              and never your system disk. Ventoy usually boots archiso images, but it has not been tested with
+              Samurai OS yet.</p>
+          </li>
+          <li>
+            <h3 class="w-display">Boot the stick in UEFI mode</h3>
+            <p>Turn Secure Boot off for the live ISO, as with Arch's own. The live system logs you in on the
+              console. Ethernet connects by itself; for Wi-Fi use <code>iwctl</code>.</p>
+          </li>
+          <li>
+            <h3 class="w-display">Run the guided installer</h3>
+            <p>It checks UEFI and RAM, lists the disks, asks its questions, shows a summary and waits for an
+              explicit <code>yes</code>. The LUKS passphrase is asked twice and never written to the profile.</p>
+            <div class="code" data-copy>
+<pre><code><span class="prompt"># </span>samurai-install</code></pre>
+            </div>
+          </li>
+          <li>
+            <h3 class="w-display">Or reinstall from a saved profile</h3>
+            <p>Reuse an <code>install-profile.toml</code> from a previous install for an identical machine. The
+              profile is validated against a strict allowlist before any disk is touched.</p>
+            <div class="code" data-copy>
+<pre><code><span class="prompt"># </span>samurai-install --profile my.toml --disk /dev/nvme0n1 --yes</code></pre>
+            </div>
+          </li>
+          <li>
+            <h3 class="w-display">Reboot and keep it sharp</h3>
+            <p>Unlock the disk, log in to Plasma, and update whenever you like with <code>samurai update</code>.
+              If a boot ever goes dark, boot the stick again and use <code>samurai rescue</code>.</p>
+          </li>
+        </ol>
+      </div>
+    </section>
+
+    <!-- ============================================================ apps -->
+    <section id="apps" class="w-section" aria-labelledby="apps-title">
+      <div class="w-container">
+        <div class="section-head">
+          <p class="w-eyebrow">The armoury · being built</p>
+          <h2 id="apps-title" class="w-display">Optional apps, at install or any time later</h2>
+          <p class="lead">A <code>samurai apps</code> catalog is being built on top of Garuda's setup-wizard
+            list, imported as data, plus our own additions. The plan: pick apps during the install or any time
+            afterwards, and offer only what resolves to a real repository.</p>
+        </div>
+
+        <h3 class="w-display mt-l" style="font-size:1.35rem">From Garuda's list <span class="w-faint small">(16 categories, 175 apps)</span></h3>
+        <ul class="cat-list mt-s">
+          <li><span>Development</span><span class="n">23</span></li>
+          <li><span>Graphics</span><span class="n">19</span></li>
+          <li><span>Multimedia</span><span class="n">15</span></li>
+          <li><span>Office</span><span class="n">14</span></li>
+          <li><span>Communication</span><span class="n">13</span></li>
+          <li><span>Audio</span><span class="n">12</span></li>
+          <li><span>Browsers</span><span class="n">12</span></li>
+          <li><span>Gaming</span><span class="n">12</span></li>
+          <li><span>Internet</span><span class="n">10</span></li>
+          <li><span>Input methods</span><span class="n">9</span></li>
+          <li><span>Package managers</span><span class="n">7</span></li>
+          <li><span>Video</span><span class="n">7</span></li>
+          <li><span>Kernels</span><span class="n">6</span></li>
+          <li><span>Mail</span><span class="n">6</span></li>
+          <li><span>Other</span><span class="n">6</span></li>
+          <li><span>Virtualization</span><span class="n">4</span></li>
+        </ul>
+
+        <h3 class="w-display mt-m" style="font-size:1.35rem">Samurai additions</h3>
+        <ul class="cat-list mt-s">
+          <li class="ours"><span>Craft suite</span><span class="n">10</span></li>
+          <li class="ours"><span>AI command-line tools</span><span class="n">7</span></li>
+          <li class="ours"><span>Local AI (Ollama)</span><span class="n">1</span></li>
+        </ul>
+        <p class="w-muted mt-m" style="max-width:48rem">The catalog also defines the bigger choices: desktop,
+          kernels, browsers, conda flavour, firewall and reverse proxy, plus toggles for gaming, Docker, Tailscale,
+          NVIDIA CUDA, Python versions and KDE monitor widgets. Firefox is the one browser ticked by default.</p>
+      </div>
+    </section>
+
+    <!-- ======================================================== security -->
+    <section id="security" class="w-section" aria-labelledby="security-title">
+      <div class="w-container">
+        <div class="section-head">
+          <p class="w-eyebrow">The armour</p>
+          <h2 id="security-title" class="w-display">Security</h2>
+          <p class="lead">The goal is secure by default without breaking games, Steam or Proton. Part of the
+            baseline is built; the rest is specified and scheduled.</p>
+        </div>
+        <div class="grid grid-2 mt-l">
+          <article class="w-card w-card-accent" aria-labelledby="sec-now">
+            <div class="card-head"><p class="kind">Built</p><span class="w-seal">today</span></div>
+            <h3 id="sec-now" class="w-display">In every install</h3>
+            <ul class="w-dash">
+              <li>LUKS2 full-root encryption on by default; <code>/boot</code> is the unencrypted ESP.</li>
+              <li>Signed <code>[samurai]</code> repository and database (<code>SigLevel = Required DatabaseRequired</code>); Arch's signing used as is.</li>
+              <li>Root account locked; your user is in <code>wheel</code>.</li>
+              <li>Install profiles are checked against a strict allowlist: no free-form shell, every value quoted, passwords only as crypt hashes.</li>
+              <li>No SSH server unless you ask for one.</li>
+              <li>Signing subkey for publishing kept in a protected CI environment; the primary key stays offline.</li>
+            </ul>
+          </article>
+          <article class="w-card" aria-labelledby="sec-next">
+            <div class="card-head"><p class="kind">Specified</p><span class="w-seal quiet">roadmap · M8</span></div>
+            <h3 id="sec-next" class="w-display">Coming next</h3>
+            <ul class="w-dash no">
+              <li>firewalld enabled with inbound denied, and one-click presets for KDE Connect, Steam, Sunshine and more.</li>
+              <li>Secure Boot with your own keys (sbctl, Microsoft keys kept for option ROMs) and Limine's config checksum enrolled.</li>
+              <li>Optional TPM2 unlock with a PIN by default, plus a one-time recovery key.</li>
+              <li>Kernel and sysctl hardening; AppArmor at boot; unprivileged user namespaces kept for Flatpak, Steam and browser sandboxes.</li>
+              <li>Tailscale in its own firewall zone, so joining a tailnet exposes nothing by itself.</li>
+              <li>An opt-in <code>paranoid</code> profile and <code>samurai security status</code>.</li>
+            </ul>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================= faq -->
+    <section id="faq" class="w-section" aria-labelledby="faq-title">
+      <div class="w-container">
+        <div class="section-head">
+          <p class="w-eyebrow">Questions at the gate</p>
+          <h2 id="faq-title" class="w-display">FAQ</h2>
+        </div>
+        <div class="faq mt-l">
+          <details>
+            <summary>Should I put this on my main machine?</summary>
+            <div class="answer">
+              <p>Not yet. Samurai OS is early and built for one owner first. Everything listed as working passes
+                a VM test, but no physical-hardware test has been run. A VM or a spare machine is the right place.</p>
+            </div>
+          </details>
+          <details>
+            <summary>Why not just use Arch, CachyOS or Garuda?</summary>
+            <div class="answer">
+              <p>The aim is to feel like Garuda (a toolbox that fixes things, snapshots before risky changes, guided
+                updates) and run like CachyOS (hardware detection, performance defaults) while staying as close to
+                plain Arch as possible, so upstream does most of the work. If you are happy with any of those,
+                stay there.</p>
+            </div>
+          </details>
+          <details>
+            <summary>Where do updates come from?</summary>
+            <div class="answer">
+              <p>From Arch's mirrors and CachyOS's repository for upstream packages, and from the signed
+                <code>[samurai]</code> repository on GitHub Releases for our own. All of it in one
+                <code>pacman -Syu</code>, wrapped by <code>samurai update</code>. Nothing else downloads or
+                installs packages.</p>
+            </div>
+          </details>
+          <details>
+            <summary>What if an update breaks the system?</summary>
+            <div class="answer">
+              <p>Every pacman transaction gets a snapshot before and after. If the system no longer boots, boot the
+                USB stick and run <code>samurai rescue rollback</code>. A second kernel from a different repository
+                is also always in the boot menu.</p>
+            </div>
+          </details>
+          <details>
+            <summary>Why is the offline ISO split into parts?</summary>
+            <div class="answer">
+              <p>GitHub release files are limited to 2 GiB each, and the offline image with KDE, two kernels and
+                the driver stacks is larger than that. Join the parts with <code>cat</code> and check them with
+                <code>sha256sum</code> (see <a class="w-link" href="#download">Download</a>).</p>
+            </div>
+          </details>
+          <details>
+            <summary>Does it support BIOS or Secure Boot?</summary>
+            <div class="answer">
+              <p>BIOS/MBR boot is not supported: x86_64 UEFI only. The live ISO boots with Secure Boot off, like
+                Arch's. Secure Boot with your own keys after install is on the roadmap.</p>
+            </div>
+          </details>
+          <details>
+            <summary>What about NVIDIA?</summary>
+            <div class="answer">
+              <p>The installer adds NVIDIA's open kernel modules matched to each kernel you pick, prebuilt for
+                <code>linux-cachyos</code> and the standard Arch kernels, DKMS for the rest. NVIDIA's open modules
+                cover Turing (RTX 20 / GTX 16) and newer; older cards get Nouveau. CUDA and other GPU extras come
+                with a later milestone.</p>
+            </div>
+          </details>
+          <details>
+            <summary>Is there a graphical installer?</summary>
+            <div class="answer">
+              <p>Not yet. Today's installer is the guided terminal wizard and the profile mode. A Calamares-based
+                graphical installer and a KDE live session are on the roadmap; both will write the same install
+                profile.</p>
+            </div>
+          </details>
+          <details>
+            <summary>Can I remove the Samurai layer later?</summary>
+            <div class="answer">
+              <p>That is the design rule: remove our packages and you should still have a working Arch system.
+                Our defaults ship as packages that drop files into vendor directories, and your own changes in
+                <code>/etc</code> and your home are never overwritten silently.</p>
+            </div>
+          </details>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================================= roadmap -->
+    <section id="roadmap" class="w-section" aria-labelledby="roadmap-title">
+      <div class="w-container">
+        <div class="section-head">
+          <p class="w-eyebrow">The road ahead</p>
+          <h2 id="roadmap-title" class="w-display">Roadmap</h2>
+          <p class="lead">Milestones in dependency order. Each one ends with a VM test that proves it. Only
+            the finished ones are available today.</p>
+        </div>
+        <div class="grid grid-2 mt-l">
+          <div>
+          <p class="road-label">Finished</p>
+          <ol class="road">
+            <li class="done">
+              <div class="meta"><h3 class="w-display">Build substrate and signed repo</h3><span class="w-seal">done</span></div>
+              <p>archiso profile built in an Arch container, OVMF boot test, signed <code>[samurai]</code> repo on GitHub Releases.</p>
+            </li>
+            <li class="done">
+              <div class="meta"><h3 class="w-display">Installer and test harness</h3><span class="w-seal">done</span></div>
+              <p>Install profile, LUKS2 + btrfs unattended install, guided wizard, QEMU harness.</p>
+            </li>
+            <li class="done">
+              <div class="meta"><h3 class="w-display">Updates, snapshots, rescue</h3><span class="w-seal">done</span></div>
+              <p>Staged updater, interventions, notifier, snapper + snap-pac, rescue rollback from the live ISO.</p>
+            </li>
+            <li class="done">
+              <div class="meta"><h3 class="w-display">KDE and offline install</h3><span class="w-seal">done</span></div>
+              <p>KDE Plasma default desktop; full offline install with both kernels and the driver stacks.</p>
+            </li>
+          </ol>
+          </div>
+          <div>
+          <p class="road-label">Ahead · not available yet</p>
+          <ol class="road">
+            <li>
+              <div class="meta"><h3 class="w-display">Toolbox CLI</h3><span class="w-seal quiet">next</span></div>
+              <p>The Rust <code>samurai</code> CLI with health checks and fixes, cleaning, diagnostics, firewall and Tailscale pages; app catalog and <code>samurai apps</code>.</p>
+            </li>
+            <li>
+              <div class="meta"><h3 class="w-display">Drivers and developer setup</h3><span class="w-seal quiet">planned</span></div>
+              <p>chwd hardware profiles, CUDA, a local-only gpu-unlock builder; opt-in Python versions, uv, Miniforge, Docker, AI CLIs.</p>
+            </li>
+            <li>
+              <div class="meta"><h3 class="w-display">Desktop ISO and graphical installer</h3><span class="w-seal quiet">planned</span></div>
+              <p>KDE live session, Calamares with catalog pages, a TUI installer, Chaotic-AUR, gaming stack, KDE panels and monitor widgets, snapshot entries in the boot menu.</p>
+            </li>
+            <li>
+              <div class="meta"><h3 class="w-display">Security, GUI toolbox, real hardware</h3><span class="w-seal quiet">planned</span></div>
+              <p>The M8 security baseline, a Qt6/QML toolbox over the same backend, a USB drive writer, then two weeks of daily driving on real machines before v1.0.</p>
+            </li>
+          </ol>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================= cta -->
+    <section class="w-section" aria-labelledby="cta-title">
+      <div class="w-container">
+        <div class="w-noren">
+          <p class="w-eyebrow">Step through the curtain</p>
+          <h2 id="cta-title" class="w-display">Try it in a VM tonight.</h2>
+          <p class="lead">Grab an ISO, give a virtual machine UEFI firmware and 4 GiB of RAM, and run
+            <code>samurai-install</code>. Issues and ideas are welcome on GitHub.</p>
+          <div class="btn-row">
+            <a class="w-btn w-btn-primary" href="https://github.com/GenorTG/samurai-os/releases/latest" rel="noopener">Latest release</a>
+            <a class="w-btn w-btn-subtle" href="https://github.com/GenorTG/samurai-os" rel="noopener">Source and specs</a>
+            <a class="w-btn w-btn-subtle" href="https://github.com/GenorTG/samurai-os/issues" rel="noopener">Issues</a>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="w-footer">
+    <div class="w-container">
+      <div>
+        <a class="brand" href="#top"><svg aria-hidden="true"><use href="#mark"/></svg><span>Samurai OS</span></a>
+        <p class="mt-s">A personal project by Genor. Not affiliated with Arch Linux, CachyOS or Garuda Linux.</p>
+        <p>Built on <a class="w-link" href="https://archlinux.org/" rel="noopener">Arch Linux</a>, with the default
+          kernel from <a class="w-link" href="https://cachyos.org/" rel="noopener">CachyOS</a>. The app catalog
+          imports Garuda Linux's setup-wizard data (GPL-3.0). Arch Linux is a trademark of its owners.</p>
+        <p>Fonts: Shippori Mincho and IBM Plex Sans, SIL Open Font License 1.1
+          (<a class="w-link" href="fonts/shippori-mincho-OFL.txt">Mincho licence</a>,
+          <a class="w-link" href="fonts/ibm-plex-sans-OFL.txt">Plex licence</a>). No trackers, no cookies, no external requests.</p>
+      </div>
+      <ul>
+        <li><a class="w-link" href="https://github.com/GenorTG/samurai-os" rel="noopener">GitHub</a></li>
+        <li><a class="w-link" href="https://github.com/GenorTG/samurai-os/releases" rel="noopener">Releases</a></li>
+        <li><a class="w-link" href="https://github.com/GenorTG/samurai-os/tree/main/docs/specs" rel="noopener">Specs</a></li>
+        <li><a class="w-link" href="https://github.com/GenorTG/samurai-repo" rel="noopener">Package repo</a></li>
+        <li><a class="w-link" href="#top">Back to top</a></li>
+      </ul>
+    </div>
+  </footer>
+
+  <script src="site.js" defer></script>
+</body>
+</html>

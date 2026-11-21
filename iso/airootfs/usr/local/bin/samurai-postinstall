@@ -67,6 +67,13 @@ p = tomllib.loads(open(sys.argv[1]).read())
 print(p.get("packages", {}).get("desktop", "kde"))
 PY
 ) || exit 1
+# catalog apps / @bundles (validated against the catalog allowlist upstream)
+read -r -a APPS < <(python3 - "$PROFILE" <<'PY'
+import sys, tomllib
+p = tomllib.loads(open(sys.argv[1]).read())
+print(" ".join(p.get("packages", {}).get("apps", [])))
+PY
+) || exit 1
 
 ### identity ###
 log "identity: hostname=$HOSTNAME tz=$TZ locale=$LOCALE"
@@ -126,7 +133,11 @@ DM=""
 case "$DESKTOP" in
     kde)
         log "desktop: KDE Plasma (Breeze Dark)"
-        DESKTOP_PKGS=(plasma-meta sddm konsole dolphin kate ark gwenview okular)
+        # day-one desktop: browser, PipeWire sound, screenshots, fonts with
+        # emoji, Flatpak for `samurai apps`, power profiles, Bluetooth
+        DESKTOP_PKGS=(plasma-meta sddm konsole dolphin kate ark gwenview okular
+            firefox pipewire pipewire-pulse pipewire-alsa wireplumber spectacle
+            noto-fonts noto-fonts-emoji flatpak power-profiles-daemon bluez bluez-utils)
         if [ "${SAMURAI_OFFLINE:-0}" = 1 ]; then
             MISSING_DESKTOP=()
             for p in "${DESKTOP_PKGS[@]}"; do
@@ -175,6 +186,61 @@ EOF
         ;;
 esac
 [ -z "$DM" ] || { systemctl enable "$DM.service" && log "display manager: $DM enabled"; }
+for unit in bluetooth.service power-profiles-daemon.service; do
+    if systemctl cat "$unit" >/dev/null 2>&1; then
+        systemctl enable "$unit" >/dev/null 2>&1 && log "service: $unit enabled"
+    fi
+done
+
+### firewall (spec 09, ADR-0006: firewalld default; deny inbound except DHCPv6) ###
+FIREWALL=$(python3 - "$PROFILE" <<'PY'
+import sys, tomllib
+p = tomllib.loads(open(sys.argv[1]).read())
+s = p.get("security", {})
+print(s.get("firewall", "none"), "yes" if s.get("ssh_server", False) else "no")
+PY
+) || { log "FATAL: security read failed"; exit 17; }
+read -r FW SSHD <<<"$FIREWALL"
+case "$FW" in
+    firewalld|ufw)
+        FW_PKGS=("$FW")
+        [ "$DESKTOP" = kde ] && FW_PKGS+=(plasma-firewall)
+        if [ "${SAMURAI_OFFLINE:-0}" = 1 ]; then
+            for p in "${FW_PKGS[@]}"; do
+                pacman -Q "$p" >/dev/null 2>&1 || { log "FATAL: offline cache missing firewall package $p"; exit 17; }
+            done
+        else
+            pacman -S --noconfirm --needed "${FW_PKGS[@]}" || { log "FATAL: firewall install failed"; exit 17; }
+        fi
+        if [ "$FW" = firewalld ]; then
+            # offline config: firewall-offline-cmd works without the daemon (chroot)
+            firewall-offline-cmd --set-default-zone=public >/dev/null
+            for svc in $(firewall-offline-cmd --zone=public --list-services); do
+                [ "$svc" = dhcpv6-client ] || firewall-offline-cmd --zone=public --remove-service="$svc" >/dev/null
+            done
+            firewall-offline-cmd --zone=public --add-service=dhcpv6-client >/dev/null
+            [ "$SSHD" = yes ] && firewall-offline-cmd --zone=public --add-service=ssh >/dev/null
+            systemctl enable firewalld.service
+            log "firewall: firewalld, zone public: $(firewall-offline-cmd --zone=public --list-services)"
+        else
+            ufw default deny incoming >/dev/null 2>&1 || true
+            ufw default allow outgoing >/dev/null 2>&1 || true
+            [ "$SSHD" = yes ] && ufw allow ssh >/dev/null 2>&1
+            sed -i 's/^ENABLED=.*/ENABLED=yes/' /etc/ufw/ufw.conf
+            systemctl enable ufw.service
+            log "firewall: ufw (deny incoming)"
+        fi
+        ;;
+    none) log "firewall: none (profile choice)" ;;
+esac
+if [ "$SSHD" = yes ]; then
+    if [ "${SAMURAI_OFFLINE:-0}" != 1 ]; then pacman -S --noconfirm --needed openssh; fi
+    if pacman -Q openssh >/dev/null 2>&1; then
+        systemctl enable sshd.service && log "ssh: sshd enabled"
+    else
+        log "ssh: openssh not available offline; enable after the first update"
+    fi
+fi
 
 # networking is a basic function (spec 09): NetworkManager always on when
 # the package is present (the baked offline set carries it)
@@ -190,6 +256,7 @@ Your blade is the `samurai` command:
   samurai update       refresh the system — a snapshot is taken first, always
   samurai snap         capture this moment before you act
   samurai rescue       for when the path darkens
+  samurai apps         find and install optional apps (samurai apps bundles)
   samurai toolbox      shape the machine to your hand
 EOF
 cat > /etc/issue <<'EOF'
@@ -197,6 +264,50 @@ Samurai OS \s \m (\l)
 
 The blade awaits. Login:
 EOF
+
+### optional apps from the catalog (profile [packages] apps; spec 08 step 6) ###
+# Same resolver as `samurai apps install` on the running system. Online only:
+# offline installs (and anything skipped) leave a first-boot note instead, so
+# the user can run the exact command later. App failures never fail the
+# install: the base system is already complete at this point.
+FIRSTBOOT_NOTES=/var/lib/samurai/firstboot-notes
+if [ "${#APPS[@]}" -gt 0 ]; then
+    mkdir -p /var/lib/samurai
+    APPS_CMD="samurai apps install ${APPS[*]}"
+    APPS_DONE=0
+    if [ "${SAMURAI_OFFLINE:-0}" = 1 ]; then
+        log "apps: offline install — skipping catalog apps (${APPS[*]}); first-boot note written"
+        printf '%s   # offline install: run once online (after samurai update)\n' "$APPS_CMD" >> "$FIRSTBOOT_NOTES"
+    elif [ ! -x /usr/local/bin/samurai-apps ]; then
+        log "WARNING: apps: samurai-apps missing in the target (samurai-tools too old); skipping ${APPS[*]}"
+        printf '%s   # samurai-apps was not installed during setup\n' "$APPS_CMD" >> "$FIRSTBOOT_NOTES"
+    else
+        log "apps: installing ${APPS[*]}"
+        # --with-upgrade: pacman -Su in the same transaction (the target was just
+        # synced, never a partial upgrade); --ignore-db-age: a pinned archive
+        # mirror has old-but-correct databases; vendor scripts wait for first boot
+        if SAMURAI_CHROOT=1 SAMURAI_APPS_NOTES_FILE="$FIRSTBOOT_NOTES" /usr/local/bin/samurai-apps \
+                install --yes --with-upgrade --ignore-db-age --skip-unavailable --no-user-scripts \
+                "${APPS[@]}" 2>&1; then
+            log "apps: done"
+            APPS_DONE=1
+        else
+            rc=$?
+            log "WARNING: apps: samurai-apps install failed (rc=$rc); first-boot note written"
+            printf '%s   # failed during install (rc=%s), see /var/log/samurai/install.log\n' \
+                "$APPS_CMD" "$rc" >> "$FIRSTBOOT_NOTES"
+        fi
+    fi
+    if [ -s "$FIRSTBOOT_NOTES" ]; then
+        {
+            printf '\nStill to do from your install profile (%s):\n' "$FIRSTBOOT_NOTES"
+            sed 's/^/  /' "$FIRSTBOOT_NOTES"
+        } >> /etc/motd
+        log "apps: first-boot notes: $(tr '\n' ';' < "$FIRSTBOOT_NOTES")"
+    elif [ "$APPS_DONE" -eq 1 ]; then
+        log "apps: nothing deferred"
+    fi
+fi
 
 ### users ###
 if ! id -u "$UNAME" >/dev/null 2>&1; then
@@ -340,7 +451,13 @@ fi
 ### services ###
 log "services"
 systemctl enable qemu-guest-agent.service 2>/dev/null || true
-systemctl enable systemd-networkd.service systemd-resolved.service
+# one network manager: NetworkManager on desktops, systemd-networkd otherwise
+# (both enabled race for the same interfaces)
+if pacman -Q networkmanager >/dev/null 2>&1; then
+    systemctl enable systemd-resolved.service
+else
+    systemctl enable systemd-networkd.service systemd-resolved.service
+fi
 
 ### snapshots (spec 06): snapper + snap-pac + maintenance timers ###
 log "snapshots: snapper root config + snap-pac"

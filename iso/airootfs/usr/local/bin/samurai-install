@@ -338,6 +338,58 @@ fi
 
 ### Base install ###
 log "installing base system"
+# GPU stacks (spec 07). Mesa (RADV/ANV/NVK) + Intel media are always
+# installed: small, and they cover AMD, Intel and nouveau. The NVIDIA stack
+# goes on only when an NVIDIA display controller is present (or the profile
+# forces it: [hardware] nvidia = "auto" | "yes" | "no").
+# Module providers CONFLICT with each other (all provide NVIDIA-MODULE):
+# prebuilt modules are used only when EVERY selected kernel has one;
+# otherwise nvidia-open-dkms builds for all selected kernels (+ headers).
+NVIDIA_MODE=$(python3 - "$PROFILE" <<'PY'
+import sys, tomllib
+p = tomllib.loads(open(sys.argv[1]).read())
+print(p.get("hardware", {}).get("nvidia", "auto"))
+PY
+) || die "hardware read failed"
+case "$NVIDIA_MODE" in
+    yes) WANT_NVIDIA=1 ;;
+    no) WANT_NVIDIA=0 ;;
+    auto)
+        # PCI class 0300 (VGA) / 0302 (3D controller), vendor 10de
+        if lspci -mm -n 2>/dev/null | awk '{gsub(/"/,"")} ($2=="0300"||$2=="0302") && $3=="10de"{f=1} END{exit !f}'; then
+            WANT_NVIDIA=1
+        else
+            WANT_NVIDIA=0
+        fi ;;
+    *) die "hardware.nvidia must be auto, yes or no (got: $NVIDIA_MODE)" ;;
+esac
+GPU_PKGS=(mesa vulkan-radeon vulkan-intel vulkan-nouveau intel-media-driver libva-intel-driver)
+# headers for every selected kernel: DKMS modules (NVIDIA, VirtualBox,
+# v4l2loopback...) build against them, and the kernel choices list them
+KERNEL_HEADERS=()
+for k in "${KERNEL_ARR[@]}"; do KERNEL_HEADERS+=("$k-headers"); done
+NVIDIA_PKGS=()
+if [ "$WANT_NVIDIA" -eq 1 ]; then
+    NVIDIA_PKGS=(nvidia-utils nvidia-settings)
+    prebuilt=()
+    for k in "${KERNEL_ARR[@]}"; do
+        case "$k" in
+            linux-cachyos) prebuilt+=(linux-cachyos-nvidia-open) ;;
+            linux) prebuilt+=(nvidia-open) ;;
+            linux-lts) prebuilt+=(nvidia-open-lts) ;;
+            *) prebuilt=(); NEED_DKMS=1; break ;;
+        esac
+    done
+    if [ "${NEED_DKMS:-0}" -eq 1 ]; then
+        NVIDIA_PKGS+=(dkms nvidia-open-dkms)
+    else
+        NVIDIA_PKGS+=("${prebuilt[@]}")
+    fi
+    log "gpu: NVIDIA stack (${NVIDIA_PKGS[*]})"
+else
+    log "gpu: no NVIDIA display controller (hardware.nvidia=$NVIDIA_MODE): Mesa/Intel stacks only"
+fi
+GPU_PKGS+=("${NVIDIA_PKGS[@]}")
 # archive-pinned installs (spec 11 update-from-archive): the profile's
 # repos.arch_mirror replaces the live mirrorlist so pacstrap AND the target
 # download from the pinned snapshot; the updater rewrites it on first update
@@ -400,6 +452,15 @@ if [ "$DESKTOP" = kde ] && [ -d "$OFFLINE_DIR" ] && compgen -G "$OFFLINE_DIR/*.p
             case " ${KERNEL_ARR[*]} " in *" $k "*) continue ;; esac
             case "$b" in "$k"-[0-9]*|"$k"-headers-[0-9]*) keep=0 ;; esac
         done
+        # NVIDIA packages: exactly the provider set chosen above, nothing else
+        # (two module providers in one transaction = unresolvable conflict)
+        for n in linux-cachyos-nvidia-open nvidia-open nvidia-open-lts nvidia-open-dkms \
+                 dkms nvidia-utils nvidia-settings; do
+            case "$b" in
+                "$n"-[0-9]*|"$n"-[0-9]:*)
+                    case " ${NVIDIA_PKGS[*]} " in *" $n "*) ;; *) keep=0 ;; esac ;;
+            esac
+        done
         [ "$keep" = 1 ] && PKG_LIST+=("$f")
     done
     set +e
@@ -428,7 +489,9 @@ if [ "$DESKTOP" = kde ] && [ -d "$OFFLINE_DIR" ] && compgen -G "$OFFLINE_DIR/*.p
 fi
 if [ "$OFFLINE_OK" -ne 1 ]; then
     pacman -Sy --noconfirm --needed archlinux-keyring 2>/dev/null || true
-    pacstrap -K /mnt base "${KERNEL_ARR[@]}" linux-firmware mkinitcpio sudo fish python pciutils "${BLDR_PKGS[@]}" snapper snap-pac 2>&1 | TLOG "$LOG"
+    pacstrap -K /mnt base "${KERNEL_ARR[@]}" linux-firmware mkinitcpio \
+        "${GPU_PKGS[@]}" "${KERNEL_HEADERS[@]}" sudo fish python pciutils \
+        "${BLDR_PKGS[@]}" snapper snap-pac 2>&1 | TLOG "$LOG"
 fi
 [ -d /mnt/etc ] || die "install failed (offline and network paths both)"
 # The live ISO's pacman config enables CachyOS and Samurai. pacstrap's -C
@@ -444,10 +507,17 @@ cp -a /etc/pacman.d/. /mnt/etc/pacman.d/ 2>/dev/null || true
 # baked [samurai] key/mirrorlist — the live ISO is not visible in the chroot)
 cp /usr/local/bin/samurai-postinstall /mnt/usr/local/bin/
 chmod 755 /mnt/usr/local/bin/samurai-postinstall
-cp /usr/local/bin/samurai-update /mnt/usr/local/bin/
-cp /usr/local/bin/samurai /mnt/usr/local/bin/
-chmod 755 /mnt/usr/local/bin/samurai-update /mnt/usr/local/bin/samurai
-chmod 755 /mnt/usr/local/bin/samurai-update
+# every samurai CLI tool + the app catalog: the installed system has the
+# toolbox from the first boot, even before samurai-tools arrives from the
+# repo (its pre_install removes these unowned copies, no file conflict)
+for f in /usr/local/bin/samurai /usr/local/bin/samurai-*; do
+    case "$f" in */samurai-install|*/samurai-postinstall) continue ;; esac
+    [ -f "$f" ] && install -m 755 "$f" /mnt/usr/local/bin/
+done
+if [ -d /usr/share/samurai/catalog ]; then
+    install -d /mnt/usr/share/samurai/catalog
+    install -m 644 /usr/share/samurai/catalog/*.toml /mnt/usr/share/samurai/catalog/
+fi
 mkdir -p /mnt/usr/lib/samurai/interventions
 cp /usr/lib/samurai/interventions/* /mnt/usr/lib/samurai/interventions/ 2>/dev/null || true
 mkdir -p /mnt/usr/share/samurai

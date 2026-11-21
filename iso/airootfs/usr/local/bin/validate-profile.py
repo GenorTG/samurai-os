@@ -11,21 +11,24 @@ Exit 0 with a normalized summary on success; non-zero with reasons on failure.
 """
 from __future__ import annotations
 
+import importlib.machinery
+import importlib.util
 import pathlib
 import re
 import subprocess
 import sys
 import tomllib
 
-ALLOWED_TOP = {"version", "system", "disk", "boot", "user", "packages", "repos", "security"}
+ALLOWED_TOP = {"version", "system", "disk", "boot", "user", "packages", "repos", "security", "hardware"}
 ALLOWED = {
     "system": {"hostname", "timezone", "locale", "keyboard"},
     "disk": {"device", "layout", "filesystem", "encryption", "auto_unlock_keyfile"},
     "boot": {"kernels", "bootloader"},
     "user": {"name", "shell", "groups", "root_locked", "password_hash"},
-    "packages": {"install", "desktop"},
+    "packages": {"install", "desktop", "apps"},
     "repos": {"samurai", "cachyos", "chaotic_aur", "arch_mirror"},
     "security": {"firewall", "ssh_server"},
+    "hardware": {"nvidia"},
 }
 KNOWN_KERNELS = {"linux", "linux-lts", "linux-zen", "linux-cachyos", "linux-cachyos-lts"}
 KNOWN_BOOTLOADERS = {"limine", "grub", "systemd-boot", "refind"}
@@ -34,12 +37,49 @@ KNOWN_SHELLS = {"bash", "fish", "zsh"}
 KNOWN_LAYOUTS = {"erase"}
 KNOWN_FS = {"btrfs"}
 KNOWN_FIREWALLS = {"none", "firewalld", "ufw"}
+KNOWN_NVIDIA = {"auto", "yes", "no"}
 USERNAME_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
 HOSTNAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9-]{0,62}$")
 LOCALE_RE = re.compile(r"^[a-zA-Z]{2,3}(_[A-Za-z]{2,4})?\.[A-Za-z0-9-]+$")
 KEYBOARD_RE = re.compile(r"^[a-z0-9-]{1,20}$")
 GROUP_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
 DEVICE_RE = re.compile(r"^/dev/[A-Za-z0-9/_.-]+$")
+APP_REF_RE = re.compile(r"^@?[A-Za-z0-9][A-Za-z0-9_.+-]{0,63}$")
+
+
+def _load_apps_module():
+    """The catalog allowlist comes from samurai-apps itself (one merge
+    implementation): next to this script on the ISO/installed system, or
+    updates/ in a source checkout."""
+    here = pathlib.Path(__file__).resolve().parent
+    for cand in (here / "samurai-apps", here.parent / "updates" / "samurai-apps"):
+        if cand.is_file():
+            loader = importlib.machinery.SourceFileLoader("samurai_apps", str(cand))
+            spec = importlib.util.spec_from_loader("samurai_apps", loader)
+            mod = importlib.util.module_from_spec(spec)
+            sys.modules[spec.name] = mod   # dataclasses resolve types via sys.modules
+            loader.exec_module(mod)
+            return mod
+    return None
+
+
+def validate_apps(apps) -> list[str]:
+    """[packages] apps: strict allowlist of catalog app ids and @bundles."""
+    if not isinstance(apps, list) or not all(isinstance(a, str) and APP_REF_RE.match(a) for a in apps):
+        fail("packages.apps must be a list of catalog app ids or @bundles (no free-form values)")
+    if not apps:
+        return []
+    mod = _load_apps_module()
+    if mod is None:
+        fail("packages.apps needs the app catalog, but samurai-apps is not installed")
+    try:
+        catalog = mod.load_catalog()
+        return mod.profile_app_names(catalog, apps)
+    except mod.CatalogError as e:
+        fail(f"app catalog unusable: {e}")
+    except mod.UsageError as e:
+        fail(str(e))
+    return []
 
 
 def fail(msg: str) -> None:
@@ -124,6 +164,8 @@ def validate(path: str) -> dict:
     ):
         fail("packages.install must be a list of package names (no shell metacharacters)")
 
+    validate_apps(profile.get("packages", {}).get("apps", []))
+
     desktop = profile.get("packages", {}).get("desktop", "kde")
     if desktop not in KNOWN_DESKTOPS:
         fail(f"unsupported desktop: {desktop!r} (choose from {sorted(KNOWN_DESKTOPS)})")
@@ -131,6 +173,11 @@ def validate(path: str) -> dict:
     sec = profile.get("security", {})
     if sec.get("firewall", "none") not in KNOWN_FIREWALLS:
         fail(f"unsupported firewall: {sec.get('firewall')!r}")
+    if not isinstance(sec.get("ssh_server", False), bool):
+        fail("security.ssh_server must be true or false")
+    nv = profile.get("hardware", {}).get("nvidia", "auto")
+    if nv not in KNOWN_NVIDIA:
+        fail(f"hardware.nvidia must be auto, yes or no, got {nv!r}")
     am = profile.get("repos", {}).get("arch_mirror", "auto")
     if am != "auto" and not re.match(r"^https://[A-Za-z0-9./_-]+$", am):
         fail(f"repos.arch_mirror must be 'auto' or an https URL, got {am!r}")

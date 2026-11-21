@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Samurai OS mark: a brushed ensō crossed by a katana">
+  <title>Samurai OS</title>
+  <defs>
+    <filter id="brush" x="-10%" y="-10%" width="120%" height="120%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.06 0.18" numOctaves="2" seed="3"/>
+      <feDisplacementMap in="SourceGraphic" scale="2.6"/>
+    </filter>
+  </defs>
+  <style>
+    .ink { stroke: #1a1d24; fill: none; stroke-linecap: round; }
+    .inkf { fill: #1a1d24; }
+    .blade { fill: #bf3a1c; }
+    .cut { stroke: #f4eee2; }
+    @media (prefers-color-scheme: dark) {
+      .ink { stroke: #ede4d3; }
+      .inkf { fill: #ede4d3; }
+      .blade { fill: #f06a4f; }
+      .cut { stroke: #171c27; }
+    }
+  </style>
+  <g filter="url(#brush)">
+    <path class="ink" d="M75 19 A36 36 0 1 0 86 46" stroke-width="8"/>
+    <path class="ink" d="M75 19 A36 36 0 0 0 56 13" stroke-width="3.5" opacity=".75"/>
+  </g>
+  <path class="blade cut" d="M30 70 Q60 44 89 11 Q64 48 33 74 Z" stroke-width="2.5" paint-order="stroke" stroke-linejoin="round"/>
+  <path class="ink cut" d="M28 75 L15 88" stroke-width="8"/>
+  <path class="ink" d="M28 75 L15 88" stroke-width="4.5"/>
+  <ellipse class="blade" cx="30.5" cy="72.5" rx="6.5" ry="2.5" transform="rotate(45 30.5 72.5)"/>
+</svg>

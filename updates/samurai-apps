@@ -1,0 +1,1437 @@
+#!/usr/bin/env python3
+"""samurai apps — install optional applications from the Samurai OS catalog.
+
+Spec 04 (toolbox: CLI first, the Qt GUI is a client), spec 08 (catalog,
+install profile), spec 10 (default software), ADR-0002 (pacman is the only
+installer: this tool only plans and then calls pacman / flatpak).
+
+Catalog: garuda-setup-wizard.toml (generated, Garuda's list) merged with
+samurai.toml (our overrides, additions, bundles). Search order for the two
+files: $SAMURAI_CATALOG_DIR, /usr/share/samurai/catalog, then ../catalog next
+to this script (a source checkout).
+
+Python 3.11+ stdlib only.
+"""
+from __future__ import annotations
+
+import argparse
+import difflib
+import json
+import os
+import pathlib
+import shlex
+import shutil
+import subprocess
+import sys
+import time
+import tomllib
+from dataclasses import dataclass, field
+
+VERSION = "0.2.0"
+GARUDA_FILE = "garuda-setup-wizard.toml"
+SAMURAI_FILE = "samurai.toml"
+SYSTEM_CATALOG_DIR = "/usr/share/samurai/catalog"
+FLATHUB_URL = "https://dl.flathub.org/repo/flathub.flatpakrepo"
+DEFAULT_MAX_DB_AGE_DAYS = 3.0
+JSON_SCHEMA = 1
+
+# exit codes (documented in --help)
+EXIT_OK = 0
+EXIT_FAIL = 1          # pacman / flatpak / systemctl failed
+EXIT_USAGE = 2         # bad arguments, unknown app id, no TTY without --yes
+EXIT_UNAVAILABLE = 3   # a requested app cannot be installed from the enabled repos
+EXIT_NEEDS_UPDATE = 4  # sync databases missing/stale, or upgrades pending
+EXIT_ABORTED = 5       # the user answered "no"
+EXIT_CATALOG = 6       # catalog files missing or inconsistent
+
+APP_FIELDS = {
+    "id", "name", "category", "packages", "origin", "source", "default", "hidden", "note",
+    "description", "flatpak", "services", "root_commands", "user_commands", "user_groups", "env",
+}
+OVERRIDE_FIELDS = APP_FIELDS - {"origin"}
+TOGGLE_FIELDS = {"id", "default", "packages", "services", "user_groups", "source", "when",
+                 "firstboot", "note", "name"}
+BUNDLE_FIELDS = {"id", "name", "description", "apps", "toggles"}
+SOURCES = {"repo", "arch", "multilib", "cachyos", "chaotic", "samurai", "flatpak",
+           "local-build", "user-script"}
+NOT_YET_SOURCES = {"samurai", "local-build"}
+
+
+class CatalogError(Exception):
+    pass
+
+
+class UsageError(Exception):
+    pass
+
+
+# ------------------------------------------------------------------ catalog model
+@dataclass
+class App:
+    id: str
+    name: str
+    category: str
+    packages: list[str] = field(default_factory=list)
+    origin: str = "samurai"
+    source: str = "repo"
+    default: bool = False
+    hidden: bool = False
+    note: str = ""
+    description: str = ""
+    flatpak: str = ""
+    services: list[str] = field(default_factory=list)
+    root_commands: list[str] = field(default_factory=list)
+    user_commands: list[str] = field(default_factory=list)
+    user_groups: list[str] = field(default_factory=list)
+    env: dict = field(default_factory=dict)
+
+    def enable_units(self) -> list[str]:
+        """Units to enable: explicit `services` plus root_commands of the exact,
+        safe form `systemctl enable --now <unit>` (Garuda's data). Anything else
+        in root_commands is never executed; it is shown as a manual step."""
+        units = list(self.services)
+        for cmd in self.root_commands:
+            unit = _systemctl_enable_unit(cmd)
+            if unit and unit not in units:
+                units.append(unit)
+        return units
+
+    def manual_root_steps(self) -> list[str]:
+        return [c for c in self.root_commands if not _systemctl_enable_unit(c)]
+
+
+def _systemctl_enable_unit(cmd: str) -> str | None:
+    parts = cmd.split()
+    if len(parts) == 4 and parts[:3] == ["systemctl", "enable", "--now"]:
+        unit = parts[3]
+        if all(ch.isalnum() or ch in "@._-" for ch in unit):
+            return unit
+    return None
+
+
+@dataclass
+class Bundle:
+    id: str
+    name: str
+    description: str = ""
+    apps: list[str] = field(default_factory=list)
+    toggles: list[str] = field(default_factory=list)
+
+
+@dataclass
+class Catalog:
+    apps: dict[str, App]
+    categories: dict[str, str]           # id -> display name, display order
+    bundles: dict[str, Bundle]
+    toggles: dict[str, App]
+    package_hints: dict[str, str]        # package -> repo it needs (e.g. steam -> multilib)
+    source_dir: str = ""
+
+    def category_name(self, cat: str) -> str:
+        return self.categories.get(cat) or cat
+
+    def ordered_categories(self) -> list[str]:
+        seen = list(self.categories)
+        for app in self.apps.values():
+            if app.category not in seen:
+                seen.append(app.category)
+        return seen
+
+    def bundles_containing(self, app_id: str) -> list[str]:
+        return [b.id for b in self.bundles.values() if app_id in b.apps]
+
+
+def find_catalog_dir() -> pathlib.Path:
+    candidates = []
+    env = os.environ.get("SAMURAI_CATALOG_DIR")
+    if env:
+        candidates.append(pathlib.Path(env))
+    else:
+        candidates.append(pathlib.Path(SYSTEM_CATALOG_DIR))
+        here = pathlib.Path(__file__).resolve().parent
+        candidates.append(here.parent / "catalog")                 # source checkout
+        candidates.append(here.parent.parent / "share/samurai/catalog")  # /usr/local/bin -> /usr/local/share
+    for c in candidates:
+        if (c / SAMURAI_FILE).is_file() and (c / GARUDA_FILE).is_file():
+            return c
+    raise CatalogError("catalog not found (looked in: " + ", ".join(str(c) for c in candidates)
+                       + "); set SAMURAI_CATALOG_DIR")
+
+
+def _load_toml(path: pathlib.Path) -> dict:
+    try:
+        return tomllib.loads(path.read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError, UnicodeDecodeError) as e:
+        raise CatalogError(f"{path}: {e}") from e
+
+
+def _str_list(value, what: str) -> list[str]:
+    if value is None:
+        return []
+    if not isinstance(value, list) or not all(isinstance(v, str) and v for v in value):
+        raise CatalogError(f"{what} must be a list of non-empty strings")
+    return list(value)
+
+
+def _make_app(raw: dict, origin: str, where: str) -> App:
+    unknown = set(raw) - APP_FIELDS
+    if unknown:
+        raise CatalogError(f"{where}: unknown field(s) {sorted(unknown)}")
+    for key in ("id", "name", "category"):
+        if not isinstance(raw.get(key), str) or not raw[key]:
+            raise CatalogError(f"{where}: missing {key}")
+    app = App(id=raw["id"], name=raw["name"], category=raw["category"], origin=origin)
+    _apply_fields(app, {k: v for k, v in raw.items() if k not in ("id", "origin")}, where)
+    if not app.packages and app.source not in ("flatpak", "user-script"):
+        raise CatalogError(f"{where}: app {app.id!r} has no packages")
+    if app.source == "flatpak" and not app.flatpak:
+        raise CatalogError(f"{where}: flatpak app {app.id!r} needs a flatpak application id")
+    if app.source == "user-script" and not app.user_commands:
+        raise CatalogError(f"{where}: user-script app {app.id!r} needs user_commands")
+    return app
+
+
+def _apply_fields(app: App, fields: dict, where: str) -> None:
+    for key, value in fields.items():
+        if key in ("packages", "services", "root_commands", "user_commands", "user_groups"):
+            setattr(app, key, _str_list(value, f"{where}: {key}"))
+        elif key in ("default", "hidden"):
+            if not isinstance(value, bool):
+                raise CatalogError(f"{where}: {key} must be true/false")
+            setattr(app, key, value)
+        elif key == "env":
+            if not isinstance(value, dict):
+                raise CatalogError(f"{where}: env must be a table")
+            app.env = dict(value)
+        elif key == "source":
+            if value not in SOURCES:
+                raise CatalogError(f"{where}: unknown source {value!r} (known: {sorted(SOURCES)})")
+            app.source = value
+        else:
+            if not isinstance(value, str):
+                raise CatalogError(f"{where}: {key} must be a string")
+            setattr(app, key, value)
+
+
+def merge_catalog(garuda: dict, samurai: dict, source_dir: str = "") -> Catalog:
+    """Merge rules (top of samurai.toml):
+    1. every Garuda [[app]] is loaded as-is (origin "garuda", source "repo");
+    2. every samurai [[app]] is added; an id that already exists is an error
+       (changing an existing entry is what [[override]] is for);
+    3. [[override]] with an id changes fields of that app; an [[override]]
+       with only a category (no id) changes every app of that category;
+       an override for an unknown id or category is an error;
+    4. [[bundle]] members must name existing apps / toggles.
+    """
+    apps: dict[str, App] = {}
+    for i, raw in enumerate(garuda.get("app", [])):
+        app = _make_app(raw, "garuda", f"{GARUDA_FILE} app #{i + 1}")
+        if app.id in apps:
+            raise CatalogError(f"{GARUDA_FILE}: duplicate app id {app.id!r}")
+        apps[app.id] = app
+
+    known_top = {"app", "override", "toggle", "choice", "bundle", "category", "package_hints"}
+    unknown = set(samurai) - known_top
+    if unknown:
+        raise CatalogError(f"{SAMURAI_FILE}: unknown table(s) {sorted(unknown)}")
+
+    categories: dict[str, str] = {}
+    for i, raw in enumerate(samurai.get("category", [])):
+        if not isinstance(raw.get("id"), str) or not isinstance(raw.get("name"), str):
+            raise CatalogError(f"{SAMURAI_FILE} category #{i + 1}: needs id and name")
+        categories[raw["id"]] = raw["name"]
+
+    for i, raw in enumerate(samurai.get("app", [])):
+        app = _make_app(raw, "samurai", f"{SAMURAI_FILE} app #{i + 1} ({raw.get('id')})")
+        if app.id in apps:
+            raise CatalogError(f"{SAMURAI_FILE}: app id {app.id!r} already exists "
+                               f"(use [[override]] to change it)")
+        apps[app.id] = app
+
+    for i, raw in enumerate(samurai.get("override", [])):
+        where = f"{SAMURAI_FILE} override #{i + 1}"
+        unknown = set(raw) - OVERRIDE_FIELDS
+        if unknown:
+            raise CatalogError(f"{where}: unknown field(s) {sorted(unknown)}")
+        if "id" in raw:
+            if raw["id"] not in apps:
+                raise CatalogError(f"{where}: no app with id {raw['id']!r}")
+            _apply_fields(apps[raw["id"]], {k: v for k, v in raw.items() if k != "id"}, where)
+        elif "category" in raw:
+            targets = [a for a in apps.values() if a.category == raw["category"]]
+            if not targets:
+                raise CatalogError(f"{where}: no app in category {raw['category']!r}")
+            changes = {k: v for k, v in raw.items() if k != "category"}
+            for a in targets:
+                _apply_fields(a, changes, where)
+        else:
+            raise CatalogError(f"{where}: needs an id or a category")
+
+    toggles: dict[str, App] = {}
+    for i, raw in enumerate(samurai.get("toggle", [])):
+        where = f"{SAMURAI_FILE} toggle #{i + 1}"
+        unknown = set(raw) - TOGGLE_FIELDS
+        if unknown:
+            raise CatalogError(f"{where}: unknown field(s) {sorted(unknown)}")
+        tid = raw.get("id")
+        if not isinstance(tid, str):
+            raise CatalogError(f"{where}: missing id")
+        t = App(id=tid, name=raw.get("name") or f"Samurai default set: {tid}",
+                category="samurai-defaults", origin="toggle", default=bool(raw.get("default")))
+        _apply_fields(t, {k: raw[k] for k in ("packages", "services", "user_groups", "note")
+                          if k in raw}, where)
+        if "source" in raw:
+            _apply_fields(t, {"source": raw["source"]}, where)
+        toggles[tid] = t
+
+    bundles: dict[str, Bundle] = {}
+    for i, raw in enumerate(samurai.get("bundle", [])):
+        where = f"{SAMURAI_FILE} bundle #{i + 1}"
+        unknown = set(raw) - BUNDLE_FIELDS
+        if unknown:
+            raise CatalogError(f"{where}: unknown field(s) {sorted(unknown)}")
+        bid = raw.get("id")
+        if not isinstance(bid, str) or not bid:
+            raise CatalogError(f"{where}: missing id")
+        b = Bundle(id=bid, name=raw.get("name", bid), description=raw.get("description", ""),
+                   apps=_str_list(raw.get("apps"), f"{where}: apps"),
+                   toggles=_str_list(raw.get("toggles"), f"{where}: toggles"))
+        for a in b.apps:
+            if a not in apps:
+                raise CatalogError(f"{where} (@{bid}): unknown app {a!r}")
+            if apps[a].hidden:
+                raise CatalogError(f"{where} (@{bid}): app {a!r} is hidden")
+        for t in b.toggles:
+            if t not in toggles:
+                raise CatalogError(f"{where} (@{bid}): unknown toggle {t!r}")
+            if not toggles[t].packages:
+                raise CatalogError(f"{where} (@{bid}): toggle {t!r} has no packages")
+        if bid in bundles:
+            raise CatalogError(f"{where}: duplicate bundle {bid!r}")
+        bundles[bid] = b
+
+    hints = samurai.get("package_hints", {})
+    if not isinstance(hints, dict) or not all(isinstance(v, str) for v in hints.values()):
+        raise CatalogError(f"{SAMURAI_FILE}: [package_hints] must map package names to repo names")
+
+    return Catalog(apps=apps, categories=categories, bundles=bundles, toggles=toggles,
+                   package_hints=dict(hints), source_dir=source_dir)
+
+
+def load_catalog(directory: pathlib.Path | None = None) -> Catalog:
+    d = directory or find_catalog_dir()
+    return merge_catalog(_load_toml(d / GARUDA_FILE), _load_toml(d / SAMURAI_FILE), str(d))
+
+
+# ------------------------------------------------------------------ target resolution
+@dataclass
+class Target:
+    app: App
+    via: str | None = None   # bundle id when the app came from @bundle
+
+    @property
+    def explicit(self) -> bool:
+        return self.via is None
+
+
+def lookup_app(catalog: Catalog, name: str) -> App:
+    """Exact id; then case-insensitive id; then a package name that exactly one app owns."""
+    if name in catalog.apps:
+        return catalog.apps[name]
+    lower = {k.lower(): v for k, v in catalog.apps.items()}
+    if name.lower() in lower:
+        return lower[name.lower()]
+    owners = [a for a in catalog.apps.values() if not a.hidden and a.packages[:1] == [name]]
+    if len(owners) == 1:
+        return owners[0]
+    hint = difflib.get_close_matches(name.lower(), list(lower), n=3, cutoff=0.6)
+    msg = f"unknown app: {name!r}"
+    if hint:
+        msg += " (did you mean: " + ", ".join(lower[h].id for h in hint) + "?)"
+    msg += " — try: samurai apps search " + shlex.quote(name)
+    raise UsageError(msg)
+
+
+def resolve_targets(catalog: Catalog, names: list[str], allow_hidden: bool = False) -> list[Target]:
+    """Expand ids and @bundles into an ordered, de-duplicated target list."""
+    out: list[Target] = []
+    seen: set[str] = set()
+
+    def add(app: App, via: str | None) -> None:
+        key = ("toggle:" if app.origin == "toggle" else "") + app.id
+        if key in seen:
+            # an explicit request wins over a bundle membership
+            if via is None:
+                for t in out:
+                    if t.app is app:
+                        t.via = None
+            return
+        seen.add(key)
+        out.append(Target(app, via))
+
+    for name in names:
+        if name.startswith("@"):
+            bid = name[1:]
+            if bid not in catalog.bundles:
+                hint = difflib.get_close_matches(bid, list(catalog.bundles), n=3)
+                msg = f"unknown bundle: {name!r}"
+                if hint:
+                    msg += " (did you mean: " + ", ".join("@" + h for h in hint) + "?)"
+                raise UsageError(msg + " — list them with: samurai apps bundles")
+            b = catalog.bundles[bid]
+            for tid in b.toggles:
+                add(catalog.toggles[tid], bid)
+            for aid in b.apps:
+                add(catalog.apps[aid], bid)
+        else:
+            app = lookup_app(catalog, name)
+            if app.hidden and not allow_hidden:
+                why = f": {app.note}" if app.note else ""
+                raise UsageError(f"app {app.id!r} is not offered by samurai apps{why}")
+            add(app, None)
+    return out
+
+
+# ------------------------------------------------------------------ package index
+@dataclass
+class Index:
+    """What the system can install. Built from pacman (real) or a JSON fixture (tests)."""
+    sync: dict[str, str] = field(default_factory=dict)       # package -> repo
+    groups: dict[str, list[str]] = field(default_factory=dict)
+    provides: dict[str, str] = field(default_factory=dict)   # provided name -> "repo/pkg"
+    repos: list[str] = field(default_factory=list)
+    installed: set[str] = field(default_factory=set)         # satisfied names (pacman -T)
+    has_flatpak: bool = False
+    flathub: bool = False
+    flatpak_installed: set[str] = field(default_factory=set)
+    db_age_days: float | None = None                         # None = no sync db at all
+    pending_upgrades: list[str] = field(default_factory=list)
+    fake: bool = False
+
+    def repo_of(self, pkg: str) -> str | None:
+        if pkg in self.sync:
+            return self.sync[pkg]
+        if pkg in self.groups:
+            return "group"
+        if pkg in self.provides:
+            return self.provides[pkg].split("/", 1)[0]
+        return None
+
+    def is_installed(self, pkg: str) -> bool:
+        if pkg in self.groups:
+            return all(m in self.installed for m in self.groups[pkg])
+        return pkg in self.installed
+
+
+def _run(cmd: list[str], **kw) -> subprocess.CompletedProcess:
+    env = dict(os.environ, LC_ALL="C")
+    return subprocess.run(cmd, capture_output=True, text=True, env=env, **kw)
+
+
+def load_fake_index(path: str) -> Index:
+    data = json.loads(pathlib.Path(path).read_text())
+    return Index(sync=data.get("sync", {}), groups=data.get("groups", {}),
+                 provides=data.get("provides", {}), repos=data.get("repos", []),
+                 installed=set(data.get("installed", [])),
+                 has_flatpak=data.get("has_flatpak", False), flathub=data.get("flathub", False),
+                 flatpak_installed=set(data.get("flatpak_installed", [])),
+                 db_age_days=data.get("db_age_days", 0.0),
+                 pending_upgrades=data.get("pending_upgrades", []), fake=True)
+
+
+def build_index(catalog: Catalog) -> Index:
+    fake = os.environ.get("SAMURAI_APPS_FAKE_INDEX")
+    if fake:   # test fixture: describes availability only; never set in production
+        return load_fake_index(fake)
+    if not shutil.which("pacman"):
+        raise CatalogError("pacman not found: samurai apps runs on Samurai OS / Arch")
+    idx = Index()
+    sl = _run(["pacman", "-Sl"])
+    for line in sl.stdout.splitlines():
+        parts = line.split()
+        if len(parts) >= 2:
+            if parts[0] not in idx.repos:
+                idx.repos.append(parts[0])
+            idx.sync.setdefault(parts[1], parts[0])   # first repo wins, as pacman does
+    sg = _run(["pacman", "-Sgg"])   # "group member" pairs (-Sg alone lists names only)
+    for line in sg.stdout.splitlines():
+        parts = line.split()
+        if len(parts) == 2:
+            idx.groups.setdefault(parts[0], []).append(parts[1])
+    wanted = _catalog_packages(catalog)
+    for name in sorted(wanted):
+        if name in idx.sync or name in idx.groups:
+            continue
+        r = _run(["pacman", "-Sp", "--print-format", "%r/%n", name])
+        lines = [l for l in r.stdout.splitlines() if "/" in l and " " not in l]
+        if r.returncode == 0 and lines:
+            idx.provides[name] = lines[0]
+    if wanted:
+        t = _run(["pacman", "-T", *sorted(n for n in wanted if n not in idx.groups)])
+        unsatisfied = set(t.stdout.split())
+        idx.installed = {n for n in wanted if n not in unsatisfied and n not in idx.groups}
+    q = _run(["pacman", "-Qq"])
+    idx.installed |= set(q.stdout.split())
+    idx.db_age_days = _sync_db_age_days()
+    qu = _run(["pacman", "-Qu"])
+    idx.pending_upgrades = [l.split()[0] for l in qu.stdout.splitlines() if l.strip()
+                            and "[ignored]" not in l]
+    if shutil.which("flatpak"):
+        idx.has_flatpak = True
+        remotes = _run(["flatpak", "remotes", "--columns=name"])
+        idx.flathub = "flathub" in remotes.stdout.split()
+        fl = _run(["flatpak", "list", "--app", "--columns=application"])
+        idx.flatpak_installed = set(fl.stdout.split())
+    return idx
+
+
+def _catalog_packages(catalog: Catalog) -> set[str]:
+    names: set[str] = set()
+    for a in list(catalog.apps.values()) + list(catalog.toggles.values()):
+        names.update(a.packages)
+    return names
+
+
+def _sync_db_age_days() -> float | None:
+    dbpath = "/var/lib/pacman/"
+    r = _run(["pacman-conf", "DBPath"]) if shutil.which("pacman-conf") else None
+    if r is not None and r.returncode == 0 and r.stdout.strip():
+        dbpath = r.stdout.strip()
+    dbs = list(pathlib.Path(dbpath, "sync").glob("*.db"))
+    if not dbs:
+        return None
+    newest = max(p.stat().st_mtime for p in dbs)
+    return max(0.0, (time.time() - newest) / 86400)
+
+
+# ------------------------------------------------------------------ status
+@dataclass
+class PkgState:
+    name: str
+    repo: str | None
+    installed: bool
+    reason: str = ""
+
+    def to_json(self) -> dict:
+        return {"name": self.name, "repo": self.repo, "available": self.repo is not None,
+                "installed": self.installed, "reason": self.reason or None}
+
+
+@dataclass
+class AppState:
+    app: App
+    status: str          # installed|available|partial|unavailable|not-yet|needs-flatpak|script|hidden
+    reason: str
+    pkgs: list[PkgState]
+
+    @property
+    def installable(self) -> bool:
+        return self.status in ("available", "installed", "script")
+
+    @property
+    def installed(self) -> bool:
+        return self.status == "installed" or (
+            self.status == "hidden" and bool(self.pkgs) and all(p.installed for p in self.pkgs))
+
+
+def _missing_reason(pkg: str, app: App, catalog: Catalog, idx: Index) -> str:
+    hint = catalog.package_hints.get(pkg)
+    if hint and hint not in idx.repos:
+        return f"needs the [{hint}] repository"
+    if app.source in NOT_YET_SOURCES or pkg.startswith("samurai-"):
+        return "not available yet ([samurai] package not built)"
+    if app.source == "chaotic" and "chaotic-aur" not in idx.repos:
+        return "needs the Chaotic-AUR repository"
+    if app.source == "multilib" and "multilib" not in idx.repos:
+        return "needs the [multilib] repository"
+    return "not in any enabled repository"
+
+
+def app_state(app: App, catalog: Catalog, idx: Index) -> AppState:
+    if app.source == "flatpak":
+        if app.flatpak in idx.flatpak_installed:
+            st, why = "installed", "flatpak"
+        elif idx.has_flatpak:
+            st, why = "available", "flathub (flatpak)"
+        else:
+            st, why = "needs-flatpak", "Flatpak app: run `samurai apps install flatpak` first"
+        return AppState(app, "hidden" if app.hidden else st, why, [])
+    if app.source == "user-script":
+        return AppState(app, "hidden" if app.hidden else "script",
+                        "vendor installer, runs as your user", [])
+    pkgs = []
+    for p in app.packages:
+        repo = idx.repo_of(p)
+        pkgs.append(PkgState(p, repo, idx.is_installed(p),
+                             "" if repo else _missing_reason(p, app, catalog, idx)))
+    avail = [p for p in pkgs if p.repo]
+    missing = [p for p in pkgs if not p.repo]
+    if not missing:
+        if all(p.installed for p in pkgs):
+            st, why = "installed", ""
+        else:
+            st, why = "available", ", ".join(sorted({p.repo for p in avail}))
+    elif not avail:
+        reasons = sorted({p.reason for p in missing})
+        st = "not-yet" if all("not available yet" in r for r in reasons) else "unavailable"
+        why = "; ".join(reasons)
+    else:
+        st = "partial"
+        why = "missing " + ", ".join(f"{p.name} ({p.reason})" for p in missing)
+    if app.hidden:
+        st = "hidden"
+        why = app.note or "not offered"
+    return AppState(app, st, why, pkgs)
+
+
+def state_json(s: AppState, catalog: Catalog) -> dict:
+    a = s.app
+    d = {
+        "id": a.id, "name": a.name, "category": a.category,
+        "category_name": catalog.category_name(a.category), "origin": a.origin,
+        "source": a.source, "default": a.default, "hidden": a.hidden,
+        "status": s.status, "installed": s.installed, "installable": s.installable,
+        "reason": s.reason or None, "packages": [p.to_json() for p in s.pkgs],
+        "bundles": catalog.bundles_containing(a.id) if a.origin != "toggle" else [],
+    }
+    if a.flatpak:
+        d["flatpak"] = a.flatpak
+    for key in ("description", "note"):
+        if getattr(a, key):
+            d[key] = getattr(a, key)
+    if a.enable_units():
+        d["services"] = a.enable_units()
+    if a.manual_root_steps():
+        d["manual_root_steps"] = a.manual_root_steps()
+    if a.user_commands:
+        d["user_commands"] = a.user_commands
+    if a.user_groups:
+        d["user_groups"] = a.user_groups
+    return d
+
+
+# ------------------------------------------------------------------ terminal output
+class Style:
+    def __init__(self, stream) -> None:
+        self.color = stream.isatty() and not os.environ.get("NO_COLOR") and \
+            os.environ.get("TERM") != "dumb"
+        enc = (getattr(stream, "encoding", None) or "").lower()
+        self.utf8 = "utf" in enc
+        self.ok = "✓" if self.utf8 else "+"
+        self.bad = "✗" if self.utf8 else "x"
+        self.dot = "·" if self.utf8 else "-"
+        self.dash = "—" if self.utf8 else "-"
+
+    def _c(self, code: str, s: str) -> str:
+        return f"\033[{code}m{s}\033[0m" if self.color else s
+
+    def bold(self, s): return self._c("1", s)
+    def dim(self, s): return self._c("2", s)
+    def green(self, s): return self._c("32", s)
+    def red(self, s): return self._c("31", s)
+    def yellow(self, s): return self._c("33", s)
+    def cyan(self, s): return self._c("36", s)
+
+
+def _width() -> int:
+    return max(60, min(shutil.get_terminal_size((100, 24)).columns, 140))
+
+
+def _trunc(s: str, n: int) -> str:
+    return s if len(s) <= n else s[: max(0, n - 1)] + "…"
+
+
+def _marker(st: AppState, sty: Style) -> str:
+    if st.installed:
+        return sty.green(sty.ok)
+    if st.status in ("available", "script"):
+        return " "
+    if st.status == "partial":
+        return sty.yellow("~")
+    return sty.red(sty.bad)
+
+
+def print_rows(states: list[AppState], catalog: Catalog, sty: Style, group: bool = True) -> None:
+    w = _width()
+    id_w = min(max([len(s.app.id) for s in states] + [8]), 26)
+    name_w = max(18, min(40, (w - id_w - 8) // 2))
+    rest = max(10, w - id_w - name_w - 8)
+    current = None
+    for s in states:
+        if group and s.app.category != current:
+            current = s.app.category
+            members = [x for x in states if x.app.category == current]
+            inst = sum(1 for x in members if x.installed)
+            print()
+            print(sty.bold(catalog.category_name(current))
+                  + sty.dim(f"  ({len(members)} apps, {inst} installed)"))
+        print(f"  {_marker(s, sty)} {_trunc(s.app.id, id_w):<{id_w}}  "
+              f"{_trunc(s.app.name, name_w):<{name_w}}  {_status_text_trunc(s, sty, rest)}")
+
+
+def _status_text_trunc(s: AppState, sty: Style, n: int) -> str:
+    plain = "installed" if s.status == "installed" else (
+        "vendor script" if s.status == "script" else s.reason or s.status)
+    plain = _trunc(plain, n)
+    if s.installed:
+        return sty.green(plain)
+    if s.status == "available":
+        return sty.cyan(plain)
+    if s.status in ("script", "partial"):
+        return sty.yellow(plain)
+    return sty.red(plain)
+
+
+def legend(sty: Style) -> str:
+    return sty.dim(f"{sty.ok} installed   ~ partly available   {sty.bad} not available   "
+                   f"(blank) ready to install")
+
+
+# ------------------------------------------------------------------ commands: read-only
+def _sorted_states(catalog: Catalog, idx: Index, include_hidden: bool) -> list[AppState]:
+    order = {c: i for i, c in enumerate(catalog.ordered_categories())}
+    states = [app_state(a, catalog, idx) for a in catalog.apps.values()
+              if include_hidden or not a.hidden]
+    states.sort(key=lambda s: (order.get(s.app.category, 999), s.app.name.lower()))
+    return states
+
+
+def _resolve_category(catalog: Catalog, cat: str) -> str:
+    cats = catalog.ordered_categories()
+    for c in cats:
+        if c == cat or c.lower() == cat.lower() or catalog.category_name(c).lower() == cat.lower():
+            return c
+    hint = difflib.get_close_matches(cat, cats, n=3)
+    raise UsageError(f"unknown category: {cat!r}" + (f" (did you mean: {', '.join(hint)}?)" if hint else "")
+                     + " — see: samurai apps categories")
+
+
+def cmd_list(args, catalog: Catalog, idx: Index) -> int:
+    states = _sorted_states(catalog, idx, args.all)
+    if args.category:
+        cat = _resolve_category(catalog, args.category)
+        states = [s for s in states if s.app.category == cat]
+    if args.installed:
+        states = [s for s in states if s.installed]
+    if args.available:
+        states = [s for s in states if s.installable and not s.installed]
+    if args.json:
+        _dump({"schema": JSON_SCHEMA, "catalog": catalog.source_dir,
+               "apps": [state_json(s, catalog) for s in states], "summary": _summary(states)})
+        return EXIT_OK
+    sty = Style(sys.stdout)
+    total = len(states)
+    inst = sum(1 for s in states if s.installed)
+    print(sty.bold("Samurai OS apps") + f" {sty.dash} {total} apps, {inst} installed")
+    print(legend(sty))
+    if not states:
+        print("\n  (nothing matches)")
+    print_rows(states, catalog, sty)
+    print()
+    print(sty.dim("details: samurai apps info <id>   install: samurai apps install <id...>   "
+                  "bundles: samurai apps bundles"))
+    return EXIT_OK
+
+
+def _summary(states: list[AppState]) -> dict:
+    out: dict[str, int] = {}
+    for s in states:
+        out[s.status] = out.get(s.status, 0) + 1
+    out["total"] = len(states)
+    return out
+
+
+def cmd_categories(args, catalog: Catalog, idx: Index) -> int:
+    states = _sorted_states(catalog, idx, False)
+    rows = []
+    for c in catalog.ordered_categories():
+        members = [s for s in states if s.app.category == c]
+        if not members:
+            continue
+        rows.append({"id": c, "name": catalog.category_name(c), "apps": len(members),
+                     "installed": sum(1 for s in members if s.installed),
+                     "available": sum(1 for s in members if s.installable)})
+    if args.json:
+        _dump({"schema": JSON_SCHEMA, "categories": rows})
+        return EXIT_OK
+    sty = Style(sys.stdout)
+    print(sty.bold(f"{'CATEGORY':<26} {'ID':<18} {'APPS':>5} {'READY':>6} {'INSTALLED':>10}"))
+    for r in rows:
+        print(f"{_trunc(r['name'], 26):<26} {_trunc(r['id'], 18):<18} {r['apps']:>5} "
+              f"{r['available']:>6} {r['installed']:>10}")
+    print(sty.dim("\nlist one: samurai apps list --category <id>"))
+    return EXIT_OK
+
+
+def search_score(app: App, term: str, catalog: Catalog) -> int:
+    t = term.lower()
+    if app.id.lower() == t or app.name.lower() == t:
+        return 100
+    if t in app.packages:
+        return 90
+    if app.id.lower().startswith(t) or app.name.lower().startswith(t):
+        return 80
+    if t in app.id.lower() or t in app.name.lower():
+        return 60
+    if any(t in p for p in app.packages) or (app.flatpak and t in app.flatpak.lower()):
+        return 40
+    if t in (app.description + " " + app.note).lower():
+        return 30
+    if t in app.category.lower() or t in catalog.category_name(app.category).lower():
+        return 20
+    return 0
+
+
+def cmd_search(args, catalog: Catalog, idx: Index) -> int:
+    term = " ".join(args.term).strip()
+    if not term:
+        raise UsageError("search needs a term")
+    scored = [(search_score(a, term, catalog), a) for a in catalog.apps.values()
+              if not a.hidden or args.all]
+    scored = [(s, a) for s, a in scored if s > 0]
+    scored.sort(key=lambda x: (-x[0], x[1].name.lower()))
+    states = [app_state(a, catalog, idx) for _, a in scored]
+    bundles = [b for b in catalog.bundles.values()
+               if term.lower() in (b.id + " " + b.name + " " + b.description).lower()]
+    if args.json:
+        _dump({"schema": JSON_SCHEMA, "term": term,
+               "apps": [state_json(s, catalog) for s in states],
+               "bundles": [b.id for b in bundles]})
+        return EXIT_OK if states or bundles else EXIT_FAIL
+    sty = Style(sys.stdout)
+    if not states and not bundles:
+        print(f"no app matches {term!r}")
+        return EXIT_FAIL
+    print(sty.bold(f"{len(states)} app(s) match {term!r}") + "   " + legend(sty))
+    print_rows(states, catalog, sty, group=False) if states else None
+    for b in bundles:
+        print(f"  {sty.cyan('@' + b.id):<20} bundle: {b.name}")
+    return EXIT_OK
+
+
+def cmd_info(args, catalog: Catalog, idx: Index) -> int:
+    name = args.id
+    if name.startswith("@"):
+        return _bundle_info(name[1:], args, catalog, idx)
+    app = lookup_app(catalog, name)
+    st = app_state(app, catalog, idx)
+    if args.json:
+        _dump({"schema": JSON_SCHEMA, "app": state_json(st, catalog)})
+        return EXIT_OK
+    sty = Style(sys.stdout)
+    print(sty.bold(app.name) + sty.dim(f"  ({app.id})"))
+    rows = [("category", f"{catalog.category_name(app.category)} ({app.category})"),
+            ("status", (f"{_marker(st, sty)} " if _marker(st, sty) != " " else "") + st.status
+             + (f" {sty.dash} {st.reason}" if st.reason else "")),
+            ("source", app.source + (f" ({app.origin} catalog)")),]
+    if app.description:
+        rows.append(("about", app.description))
+    if app.note:
+        rows.append(("note", app.note))
+    if app.flatpak:
+        rows.append(("flatpak", app.flatpak))
+    for k, v in rows:
+        print(f"  {k:<10} {v}")
+    if st.pkgs:
+        print("  packages")
+        for p in st.pkgs:
+            mark = sty.green(sty.ok) if p.installed else (" " if p.repo else sty.red(sty.bad))
+            where = p.repo if p.repo else sty.red(p.reason)
+            print(f"    {mark} {p.name:<34} {where}")
+    if app.enable_units():
+        print(f"  {'services':<10} {', '.join(app.enable_units())} (enabled after install)")
+    for step in app.manual_root_steps():
+        print(f"  {'manual':<10} {step}")
+    if app.user_groups:
+        print(f"  {'groups':<10} optional (root-equivalent for some groups): "
+              + "; ".join(f"sudo usermod -aG {g} $USER" for g in app.user_groups))
+    for c in app.user_commands:
+        print(f"  {'user cmd':<10} {c}")
+    b = catalog.bundles_containing(app.id)
+    if b:
+        print(f"  {'bundles':<10} " + ", ".join("@" + x for x in b))
+    if st.installable and not st.installed:
+        print(sty.dim(f"\n  install: samurai apps install {app.id}"))
+    elif st.installed:
+        print(sty.dim(f"\n  remove:  samurai apps remove {app.id}"))
+    return EXIT_OK
+
+
+def _bundle_info(bid: str, args, catalog: Catalog, idx: Index) -> int:
+    if bid not in catalog.bundles:
+        raise UsageError(f"unknown bundle: @{bid} — list them with: samurai apps bundles")
+    b = catalog.bundles[bid]
+    targets = resolve_targets(catalog, ["@" + bid])
+    states = [app_state(t.app, catalog, idx) for t in targets]
+    if args.json:
+        _dump({"schema": JSON_SCHEMA, "bundle": _bundle_json(b, states, catalog)})
+        return EXIT_OK
+    sty = Style(sys.stdout)
+    print(sty.bold(f"@{b.id}  {b.name}"))
+    if b.description:
+        print(f"  {b.description}")
+    print(legend(sty))
+    print_rows(states, catalog, sty, group=False)
+    print(sty.dim(f"\n  install: samurai apps install @{b.id}  "
+                  f"(members that are not available are skipped with a warning)"))
+    return EXIT_OK
+
+
+def _bundle_json(b: Bundle, states: list[AppState], catalog: Catalog) -> dict:
+    return {"id": b.id, "name": b.name, "description": b.description, "apps": b.apps,
+            "toggles": b.toggles, "members": [state_json(s, catalog) for s in states],
+            "summary": _summary(states)}
+
+
+def cmd_bundles(args, catalog: Catalog, idx: Index) -> int:
+    rows = []
+    for b in catalog.bundles.values():
+        states = [app_state(t.app, catalog, idx) for t in resolve_targets(catalog, ["@" + b.id])]
+        rows.append((b, states))
+    if args.json:
+        _dump({"schema": JSON_SCHEMA,
+               "bundles": [_bundle_json(b, s, catalog) for b, s in rows]})
+        return EXIT_OK
+    sty = Style(sys.stdout)
+    print(sty.bold("Samurai OS app bundles") + sty.dim("  (install with: samurai apps install @<bundle>)"))
+    for b, states in rows:
+        ready = sum(1 for s in states if s.installable)
+        inst = sum(1 for s in states if s.installed)
+        print()
+        print(f"  {sty.cyan('@' + b.id):<14} {sty.bold(b.name)}"
+              + sty.dim(f"  {len(states)} items, {ready} ready, {inst} installed"))
+        if b.description:
+            print(f"  {'':<12}{sty.dim(b.description)}")
+        names = []
+        for s in states:
+            label = s.app.id if s.app.origin != "toggle" else f"{s.app.id} (default set)"
+            mark = _marker(s, sty)
+            names.append(f"{sty.dot if mark == ' ' else mark} {label}")
+        print(f"  {'':<12}" + "   ".join(names))
+    return EXIT_OK
+
+
+def cmd_check(args, catalog: Catalog, idx: Index) -> int:
+    """Availability of every catalog package (CI and `samurai apps doctor` use)."""
+    rows = []
+    items = [(a, "app") for a in catalog.apps.values()] + [(t, "toggle") for t in catalog.toggles.values()]
+    for a, kind in items:
+        if a.source in ("flatpak", "user-script"):
+            continue
+        for p in a.packages:
+            repo = idx.repo_of(p)
+            rows.append({"owner": a.id, "kind": kind, "hidden": a.hidden, "package": p,
+                         "repo": repo, "reason": None if repo else _missing_reason(p, a, catalog, idx)})
+    uniq: dict[str, dict] = {}
+    for r in rows:
+        uniq.setdefault(r["package"], r)
+    resolved = [r for r in uniq.values() if r["repo"]]
+    missing = [r for r in rows if not r["repo"]]
+    by_repo: dict[str, int] = {}
+    for r in resolved:
+        by_repo[r["repo"]] = by_repo.get(r["repo"], 0) + 1
+    report = {"schema": JSON_SCHEMA, "repos": idx.repos, "packages": len(uniq),
+              "resolved": len(resolved), "unresolved": len(uniq) - len(resolved),
+              "by_repo": by_repo, "missing": missing,
+              "flatpak_apps": [a.id for a in catalog.apps.values() if a.source == "flatpak"],
+              "script_apps": [a.id for a in catalog.apps.values() if a.source == "user-script"]}
+    if args.json:
+        _dump(report)
+    else:
+        sty = Style(sys.stdout)
+        print(sty.bold("catalog availability") + f"  repos: {', '.join(idx.repos) or '(none)'}")
+        print(f"  {report['resolved']}/{report['packages']} distinct packages resolve "
+              f"({report['unresolved']} do not)")
+        print("  by repo: " + ", ".join(f"{k} {v}" for k, v in sorted(by_repo.items())))
+        print(f"  flatpak apps: {len(report['flatpak_apps'])}   vendor-script apps: "
+              f"{len(report['script_apps'])}")
+        if missing:
+            print(sty.bold("\n  unresolved:"))
+            for r in missing:
+                tag = " (hidden)" if r["hidden"] else ""
+                print(f"    {sty.red(sty.bad)} {r['package']:<34} {r['kind']} {r['owner']}{tag}: {r['reason']}")
+    visible_missing = [r for r in missing if not r["hidden"]]
+    return EXIT_UNAVAILABLE if (args.strict and visible_missing) else EXIT_OK
+
+
+def _dump(obj) -> None:
+    json.dump(obj, sys.stdout, indent=2, ensure_ascii=False)
+    sys.stdout.write("\n")
+
+
+# ------------------------------------------------------------------ install / remove planning
+@dataclass
+class Plan:
+    pacman: list[str] = field(default_factory=list)
+    flatpaks: list[tuple[App, str]] = field(default_factory=list)
+    scripts: list[App] = field(default_factory=list)
+    services: list[str] = field(default_factory=list)
+    apps: list[App] = field(default_factory=list)          # apps that get something installed
+    already: list[App] = field(default_factory=list)
+    skipped: list[tuple[App, str]] = field(default_factory=list)
+    errors: list[tuple[App, str]] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
+
+
+def plan_install(targets: list[Target], catalog: Catalog, idx: Index,
+                 skip_unavailable: bool = False, user_scripts: bool = True) -> Plan:
+    plan = Plan()
+    for t in targets:
+        app = t.app
+        st = app_state(app, catalog, idx)
+        lenient = skip_unavailable or not t.explicit
+        label = f"{app.id}" + (f" (@{t.via})" if t.via else "")
+        if st.status == "hidden":
+            plan.errors.append((app, f"{label}: not offered ({st.reason})"))
+            continue
+        if st.installed:
+            plan.already.append(app)
+            continue
+        if st.status == "needs-flatpak":
+            msg = f"{label}: {st.reason}"
+            (plan.skipped if lenient else plan.errors).append((app, msg))
+            continue
+        if app.source == "flatpak":
+            plan.flatpaks.append((app, app.flatpak))
+            plan.apps.append(app)
+            continue
+        if st.status == "script":
+            if user_scripts:
+                plan.scripts.append(app)
+                plan.apps.append(app)
+            else:
+                plan.skipped.append((app, f"{label}: vendor script deferred "
+                                     f"(run later: samurai apps install {app.id})"))
+            continue
+        if st.status in ("unavailable", "not-yet"):
+            msg = f"{label}: {st.reason}"
+            (plan.skipped if lenient else plan.errors).append((app, msg))
+            continue
+        if st.status == "partial" and not lenient:
+            plan.errors.append((app, f"{label}: {st.reason} "
+                                     f"(--skip-unavailable installs the rest)"))
+            continue
+        if st.status == "partial":
+            plan.skipped.append((app, f"{label}: {st.reason}"))
+        new = [p.name for p in st.pkgs if p.repo and not p.installed]
+        for p in new:
+            if p not in plan.pacman:
+                plan.pacman.append(p)
+        for unit in app.enable_units():
+            if unit not in plan.services:
+                plan.services.append(unit)
+        for step in app.manual_root_steps():
+            plan.notes.append(f"{app.id}: manual step (not run automatically): {step}")
+        for g in app.user_groups:
+            plan.notes.append(f"{app.id}: optional, root-equivalent for some groups: "
+                              f"sudo usermod -aG {g} $USER")
+        plan.apps.append(app)
+    return plan
+
+
+def plan_remove(targets: list[Target], catalog: Catalog, idx: Index) -> Plan:
+    plan = Plan()
+    removing = {id(t.app) for t in targets}
+    keep: set[str] = set()
+    for a in list(catalog.apps.values()) + list(catalog.toggles.values()):
+        if id(a) in removing or a.source in ("flatpak", "user-script"):
+            continue
+        st = app_state(a, catalog, idx)
+        if st.installed or (a.origin == "toggle" and any(p.installed for p in st.pkgs)):
+            keep.update(a.packages)
+    for t in targets:
+        app = t.app
+        if app.source == "flatpak":
+            if app.flatpak in idx.flatpak_installed:
+                plan.flatpaks.append((app, app.flatpak))
+                plan.apps.append(app)
+            else:
+                plan.skipped.append((app, f"{app.id}: not installed"))
+            continue
+        if app.source == "user-script":
+            plan.skipped.append((app, f"{app.id}: installed by a vendor script; remove it the "
+                                      f"vendor's way"))
+            continue
+        pk = []
+        for p in app.packages:
+            members = idx.groups.get(p, [p])
+            for m in members:
+                if m in idx.installed and m in idx.sync and m not in keep and m not in pk:
+                    pk.append(m)
+                elif m in idx.installed and m in keep:
+                    plan.notes.append(f"{app.id}: keeping {m} (another installed app uses it)")
+        if not pk:
+            plan.skipped.append((app, f"{app.id}: not installed"))
+            continue
+        for p in pk:
+            if p not in plan.pacman:
+                plan.pacman.append(p)
+        plan.apps.append(app)
+    return plan
+
+
+def privilege_prefix() -> list[str]:
+    if os.geteuid() == 0:
+        return []
+    if shutil.which("sudo"):
+        return ["sudo"]
+    if shutil.which("pkexec"):
+        return ["pkexec"]
+    raise UsageError("not root and neither sudo nor pkexec is available")
+
+
+def _prefix_for(dry_run: bool) -> list[str]:
+    if os.geteuid() == 0:
+        return []
+    try:
+        return privilege_prefix()
+    except UsageError:
+        if dry_run:
+            return ["sudo"]
+        raise
+
+
+def in_chroot_or_offline_systemd() -> bool:
+    return os.environ.get("SAMURAI_CHROOT") == "1" or not os.path.isdir("/run/systemd/system")
+
+
+def install_commands(plan: Plan, idx: Index, with_upgrade: bool, prefix: list[str]) -> list[list[str]]:
+    cmds: list[list[str]] = []
+    if plan.pacman:
+        op = "-Su" if with_upgrade else "-S"
+        cmds.append(prefix + ["pacman", op, "--needed", "--noconfirm", *plan.pacman])
+    if plan.flatpaks:
+        if not idx.flathub:
+            cmds.append(prefix + ["flatpak", "remote-add", "--if-not-exists", "flathub", FLATHUB_URL])
+        cmds.append(prefix + ["flatpak", "install", "--noninteractive", "flathub",
+                              *[f for _, f in plan.flatpaks]])
+    if plan.services:
+        now = [] if in_chroot_or_offline_systemd() else ["--now"]
+        cmds.append(prefix + ["systemctl", "enable", *now, *plan.services])
+    return cmds
+
+
+def remove_commands(plan: Plan, prefix: list[str]) -> list[list[str]]:
+    cmds = []
+    if plan.pacman:
+        cmds.append(prefix + ["pacman", "-Rs", "--noconfirm", *plan.pacman])
+    if plan.flatpaks:
+        cmds.append(prefix + ["flatpak", "uninstall", "--noninteractive",
+                              *[f for _, f in plan.flatpaks]])
+    return cmds
+
+
+def preflight(idx: Index, max_age: float, with_upgrade: bool, ignore_db_age: bool) -> list[str]:
+    """Problems that make a pacman -S unsafe now. Never fixes them with -Sy
+    (that would be a partial upgrade); the user runs `samurai update`."""
+    problems = []
+    if idx.db_age_days is None:
+        problems.append("no pacman sync databases yet — run `samurai update` first")
+    elif idx.db_age_days > max_age and not ignore_db_age:
+        problems.append(f"package databases are {idx.db_age_days:.1f} days old (limit {max_age:g}) — "
+                        f"run `samurai update` first so downloads match the mirrors")
+    if idx.pending_upgrades and not with_upgrade:
+        n = len(idx.pending_upgrades)
+        problems.append(f"{n} system upgrade(s) pending ({', '.join(idx.pending_upgrades[:5])}"
+                        f"{', …' if n > 5 else ''}) — installing now would be a partial upgrade. "
+                        f"Run `samurai update` first, or pass --with-upgrade to upgrade and install "
+                        f"in one transaction")
+    return problems
+
+
+def _confirm(prompt: str, yes: bool) -> bool:
+    if yes:
+        return True
+    if not sys.stdin.isatty():
+        raise UsageError("no terminal to ask for confirmation; re-run with --yes")
+    try:
+        return input(f"{prompt} [y/N] ").strip().lower() in ("y", "yes")
+    except EOFError:
+        return False
+
+
+def _show(cmd: list[str], sty: Style) -> None:
+    print(sty.dim("  $ ") + shlex.join(cmd))
+
+
+def _run_live(cmd: list[str]) -> int:
+    sys.stdout.flush()
+    sys.stderr.flush()
+    try:
+        return subprocess.run(cmd).returncode
+    except FileNotFoundError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 127
+
+
+def _script_user() -> str | None:
+    if os.geteuid() != 0:
+        return None   # run as ourselves
+    if os.environ.get("SUDO_USER"):
+        return os.environ["SUDO_USER"]
+    if os.environ.get("PKEXEC_UID"):
+        return _uid_name(os.environ["PKEXEC_UID"])
+    return None
+
+
+def _uid_name(uid: str) -> str | None:
+    try:
+        import pwd
+        return pwd.getpwuid(int(uid)).pw_name
+    except (KeyError, ValueError):
+        return None
+
+
+def _write_notes(plan: Plan) -> None:
+    """SAMURAI_APPS_NOTES_FILE (set by samurai-postinstall): append one
+    `samurai apps install <id>   # reason` line per skipped/deferred app, the
+    first-boot to-do list."""
+    path = os.environ.get("SAMURAI_APPS_NOTES_FILE")
+    if not path or not plan.skipped:
+        return
+    with open(path, "a", encoding="utf-8") as f:
+        for app, msg in plan.skipped:
+            reason = msg.split(": ", 1)[-1]
+            f.write(f"samurai apps install {app.id if app.origin != 'toggle' else '@' + app.id}"
+                    f"   # {reason}\n")
+
+
+def cmd_install(args, catalog: Catalog, idx: Index) -> int:
+    sty = Style(sys.stdout)
+    targets = resolve_targets(catalog, args.ids)
+    plan = plan_install(targets, catalog, idx, args.skip_unavailable,
+                        user_scripts=not args.no_user_scripts and os.environ.get("SAMURAI_CHROOT") != "1")
+    for _, msg in plan.errors:
+        print(sty.red(f"{sty.bad} {msg}"), file=sys.stderr)
+    if plan.errors:
+        print("nothing was installed.", file=sys.stderr)
+        return EXIT_UNAVAILABLE if all("not offered" not in m for _, m in plan.errors) else EXIT_USAGE
+    for _, msg in plan.skipped:
+        print(sty.yellow(f"! skipped {msg}"))
+    _write_notes(plan)
+    for a in plan.already:
+        print(sty.green(f"{sty.ok} {a.id} is already installed"))
+    if not (plan.pacman or plan.flatpaks or plan.scripts or plan.services):
+        print("nothing to install.")
+        return EXIT_OK
+    max_age = float(os.environ.get("SAMURAI_APPS_MAX_DB_AGE_DAYS", DEFAULT_MAX_DB_AGE_DAYS))
+    problems = preflight(idx, max_age, args.with_upgrade, args.ignore_db_age) if plan.pacman else []
+    if plan.flatpaks and not idx.has_flatpak:
+        problems.append("flatpak is not installed — run `samurai apps install flatpak` first")
+    prefix = _prefix_for(args.dry_run)
+    cmds = install_commands(plan, idx, args.with_upgrade, prefix)
+
+    print(sty.bold(f"\nInstalling {len(plan.apps)} app(s):") + " " + ", ".join(a.id for a in plan.apps))
+    if plan.pacman:
+        print(f"  pacman packages ({len(plan.pacman)}): {' '.join(plan.pacman)}")
+    if plan.flatpaks:
+        print(f"  flatpak (flathub): {' '.join(f for _, f in plan.flatpaks)}")
+    if plan.services:
+        print(f"  services to enable: {' '.join(plan.services)}")
+    for a in plan.scripts:
+        print(f"  vendor script for {a.id} (runs as your user, not root):")
+        for c in a.user_commands:
+            print(f"      {c}")
+    for n in plan.notes:
+        print(sty.dim(f"  note: {n}"))
+    print(sty.bold("commands:"))
+    for c in cmds:
+        _show(c, sty)
+    if problems:
+        for p in problems:
+            print(sty.red(f"{sty.bad} {p}"), file=sys.stderr)
+        return EXIT_NEEDS_UPDATE
+    if args.dry_run:
+        print(sty.dim("(dry run: nothing changed)"))
+        return EXIT_OK
+    if not _confirm("Proceed?", args.yes):
+        print("aborted.")
+        return EXIT_ABORTED
+    for c in cmds:
+        print(sty.bold("==> ") + shlex.join(c))
+        rc = _run_live(c)
+        if rc != 0:
+            print(sty.red(f"{sty.bad} command failed (exit {rc}): {shlex.join(c)}"), file=sys.stderr)
+            return EXIT_FAIL
+    for a in plan.scripts:
+        user = _script_user()
+        if os.geteuid() == 0 and not user:
+            print(sty.yellow(f"! {a.id}: vendor script not run as root; as your user run: "
+                             + " && ".join(a.user_commands)))
+            continue
+        for c in a.user_commands:
+            cmd = ["bash", "-c", c] if not user else ["runuser", "-u", user, "--", "bash", "-lc", c]
+            print(sty.bold("==> ") + shlex.join(cmd))
+            if _run_live(cmd) != 0:
+                print(sty.red(f"{sty.bad} {a.id}: vendor script failed"), file=sys.stderr)
+                return EXIT_FAIL
+    print(sty.green(f"{sty.ok} done: " + ", ".join(a.id for a in plan.apps)))
+    return EXIT_OK
+
+
+def cmd_remove(args, catalog: Catalog, idx: Index) -> int:
+    sty = Style(sys.stdout)
+    targets = resolve_targets(catalog, args.ids, allow_hidden=True)
+    plan = plan_remove(targets, catalog, idx)
+    for _, msg in plan.skipped:
+        print(sty.yellow(f"! {msg}"))
+    for n in plan.notes:
+        print(sty.dim(f"  note: {n}"))
+    if not (plan.pacman or plan.flatpaks):
+        print("nothing to remove.")
+        return EXIT_OK
+    prefix = _prefix_for(args.dry_run)
+    cmds = remove_commands(plan, prefix)
+    print(sty.bold(f"Removing {len(plan.apps)} app(s):") + " " + ", ".join(a.id for a in plan.apps))
+    if plan.pacman:
+        print(f"  pacman packages ({len(plan.pacman)}): {' '.join(plan.pacman)}  "
+              + sty.dim("(+ dependencies nothing else needs; changed configs kept as .pacsave)"))
+    if plan.flatpaks:
+        print(f"  flatpak: {' '.join(f for _, f in plan.flatpaks)}")
+    print(sty.bold("commands:"))
+    for c in cmds:
+        _show(c, sty)
+    if args.dry_run:
+        print(sty.dim("(dry run: nothing changed)"))
+        return EXIT_OK
+    if not _confirm("Remove?", args.yes):
+        print("aborted.")
+        return EXIT_ABORTED
+    for c in cmds:
+        print(sty.bold("==> ") + shlex.join(c))
+        rc = _run_live(c)
+        if rc != 0:
+            print(sty.red(f"{sty.bad} command failed (exit {rc})"), file=sys.stderr)
+            return EXIT_FAIL
+    print(sty.green(f"{sty.ok} removed: " + ", ".join(a.id for a in plan.apps)))
+    return EXIT_OK
+
+
+# ------------------------------------------------------------------ profile support
+def profile_app_names(catalog: Catalog, names) -> list[str]:
+    """Validate install-profile `[packages] apps`: a strict allowlist of catalog
+    ids and @bundles. Returns the normalized names; raises UsageError."""
+    if not isinstance(names, list) or not all(isinstance(n, str) for n in names):
+        raise UsageError("packages.apps must be a list of catalog app ids or @bundles")
+    out = []
+    for n in names:
+        if n.startswith("@"):
+            if n[1:] not in catalog.bundles:
+                raise UsageError(f"packages.apps: unknown bundle {n!r}")
+            out.append(n)
+            continue
+        if n not in catalog.apps:   # exact ids only in profiles: no fuzzy matching
+            raise UsageError(f"packages.apps: unknown app id {n!r}")
+        if catalog.apps[n].hidden:
+            raise UsageError(f"packages.apps: app {n!r} is not offered")
+        out.append(n)
+    return out
+
+
+# ------------------------------------------------------------------ CLI
+EPILOG = """\
+exit codes: 0 ok · 1 a command failed · 2 usage / unknown app · 3 not available
+            · 4 run `samurai update` first · 5 aborted · 6 catalog problem
+
+The catalog is the allowlist: anything else is plain `pacman -S`. This tool
+never syncs package databases on its own (no `pacman -Sy`: that is a partial
+upgrade); it asks you to run `samurai update` when they are stale.
+"""
+
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        prog="samurai apps", description="Find and install optional apps from the Samurai OS catalog.",
+        epilog=EPILOG, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--version", action="version", version=f"samurai apps {VERSION}")
+    sub = p.add_subparsers(dest="command", metavar="<command>")
+
+    def add(name, help_, **kw):
+        sp = sub.add_parser(name, help=help_, description=help_, epilog=EPILOG,
+                            formatter_class=argparse.RawDescriptionHelpFormatter, **kw)
+        return sp
+
+    s = add("list", "list catalog apps by category")
+    s.add_argument("--category", "-c", metavar="ID", help="only this category (id or name)")
+    s.add_argument("--installed", action="store_true", help="only installed apps")
+    s.add_argument("--available", action="store_true", help="only apps ready to install")
+    s.add_argument("--all", action="store_true", help="include hidden entries")
+    s.add_argument("--json", action="store_true", help="machine-readable output")
+    s.set_defaults(func=cmd_list)
+
+    s = add("categories", "list categories with counts")
+    s.add_argument("--json", action="store_true")
+    s.set_defaults(func=cmd_categories)
+
+    s = add("search", "search apps by id, name, package or category")
+    s.add_argument("term", nargs="+")
+    s.add_argument("--all", action="store_true", help="include hidden entries")
+    s.add_argument("--json", action="store_true")
+    s.set_defaults(func=cmd_search)
+
+    s = add("info", "show one app (or @bundle) in detail")
+    s.add_argument("id", help="app id, package name, or @bundle")
+    s.add_argument("--json", action="store_true")
+    s.set_defaults(func=cmd_info)
+
+    s = add("bundles", "list curated bundles (@gaming, @dev, ...)")
+    s.add_argument("--json", action="store_true")
+    s.set_defaults(func=cmd_bundles)
+
+    s = add("install", "install apps and @bundles in one pacman transaction")
+    s.add_argument("ids", nargs="+", metavar="ID|@BUNDLE")
+    s.add_argument("--yes", "-y", action="store_true", help="do not ask for confirmation")
+    s.add_argument("--dry-run", "-n", action="store_true", help="print the plan and exact commands only")
+    s.add_argument("--skip-unavailable", action="store_true",
+                   help="install what is available instead of failing (bundles always do this)")
+    s.add_argument("--with-upgrade", action="store_true",
+                   help="pending upgrades: run `pacman -Su --needed <apps>` (full upgrade + install)")
+    s.add_argument("--ignore-db-age", action="store_true",
+                   help="install even when the sync databases are older than the limit")
+    s.add_argument("--no-user-scripts", action="store_true", help="skip vendor-script apps")
+    s.set_defaults(func=cmd_install)
+
+    s = add("remove", "remove apps and @bundles (keeps packages other installed apps use)")
+    s.add_argument("ids", nargs="+", metavar="ID|@BUNDLE")
+    s.add_argument("--yes", "-y", action="store_true")
+    s.add_argument("--dry-run", "-n", action="store_true")
+    s.set_defaults(func=cmd_remove)
+
+    s = add("check", "report which catalog packages resolve in the enabled repositories")
+    s.add_argument("--json", action="store_true")
+    s.add_argument("--strict", action="store_true", help="exit 3 if a visible entry does not resolve")
+    s.set_defaults(func=cmd_check)
+    return p
+
+
+def main(argv: list[str] | None = None) -> int:
+    # our plan text must appear before pacman's own output, also through pipes/logs
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(line_buffering=True)
+        except (AttributeError, ValueError):
+            pass
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if not args.command:
+        parser.print_help()
+        return EXIT_USAGE
+    try:
+        catalog = load_catalog()
+        idx = build_index(catalog)
+        return args.func(args, catalog, idx)
+    except UsageError as e:
+        print(f"samurai apps: {e}", file=sys.stderr)
+        return EXIT_USAGE
+    except CatalogError as e:
+        print(f"samurai apps: catalog error: {e}", file=sys.stderr)
+        return EXIT_CATALOG
+    except KeyboardInterrupt:
+        print("\naborted.", file=sys.stderr)
+        return EXIT_ABORTED
+    except BrokenPipeError:
+        return EXIT_OK
+
+
+if __name__ == "__main__":
+    sys.exit(main())

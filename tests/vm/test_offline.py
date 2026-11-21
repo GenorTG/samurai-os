@@ -28,6 +28,9 @@ def _offline_profile(mirror) -> None:
     )
     profile = re.sub(r"\[user\].*?(?=\n\[|\Z)", new_user, default, flags=re.S)
     profile = re.sub(r'arch_mirror = "auto"', f'arch_mirror = "{DEAD_MIRROR}"', profile)
+    # exercise the NVIDIA DKMS path without a GPU
+    profile = re.sub(r'nvidia = "auto"', 'nvidia = "yes"', profile)
+    assert 'nvidia = "yes"' in profile, "failed to force the NVIDIA stack"
     assert DEAD_MIRROR in profile, "failed to pin the dead mirror"
     (mirror.dir / "profile-offline.toml").write_text(profile)
 
@@ -45,10 +48,11 @@ def test_offline_install(mirror):
         code, out = ga.exec(
             "curl -fsSL http://10.0.2.2:8966/profile-offline.toml -o /tmp/p.toml "
             "&& samurai-install --profile /tmp/p.toml --disk /dev/vda --yes "
-            ">/dev/null 2>&1; echo OFFLINE-INSTALL-RC=$?",
+            ">/dev/null 2>&1; rc=$?; echo OFFLINE-INSTALL-RC=$rc; "
+            "[ $rc -eq 0 ] || tail -n 80 /var/log/samurai/install.log",
             timeout=INSTALL_TIMEOUT,
         )
-        assert "OFFLINE-INSTALL-RC=0" in out, out[-1500:]
+        assert "OFFLINE-INSTALL-RC=0" in out, out[-6000:]
 
         # the -U path must actually have been taken (not the network fallback)
         code, ev = ga.exec(
@@ -73,26 +77,32 @@ def test_offline_install(mirror):
         assert "active" in out.split("\n")[0], out[-800:]
         assert "plasma-meta" in out, out[-800:]
         assert "linux-cachyos" in out, out[-800:]
+        # NVIDIA forced on ([hardware] nvidia = "yes"): neither linux-zen nor the
+        # mix has a prebuilt module for every kernel, so DKMS builds for both
         _, gpu_packages = ga2.exec(
             "pacman -Q mesa vulkan-radeon vulkan-intel vulkan-nouveau "
-            "intel-media-driver libva-intel-driver nvidia-utils "
-            "linux-cachyos-nvidia-open linux-zen-headers nvidia-open-dkms"
+            "intel-media-driver libva-intel-driver nvidia-utils nvidia-open-dkms "
+            "linux-cachyos-headers linux-zen-headers; "
+            "pacman -Q linux-cachyos-nvidia-open >/dev/null 2>&1 && echo PREBUILT-PRESENT; "
+            "dkms status", check=False,
         )
-        assert all(
-            package in gpu_packages
-            for package in (
-                "mesa ",
-                "vulkan-radeon ",
-                "vulkan-intel ",
-                "vulkan-nouveau ",
-                "intel-media-driver ",
-                "libva-intel-driver ",
-                "nvidia-utils ",
-                "linux-cachyos-nvidia-open ",
-                "linux-zen-headers ",
-                "nvidia-open-dkms ",
-            )
-        ), gpu_packages[-1200:]
+        for package in ("mesa ", "vulkan-radeon ", "vulkan-intel ", "vulkan-nouveau ",
+                        "intel-media-driver ", "libva-intel-driver ", "nvidia-utils ",
+                        "nvidia-open-dkms ", "linux-cachyos-headers ", "linux-zen-headers "):
+            assert package in gpu_packages, f"{package!r} missing:\n{gpu_packages[-1500:]}"
+        assert "PREBUILT-PRESENT" not in gpu_packages, gpu_packages[-1500:]
+        dkms_lines = [l for l in gpu_packages.splitlines() if l.startswith("nvidia") and "installed" in l]
+        assert any("cachyos" in l for l in dkms_lines) and any("zen" in l for l in dkms_lines), \
+            f"dkms did not build for both kernels:\n{gpu_packages[-1500:]}"
+
+        # day-one desktop pieces + firewall default (spec 09)
+        _, extras = ga2.exec(
+            "pacman -Q firefox pipewire-pulse wireplumber flatpak firewalld; "
+            "systemctl is-active firewalld", check=False,
+        )
+        for package in ("firefox ", "pipewire-pulse ", "wireplumber ", "flatpak ", "firewalld "):
+            assert package in extras, f"{package!r} missing:\n{extras[-1000:]}"
+        assert extras.strip().splitlines()[-1] == "active", extras[-1000:]
         assert "org.kde.breezedark.desktop" in out, out[-800:]
         assert "\n0" in out, out[-800:]
         assert "btrfs" in out, out[-800:]

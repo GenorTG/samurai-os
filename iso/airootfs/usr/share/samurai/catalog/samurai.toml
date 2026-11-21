@@ -1,0 +1,614 @@
+# Samurai OS install catalog: our choices on top of catalog/garuda-setup-wizard.toml (spec 08).
+# The graphical installer, the terminal installer, the setup assistant and the toolbox all read
+# these two files; `samurai apps` implements the merge (tests/unit/test_apps_catalog.py).
+# Merge rules:
+#   1. every Garuda [[app]] is loaded as-is (origin garuda; source "repo" = whichever enabled
+#      repository has the package);
+#   2. [[app]] here adds a new entry; reusing an existing id is an error (use [[override]]);
+#   3. [[override]] with an id changes fields of that app (any field except id/origin); an
+#      [[override]] with only a category changes every app of that category; an override that
+#      matches nothing is an error;
+#   4. [[choice]] defines single-select or multi-select groups (installer pages);
+#   5. [[toggle]] defines the installer's default-on sets; [[bundle]] groups apps and toggles
+#      for `samurai apps install @<bundle>` and the install-profile key `[packages] apps`;
+#   6. [[category]] gives display names and order; [package_hints] names the repository a
+#      package needs when it does not resolve (so the message can say "needs [multilib]").
+# Unknown fields or tables are errors: a typo can never silently change what gets installed.
+#
+# source = where the package comes from, checked by CI against the live repos:
+#   arch | multilib | cachyos | chaotic | samurai | flatpak | local-build | user-script
+# Package names were checked against Arch, AUR and Chaotic-AUR on 2026-10-27.
+
+# ---------------------------------------------------------------- categories (display order)
+[[category]]
+id = "browsers"
+name = "Browsers"
+
+[[category]]
+id = "communication"
+name = "Communication"
+
+[[category]]
+id = "mail"
+name = "Mail"
+
+[[category]]
+id = "office"
+name = "Office"
+
+[[category]]
+id = "development"
+name = "Development"
+
+[[category]]
+id = "ai-cli"
+name = "AI command-line tools"
+
+[[category]]
+id = "ai-local"
+name = "Local AI"
+
+[[category]]
+id = "gaming-tools"
+name = "Gaming tools"
+
+[[category]]
+id = "gaming"
+name = "Games"
+
+[[category]]
+id = "graphics"
+name = "Graphics & 3D"
+
+[[category]]
+id = "craft"
+name = "Craft suite"
+
+[[category]]
+id = "video"
+name = "Video"
+
+[[category]]
+id = "audio"
+name = "Audio"
+
+[[category]]
+id = "multimedia"
+name = "Multimedia tools"
+
+[[category]]
+id = "internet"
+name = "Internet & file sharing"
+
+[[category]]
+id = "utilities"
+name = "System utilities"
+
+[[category]]
+id = "virtualization"
+name = "Virtualization"
+
+[[category]]
+id = "pkgmngrs"
+name = "Software stores & package tools"
+
+[[category]]
+id = "inputMethod"
+name = "Input methods"
+
+[[category]]
+id = "other"
+name = "Other"
+
+[[category]]
+id = "kernels"
+name = "Kernels"
+
+[package_hints]
+steam = "multilib"
+lib32-gamemode = "multilib"
+lib32-mangohud = "multilib"
+
+# ---------------------------------------------------------------- single/multi choices
+[[choice]]
+id = "desktop"
+mode = "single"
+default = "kde"
+options = [
+  { id = "kde", name = "KDE Plasma (Wayland)", meta = "samurai-desktop-kde", tested = true },
+  { id = "gnome", name = "GNOME", meta = "samurai-desktop-gnome", tested = false },
+  { id = "hyprland", name = "Hyprland", meta = "samurai-desktop-hyprland", tested = false },
+  { id = "cosmic", name = "COSMIC", meta = "samurai-desktop-cosmic", tested = false },
+  { id = "xfce", name = "Xfce", meta = "samurai-desktop-xfce", tested = false },
+  { id = "cinnamon", name = "Cinnamon", meta = "samurai-desktop-cinnamon", tested = false },
+  { id = "sway", name = "Sway", meta = "samurai-desktop-sway", tested = false },
+  { id = "i3", name = "i3 (X11)", meta = "samurai-desktop-i3", tested = false },
+  { id = "none", name = "No desktop (server / build your own)", meta = "", tested = true },
+]
+
+[[choice]]
+id = "kernels"
+mode = "multi"
+default = ["linux-cachyos", "linux-zen"]
+default_boot = "linux-cachyos"
+options = [
+  { id = "linux-cachyos", packages = ["linux-cachyos", "linux-cachyos-headers"], source = "cachyos" },
+  { id = "linux-zen", packages = ["linux-zen", "linux-zen-headers"], source = "arch" },
+  { id = "linux", packages = ["linux", "linux-headers"], source = "arch" },
+  { id = "linux-lts", packages = ["linux-lts", "linux-lts-headers"], source = "arch" },
+  { id = "linux-cachyos-lts", packages = ["linux-cachyos-lts", "linux-cachyos-lts-headers"], source = "cachyos" },
+]
+
+[[choice]]
+id = "browsers"
+mode = "multi"
+default = ["firefox"]
+# options = every app in category "browsers" (Garuda list) + the extras below
+
+[[choice]]
+id = "kde-theme"
+mode = "single"
+default = "otto"
+when = "desktop == kde"
+options = [
+  { id = "otto", name = "Otto (dark, orange/yellow)", meta = "samurai-theme-otto" },
+  { id = "scratchy", name = "Scratchy (dark, Catppuccin Macchiato)", meta = "samurai-theme-scratchy" },
+  { id = "breeze", name = "Breeze Dark (KDE default)", meta = "" },
+]
+
+[[choice]]
+id = "conda"
+mode = "single"
+default = "miniforge"
+options = [
+  { id = "miniforge", name = "Miniforge (conda + mamba, conda-forge channel)", packages = ["samurai-miniforge"], source = "samurai" },
+  { id = "miniconda", name = "Miniconda (Anaconda defaults channel)", packages = ["samurai-miniconda"], source = "samurai" },
+  { id = "none", name = "None (uv only)" },
+]
+
+[[choice]]
+id = "firewall"
+mode = "single"
+default = "firewalld"
+options = [
+  { id = "firewalld", packages = ["firewalld", "plasma-firewall"], source = "arch" },
+  { id = "ufw", packages = ["ufw", "plasma-firewall"], source = "arch" },
+  { id = "none", name = "No firewall (not recommended)" },
+]
+
+# ---------------------------------------------------------------- defaults ON (toggleable)
+[[toggle]]
+id = "docker"
+default = true
+packages = ["docker", "docker-compose", "docker-buildx"]
+services = ["docker.socket"]
+user_groups = ["docker"]          # root-equivalent; separate checkbox "add me to the docker group", default on
+source = "arch"
+
+[[toggle]]
+id = "tailscale"
+default = true
+packages = ["tailscale"]
+services = ["tailscaled.service"]
+firstboot = "welcome: Connect to Tailscale (runs `tailscale up`, opens the login URL)"
+source = "arch"
+
+# ---------------------------------------------------------------- optional (default off, installable later via toolbox)
+[[choice]]
+id = "reverse-proxy"
+mode = "single"
+default = "none"
+options = [
+  { id = "caddy", name = "Caddy (auto-HTTPS, simplest)", packages = ["caddy"], source = "arch" },
+  { id = "nginx", name = "nginx", packages = ["nginx", "certbot"], source = "arch" },
+  { id = "traefik", name = "traefik (Docker-native routing)", packages = ["traefik"], source = "arch" },
+  { id = "none", name = "No reverse proxy" },
+]  # samurai-reverse-proxy wraps the engine: sites-available/enabled + `samurai proxy` + toolbox page
+
+[[toggle]]
+id = "nvidia-cuda"
+default = true
+when = "gpu.nvidia && gpu.nvidia.generation >= turing"   # CUDA 13 no longer targets Maxwell/Pascal/Volta
+packages = ["cuda", "cudnn", "nvtop"]
+source = "arch"
+
+[[toggle]]
+id = "gpu-unlock"
+default = true
+when = "gpu.any_supported_by_gpu_unlock"                  # spec 07: recipe table read from the module source
+packages = ["samurai-gpu-unlock"]                         # builder only; firmware is built on this machine
+source = "samurai"
+
+[[toggle]]
+id = "kde-monitor-widgets"
+default = true
+when = "desktop == kde"
+
+[[toggle]]
+id = "python-versions"
+default = true
+packages = ["uv", "samurai-python310", "samurai-python311", "samurai-python312", "samurai-python313"]
+note = "python (3.14) from Arch core stays the system python"
+
+[[toggle]]
+id = "gaming"
+default = true
+packages = [
+  "steam", "heroic-games-launcher-bin", "gamemode", "lib32-gamemode", "mangohud", "lib32-mangohud",
+  "gamescope", "protontricks", "umu-launcher", "samurai-proton-ge", "proton-cachyos-slr", "samurai-wine",
+  # proton-cachyos-slr: CachyOS split proton-cachyos into -native/-slr (checked 2026-11-21);
+  # the Steam Linux Runtime build is the one Steam lists as a compatibility tool.
+]
+
+# ---------------------------------------------------------------- new categories
+[[app]]
+category = "craft"
+id = "craft-launcher"
+name = "Craft Launcher (installs and updates every ArtCraft app)"
+packages = ["artcraft-launcher-appimage"]
+source = "samurai"   # AUR only today; repackaged in [samurai]
+
+[[app]]
+category = "craft"
+id = "photocraft"
+name = "PhotoCraft (Photoshop-style)"
+packages = ["photocraft"]
+source = "chaotic"
+
+[[app]]
+category = "craft"
+id = "vectorcraft"
+name = "VectorCraft (Illustrator-style)"
+packages = ["vectorcraft-bin"]
+source = "samurai"   # not in Chaotic-AUR on 2026-10-27
+
+[[app]]
+category = "craft"
+id = "filmcraft"
+name = "FilmCraft (Premiere-style)"
+packages = ["filmcraft"]
+source = "chaotic"
+
+[[app]]
+category = "craft"
+id = "lightcraft"
+name = "LightCraft (Lightroom-style)"
+packages = ["lightcraft"]
+source = "chaotic"
+
+[[app]]
+category = "craft"
+id = "effectcraft"
+name = "EffectCraft (After Effects-style)"
+packages = ["effectcraft"]
+source = "chaotic"
+
+[[app]]
+category = "craft"
+id = "designcraft"
+name = "DesignCraft (InDesign-style)"
+packages = ["designcraft"]
+source = "chaotic"
+
+[[app]]
+category = "craft"
+id = "pdfcraft"
+name = "PdfCraft (Acrobat-style)"
+packages = ["pdfcraft"]
+source = "chaotic"
+
+[[app]]
+category = "craft"
+id = "craft-office"
+name = "WordCraft, GridCraft, DeckCraft (Office-style)"
+packages = ["gridcraft", "deckcraft"]
+source = "chaotic"   # WordCraft: add when packaged
+
+[[app]]
+category = "craft"
+id = "craft-more"
+name = "FigCraft, CADCraft, SoundCraft"
+packages = ["figcraft", "cadcraft", "soundcraft"]
+source = "chaotic"
+
+# AI command-line tools (spec 13). One checkbox each; all updated by pacman.
+[[app]]
+category = "ai-cli"
+id = "claude-code"
+name = "Claude Code (Anthropic)"
+packages = ["claude-code"]
+source = "chaotic"
+env = { DISABLE_AUTOUPDATER = "1" }     # pacman updates it
+
+[[app]]
+category = "ai-cli"
+id = "codex"
+name = "Codex CLI (OpenAI)"
+packages = ["openai-codex-bin"]
+source = "samurai"
+
+[[app]]
+category = "ai-cli"
+id = "gemini-cli"
+name = "Gemini CLI (Google)"
+packages = ["gemini-cli"]
+source = "arch"
+
+[[app]]
+category = "ai-cli"
+id = "copilot-cli"
+name = "GitHub Copilot CLI"
+packages = ["github-copilot-cli"]
+source = "chaotic"
+
+[[app]]
+category = "ai-cli"
+id = "opencode"
+name = "OpenCode"
+packages = ["opencode-bin"]
+source = "samurai"
+
+[[app]]
+category = "ai-cli"
+id = "aider"
+name = "Aider"
+user_commands = ["uv tool install aider-chat"]
+source = "user-script"
+
+[[app]]
+category = "ai-cli"
+id = "cursor-cli"
+name = "Cursor CLI"
+user_commands = ["curl https://cursor.com/install -fsS | bash"]
+source = "user-script"   # vendor installer; last resort, runs as the user, shows the URL first
+
+[[app]]
+category = "ai-local"
+id = "ollama"
+name = "Ollama (GPU build picked by driver profile)"
+packages = ["ollama"]          # ollama-cuda / ollama-rocm substituted by the hardware step
+services = ["ollama.service"]
+source = "arch"
+
+# ---------------------------------------------------------------- samurai additions (2026-11-21, `samurai apps`)
+# Every package below was resolved against core/extra/cachyos/chaotic-aur on 2026-11-21.
+[[app]]
+category = "gaming-tools"
+id = "lutris"
+name = "Lutris (game launcher for Wine, emulators, native games)"
+packages = ["lutris"]
+source = "arch"
+
+[[app]]
+category = "gaming-tools"
+id = "goverlay"
+name = "GOverlay (MangoHud / vkBasalt settings)"
+packages = ["goverlay"]
+source = "arch"
+
+[[app]]
+category = "gaming-tools"
+id = "protonup-qt"
+name = "ProtonUp-Qt (manage Proton/Wine builds)"
+packages = ["protonup-qt"]
+source = "cachyos"
+
+[[app]]
+category = "gaming-tools"
+id = "bottles"
+name = "Bottles (Windows apps in Wine prefixes)"
+packages = ["bottles"]
+source = "chaotic"
+
+[[app]]
+category = "gaming-tools"
+id = "sober"
+name = "Sober (Roblox client)"
+flatpak = "org.vinegarhq.Sober"
+source = "flatpak"
+description = "Flatpak-only upstream; needs Flatpak (samurai apps install flatpak)."
+
+[[app]]
+category = "development"
+id = "neovim"
+name = "Neovim"
+packages = ["neovim"]
+source = "arch"
+
+[[app]]
+category = "development"
+id = "github-cli"
+name = "GitHub CLI (gh)"
+packages = ["github-cli"]
+source = "arch"
+
+[[app]]
+category = "development"
+id = "lazygit"
+name = "lazygit (terminal UI for git)"
+packages = ["lazygit"]
+source = "arch"
+
+[[app]]
+category = "development"
+id = "distrobox"
+name = "Distrobox (other distros in containers)"
+packages = ["distrobox"]
+source = "arch"
+
+[[app]]
+category = "development"
+id = "uv"
+name = "uv (Python packages, tools and versions)"
+packages = ["uv"]
+source = "arch"
+
+[[app]]
+category = "video"
+id = "mpv"
+name = "mpv"
+packages = ["mpv"]
+source = "arch"
+
+[[app]]
+category = "video"
+id = "obs-vkcapture"
+name = "OBS Vulkan/OpenGL game capture"
+packages = ["obs-vkcapture", "lib32-obs-vkcapture"]
+source = "cachyos"
+
+[[app]]
+category = "video"
+id = "v4l2loopback"
+name = "v4l2loopback (OBS virtual camera)"
+packages = ["v4l2loopback-dkms", "v4l2loopback-utils"]
+source = "arch"
+
+[[app]]
+category = "video"
+id = "streamlink"
+name = "Streamlink (watch streams in your player)"
+packages = ["streamlink"]
+source = "arch"
+
+[[app]]
+category = "audio"
+id = "easyeffects"
+name = "EasyEffects (PipeWire audio effects)"
+packages = ["easyeffects"]
+source = "arch"
+
+[[app]]
+category = "utilities"
+id = "htop"
+name = "htop (process viewer)"
+packages = ["htop"]
+source = "arch"
+
+[[app]]
+category = "utilities"
+id = "btop"
+name = "btop (resource monitor)"
+packages = ["btop"]
+source = "arch"
+
+[[app]]
+category = "utilities"
+id = "nvtop"
+name = "nvtop (GPU monitor)"
+packages = ["nvtop"]
+source = "arch"
+
+[[app]]
+category = "pkgmngrs"
+id = "flatpak"
+name = "Flatpak (needed for Flatpak-only apps)"
+packages = ["flatpak"]
+source = "arch"
+
+# ---------------------------------------------------------------- overrides of Garuda entries
+[[override]]
+id = "firefox"
+default = true
+
+[[override]]
+id = "docker"
+default = true   # also covered by the docker toggle
+
+[[override]]
+category = "kernels"
+hidden = true    # the whole Garuda kernels category: kernels come from the "kernels" choice instead
+note = "kernels come from the installer's kernel choice and `samurai kernel`"
+
+# Data fixes found by `samurai apps check` against core/extra/cachyos/chaotic-aur (2026-11-21).
+[[override]]
+id = "intellijIdea"
+name = "IntelliJ IDEA (open-source build)"
+packages = ["intellij-idea-oss"]   # Arch renamed intellij-idea-community-edition
+
+[[override]]
+id = "xtreme"
+packages = ["xdman"]               # xdman-beta-bin is gone; [cachyos] ships xdman
+
+[[override]]
+id = "asian"
+packages = ["noto-fonts-cjk", "adobe-source-han-sans-otc-fonts", "adobe-source-han-serif-otc-fonts", "wqy-zenhei"]
+# asian-fonts is a Garuda-repo meta package; these are its Arch equivalents
+
+[[override]]
+id = "virtualBox"
+packages = ["virtualbox", "virtualbox-host-dkms", "virtualbox-guest-iso"]
+# virtualbox-meta is Garuda-repo only; -dkms because our default kernels are cachyos/zen
+
+[[override]]
+id = "virtManager"
+packages = ["virt-manager", "qemu-desktop", "libvirt", "dnsmasq", "edk2-ovmf", "swtpm"]
+# virt-manager-meta is Garuda-repo only
+
+[[override]]
+id = "genymotion"
+packages = ["genymotion", "virtualbox", "virtualbox-host-dkms"]   # virtualbox-meta: see above
+
+[[override]]
+id = "luanti"
+packages = ["luanti", "luanti-server"]   # Arch [extra] ships Luanti; -git builds are dev snapshots
+
+[[override]]
+id = "firedragonCatppuccin"
+hidden = true
+note = "firedragon-catppuccin is only in Garuda's own repository"
+
+[[override]]
+id = "wire"
+hidden = true
+note = "wire-desktop is no longer packaged in Arch or Chaotic-AUR"
+
+[[override]]
+id = "nitroshare"
+hidden = true
+note = "nitroshare is AUR-only (not built by Chaotic-AUR)"
+
+[[override]]
+id = "bauh"
+hidden = true
+note = "bauh is AUR-only (not built by Chaotic-AUR)"
+
+# ---------------------------------------------------------------- bundles (`samurai apps install @<id>`)
+# Members that are not available on this system are skipped with a warning, never silently.
+[[bundle]]
+id = "gaming"
+name = "Gaming"
+description = "The installer's gaming set (Steam, Heroic, GameMode, MangoHud, gamescope, Proton) plus Lutris, GOverlay and ProtonUp-Qt."
+toggles = ["gaming"]
+apps = ["lutris", "goverlay", "protonup-qt"]
+
+[[bundle]]
+id = "dev"
+name = "Development"
+description = "Docker + Compose + buildx (installer default set), VS Code (OSS), Neovim, GitHub CLI, lazygit, Distrobox, uv."
+toggles = ["docker"]
+apps = ["visualStudioCodeOss", "neovim", "github-cli", "lazygit", "distrobox", "uv"]
+
+[[bundle]]
+id = "creative"
+name = "Creative"
+description = "Painting, photo, vector, 3D, video and audio editing."
+apps = ["krita", "gimp", "inkscape", "blender", "darktable", "kdenlive", "audacity"]
+
+[[bundle]]
+id = "office"
+name = "Office"
+description = "LibreOffice, Thunderbird, Obsidian, KeePassXC."
+apps = ["libreOfficeFresh", "thunderbird", "obsidian", "keepassXc"]
+
+[[bundle]]
+id = "media"
+name = "Media"
+description = "Video and music players plus HandBrake."
+apps = ["vlc", "mpv", "strawberryPlayer", "handbrake"]
+
+[[bundle]]
+id = "streaming"
+name = "Streaming"
+description = "OBS Studio with game capture and virtual camera, EasyEffects, Streamlink."
+apps = ["obsStudio", "obs-vkcapture", "v4l2loopback", "easyeffects", "streamlink"]

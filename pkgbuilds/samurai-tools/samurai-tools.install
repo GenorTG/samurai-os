@@ -5,6 +5,9 @@ _remove_legacy_unowned_files() {
         /usr/local/bin/samurai-update \
         /usr/local/bin/samurai-snap \
         /usr/local/bin/samurai-rescue \
+        /usr/local/bin/samurai-apps \
+        /usr/share/samurai/catalog/garuda-setup-wizard.toml \
+        /usr/share/samurai/catalog/samurai.toml \
         /usr/local/bin/samurai-notifier \
         /usr/lib/samurai/interventions/0001-update-mechanism-demo.toml \
         /usr/lib/samurai/interventions/0001-update-mechanism-demo.sh; do

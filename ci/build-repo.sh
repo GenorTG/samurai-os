@@ -64,12 +64,13 @@ for src in /src/pkgbuilds/*/; do
     pkg="$(basename "$src")"
     cp -a "$src" "$pkg"
     if [ "$pkg" = samurai-tools ]; then
-        for name in samurai samurai-update samurai-snap samurai-rescue samurai-notifier \
+        for name in samurai samurai-update samurai-snap samurai-rescue samurai-apps samurai-notifier \
                     samurai-notifier.service samurai-notifier.timer; do
             cp -a "/src/updates/$name" "$pkg/"
         done
         cp -a /src/updates/interventions/0001-update-mechanism-demo.toml "$pkg/"
         cp -a /src/updates/interventions/0001-update-mechanism-demo.sh "$pkg/"
+        cp -a /src/catalog/garuda-setup-wizard.toml /src/catalog/samurai.toml "$pkg/"
     fi
     if [ -n "$SAMURAI_PKGREL_OVERRIDE" ] && \
        { [ "$pkg" = samurai-tools ] || [ "$pkg" = samurai-release ]; }; then

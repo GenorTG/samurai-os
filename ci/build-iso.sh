@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
 # M0: build the Samurai OS ISO in an archlinux container (roadmap spec 12).
 #
-# Usage: ci/build-iso.sh [output-dir]   (default: build/)
+# Usage: [SAMURAI_ISO_FLAVOR=offline|online] ci/build-iso.sh [output-dir]   (default: build/)
+#   offline (default): the full KDE + kernels + GPU-driver closure is baked into
+#                      the ISO; the default install needs no network (~4.3 GB).
+#   online:            netinstall; no baked cache, the installer pulls current
+#                      packages from the mirrors (~1.3 GB).
+# The ISO is renamed samurai-os-<date>-<flavor>-x86_64.iso.
 # Requires: docker, ~4 GB free in /var, network access to Arch mirrors.
 # The container runs privileged: mkarchiso's pacstrap bind-mounts
 # /proc, /sys and /dev into the airootfs (CAP_SYS_ADMIN).
@@ -15,6 +20,11 @@ work_dir="$out_dir/work"
 profile_dir="$out_dir/profile"
 image="archlinux:base-devel"
 container="samurai-iso-build-$$"
+flavor="${SAMURAI_ISO_FLAVOR:-offline}"
+case "$flavor" in
+    offline|online) ;;
+    *) echo "error: SAMURAI_ISO_FLAVOR must be offline or online (got: $flavor)" >&2; exit 2 ;;
+esac
 
 mkdir -p "$out_dir"
 # Build from a staged profile so generated packages cannot accumulate in the
@@ -41,15 +51,31 @@ cp -f "$repo_root/iso/pacman.conf" "$profile_dir/airootfs/etc/pacman.conf"
 for f in samurai-install samurai-postinstall validate-profile.py; do
     cp -f "$repo_root/installer/$f" "$bin_dir/$f"
 done
-for f in samurai samurai-notifier samurai-rescue samurai-snap samurai-update; do
-    cp -f "$repo_root/updates/$f" "$bin_dir/$f"
+# every executable tool under updates/ (samurai, samurai-*): new tools ship
+# without editing this list
+for f in "$repo_root"/updates/samurai "$repo_root"/updates/samurai-*; do
+    [ -f "$f" ] && [ -x "$f" ] || continue
+    case "$f" in *.service|*.timer) continue ;; esac
+    cp -f "$f" "$bin_dir/$(basename "$f")"
+    chmod 755 "$bin_dir/$(basename "$f")"
 done
 for f in samurai-notifier.service samurai-notifier.timer; do
     cp -f "$repo_root/updates/$f" "$lib_dir/$f"
 done
+# app catalog: the installer validates [packages] apps against it and the
+# live session can browse it (`samurai apps`)
+mkdir -p "$profile_dir/airootfs/usr/share/samurai/catalog"
+cp -f "$repo_root"/catalog/*.toml "$profile_dir/airootfs/usr/share/samurai/catalog/"
+printf '%s\n' "$flavor" > "$profile_dir/airootfs/etc/samurai-iso-flavor"
 chmod 755 "$bin_dir"/samurai-install "$bin_dir"/samurai-postinstall \
-    "$bin_dir"/validate-profile.py "$bin_dir"/samurai "$bin_dir"/samurai-notifier \
-    "$bin_dir"/samurai-rescue "$bin_dir"/samurai-snap "$bin_dir"/samurai-update
+    "$bin_dir"/validate-profile.py
+# profiledef's file_permissions would otherwise reset copied tools to 644
+for f in "$bin_dir"/samurai*; do
+    rel="/usr/local/bin/$(basename "$f")"
+    grep -q "\[\"$rel\"\]" "$profile_dir/profiledef.sh" ||
+        sed -i "s|^file_permissions=(|file_permissions=(\n  [\"$rel\"]=\"0:0:755\"|" "$profile_dir/profiledef.sh"
+done
+sed -i "s|^iso_application=.*|iso_application=\"Samurai OS Live/Installer ($flavor)\"|" "$profile_dir/profiledef.sh"
 
 ### Offline install cache (Genor 2026-11-20): bake the default release
 ### profile's full package closure + sync dbs into the ISO, so the default
@@ -57,6 +83,7 @@ chmod 755 "$bin_dir"/samurai-install "$bin_dir"/samurai-postinstall \
 ### of curls"). Downloaded with SigLevel Never: the ISO itself is the trust
 ### anchor (signatures were verified upstream when these repos built).
 ### This MUST run before mkarchiso: the cache is injected into the airootfs.
+if [ "$flavor" = offline ]; then
 echo "==> downloading offline install cache (release default set)"
 # stale-state rule: a reused download dir would keep two versions of one
 # package and pacman -U would refuse the pair — purge first
@@ -89,8 +116,8 @@ mkdir -p /b/offline-pkgs /tmp/freshdb
 # bash, coreutils — the -U target is empty and needs them all)
 pacman --dbpath /tmp/freshdb -Sy >/dev/null
 pacman --dbpath /tmp/freshdb -Sw --noconfirm --cachedir /b/offline-pkgs \
-    base linux-cachyos linux-zen linux-zen-headers \
-    linux linux-headers linux-lts linux-lts-headers linux-cachyos-lts \
+    base linux-cachyos linux-cachyos-headers linux-zen linux-zen-headers \
+    linux linux-headers linux-lts linux-lts-headers linux-cachyos-lts linux-cachyos-lts-headers \
     linux-firmware mkinitcpio dkms linux-cachyos-nvidia-open nvidia-open \
     nvidia-open-lts nvidia-open-dkms nvidia-utils nvidia-settings \
     mesa vulkan-radeon vulkan-intel vulkan-nouveau \
@@ -99,6 +126,9 @@ pacman --dbpath /tmp/freshdb -Sw --noconfirm --cachedir /b/offline-pkgs \
     grub limine refind efibootmgr os-prober \
     networkmanager wpa_supplicant qemu-guest-agent archlinux-keyring cachyos-keyring \
     plasma-meta sddm konsole dolphin kate ark gwenview okular \
+    firefox pipewire pipewire-pulse pipewire-alsa wireplumber spectacle \
+    noto-fonts noto-fonts-emoji flatpak power-profiles-daemon bluez bluez-utils \
+    firewalld plasma-firewall \
     samurai-release samurai-mirrorlist samurai-keyring
 cp /var/lib/pacman/sync/*.db /b/offline-pkgs/
 '
@@ -106,6 +136,9 @@ mkdir -p "$profile_dir/airootfs/usr/share/samurai/pkg-cache"
 find "$out_dir/offline-pkgs" -maxdepth 1 -type f ! -name '*.sig' \
     -exec cp {} "$profile_dir/airootfs/usr/share/samurai/pkg-cache/" \;
 echo "==> offline cache: $(ls "$profile_dir/airootfs/usr/share/samurai/pkg-cache" | wc -l) files"
+else
+    echo "==> online flavor: no baked package cache (installer uses the mirrors)"
+fi
 # mkarchiso skips every stamped step when the work dir holds stamps from a
 # previous build — a reused work dir "succeeds" in 2 s and produces NO ISO.
 # Keep build outputs isolated: refuse a non-empty work dir rather than
@@ -145,9 +178,26 @@ pacman -S --noconfirm --needed archiso >/dev/null
 # under DatabaseOptional, and mkarchiso cannot answer the import prompt.
 # Import the keyring from the offline cache (already downloaded via the
 # 4-server fallback — the mirror desyncs, seen 2026-11-20)
-pacman -U --noconfirm /out/offline-pkgs/cachyos-keyring-*.pkg.tar.zst >/dev/null
+if compgen -G "/out/offline-pkgs/cachyos-keyring-*.pkg.tar.zst" >/dev/null; then
+    pacman -U --noconfirm /out/offline-pkgs/cachyos-keyring-*.pkg.tar.zst >/dev/null
+else
+    # online flavor: no offline cache, fetch the keyring through the same
+    # 4-server fallback the offline download uses
+    for s in nl aur mirror build; do
+        curl -fsSL --retry 4 -o /tmp/ck.db "https://$s.cachyos.org/repo/x86_64/cachyos/cachyos.db" || continue
+        kr=$(bsdtar -tf /tmp/ck.db | grep -o "^cachyos-keyring-[^/]*" | head -1) || continue
+        curl -fsSL --retry 4 -o /tmp/ck.pkg.tar.zst "https://$s.cachyos.org/repo/x86_64/cachyos/$kr-any.pkg.tar.zst" && break
+    done
+    pacman -U --noconfirm /tmp/ck.pkg.tar.zst >/dev/null
+fi
 mkarchiso -v -w /work -o /out /out/profile
 '
+
+built=$(find "$out_dir" -maxdepth 1 -name "samurai-os-*-x86_64.iso" ! -name "*-online-*" ! -name "*-offline-*" | head -1)
+if [ -n "$built" ]; then
+    stem="${built%-x86_64.iso}"
+    docker run --rm -v "$out_dir":/b alpine mv "/b/$(basename "$built")" "/b/$(basename "$stem")-$flavor-x86_64.iso"
+fi
 
 echo "==> done:"
 ls -lh "$out_dir"

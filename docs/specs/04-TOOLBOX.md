@@ -14,6 +14,7 @@ means: CLI command, helper method with polkit action, GUI control, VM test.
 |---------|--------|------|-----|
 | Welcome / first-run page: links, release notes, "what to do next" | Welcome, setup wizard | yes | `samurai welcome` (GUI) |
 | Setup assistant: pick extra software by category after install | `garuda-setup-assistant` | yes, driven by a package catalog file (spec 10) | `samurai setup` |
+| Optional apps: browse, search, install/remove catalog apps and curated bundles | setup wizard | **ours**: `samurai apps` (section below), the backend of the setup assistant and the GUI Apps page | `samurai apps list/search/info/install/remove/bundles` |
 | System status: pending updates, reboot pending, `.pacnew` files, health warnings, not updated in 14 days | System status | yes | `samurai status` |
 | Tray notifier for the above | `garuda-system-maintenance` | `samurai-notifier` (spec 03) | — |
 | Pending operations queue: stack changes, apply in one go | operation manager | yes (task queue, spec 01) | `samurai queue list/apply/clear` |
@@ -101,6 +102,49 @@ means: CLI command, helper method with polkit action, GUI control, VM test.
   for v1. Note: Discover's PackageKit backend can do partial upgrades. We ship Discover **without
   `packagekit`** and use it only for Flatpak, and the health check flags `packagekit` (Garuda checks
   for it too).
+
+## Optional apps (`samurai apps`)
+One tool over the merged catalog (`catalog/garuda-setup-wizard.toml` + `catalog/samurai.toml`, merge
+rules at the top of `samurai.toml`), installed by `samurai-tools` to `/usr/share/samurai/catalog/`
+(`SAMURAI_CATALOG_DIR` overrides it for tests). The catalog is the allowlist: anything else is plain
+`pacman -S`.
+
+| Command | Does |
+|---------|------|
+| `samurai apps list [--category X] [--installed] [--available] [--all] [--json]` | apps by category, ✓ installed, ✗ not available with the reason |
+| `samurai apps categories [--json]` | categories with app / ready / installed counts |
+| `samurai apps search <term> [--json]` | ranked match on id, name, package, category |
+| `samurai apps info <id\|@bundle> [--json]` | packages with their repo, services, manual steps, bundles |
+| `samurai apps bundles [--json]` | curated sets: `@gaming` (reuses the installer's gaming toggle), `@dev` (docker toggle), `@creative`, `@office`, `@media`, `@streaming` |
+| `samurai apps install <id\|@bundle...> [--yes] [--dry-run] [--skip-unavailable] [--with-upgrade]` | one `pacman -S --needed` transaction, then `systemctl enable --now` for the apps' services |
+| `samurai apps remove <id\|@bundle...> [--yes] [--dry-run]` | `pacman -Rs`, keeping packages another installed catalog app still uses |
+| `samurai apps check [--json] [--strict]` | how many catalog packages resolve in the enabled repos (CI and diagnostics) |
+
+- **Availability first.** Every package is resolved against the local sync databases (`pacman -Sl`,
+  `-Sgg`, `-Sp` for provides) before anything runs. Not-available apps say why: needs `[multilib]`,
+  needs Chaotic-AUR, `[samurai]` package not built yet, or not in any enabled repo. An explicitly
+  requested unavailable app fails up front (exit 3); bundle members are skipped with a warning.
+- **No partial upgrades.** The tool never runs `pacman -Sy`. Sync databases older than 3 days
+  (`SAMURAI_APPS_MAX_DB_AGE_DAYS`) or pending upgrades stop the install with "run `samurai update`
+  first" (exit 4); `--with-upgrade` instead runs `pacman -Su --needed <apps>`, a full upgrade and the
+  install in one transaction.
+- **Confirmation.** The plan (apps, packages, services, exact commands) is shown and confirmed with
+  y/N unless `--yes`; `--dry-run` prints it and changes nothing. Runs pacman through `sudo` (or
+  `pkexec`) when not root.
+- **Flatpak apps** (`source = "flatpak"`) install with `flatpak install --noninteractive flathub`
+  only when Flatpak is present; otherwise the hint is `samurai apps install flatpak`.
+  **Vendor-script apps** (`user-script`) show their commands and run them as the invoking user,
+  never as root. Catalog `root_commands` are executed only in the exact form
+  `systemctl enable --now <unit>`; anything else is shown as a manual step.
+- **Output.** Columns and category headings for people; `--json` (schema 1) for the Qt toolbox and
+  the installer's catalog pages. Exit codes: 0 ok, 1 command failed, 2 usage/unknown app, 3 not
+  available, 4 run `samurai update` first, 5 aborted, 6 catalog error.
+- **Install profile.** `[packages] apps = ["firefox", "@gaming"]` is validated by
+  `validate-profile.py` against the catalog (exact ids and bundle names only). `samurai-postinstall`
+  applies it at the end of an online install through the same tool (`--with-upgrade
+  --skip-unavailable`, vendor scripts deferred). Offline installs skip it with a log line. Anything
+  skipped is written to `/var/lib/samurai/firstboot-notes` as the exact `samurai apps install ...`
+  command and shown in `/etc/motd`; `samurai welcome` will read the same file.
 
 ## GUI shape
 - Pages: Home/Status · Update · Maintenance · Health · Diagnostics · Snapshots · Kernels · Boot ·

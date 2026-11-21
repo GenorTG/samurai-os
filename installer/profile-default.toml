@@ -33,6 +33,10 @@ root_locked = true
 # Desktop: KDE Plasma is the default face of Samurai OS (Genor 2026-11-20);
 # alternatives gnome/xfce/lxqt/none arrive via the wizard or the toolbox.
 desktop = "kde"
+# Optional catalog apps and @bundles (`samurai apps list`, `samurai apps bundles`).
+# Strict allowlist: exact catalog ids only. Online installs apply them at the end;
+# offline installs leave a first-boot note with the exact command instead.
+# apps = ["firefox", "@gaming", "@dev"]
 # M2 install set: enough for a booting, testable system. Desktop/gaming/dev
 # packages arrive with their milestones (M6–M7); samurai-postinstall applies
 # whatever the profile lists, from repos the ISO trusts.
@@ -53,5 +57,8 @@ arch_mirror = "auto"         # "auto" = live medium mirrors; or an https URL to 
                              # (spec 11: Arch archive for update-from-archive testing)
 
 [security]
-firewall = "none"            # firewalld arrives with M8; profile validated against allowlist
+firewall = "firewalld"       # spec 09 / ADR-0006: deny inbound except DHCPv6 (ssh only with ssh_server)
 ssh_server = false
+
+[hardware]
+nvidia = "auto"              # auto = install the NVIDIA stack only when an NVIDIA GPU is present
