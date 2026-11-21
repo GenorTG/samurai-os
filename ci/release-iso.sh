@@ -75,10 +75,24 @@ sha256sum -c --ignore-missing SHA256SUMS          # joined ISO
 Write either ISO to a USB stick (\`sudo dd if=<iso> of=/dev/sdX bs=4M status=progress oflag=sync\`, or
 copy it onto a Ventoy stick), boot it and run \`samurai-install\` for the guided wizard.
 
+### New in this release
+- **Two installers**: online netinstall and a full offline ISO. Offline installs resolve from a local
+  repository on the medium, so a machine gets only what it needs.
+- **\`samurai apps\`**: optional apps and bundles (\`@gaming\`, \`@dev\`, \`@creative\`, \`@office\`,
+  \`@media\`, \`@streaming\`) from one catalog, at install time (\`[packages] apps\`) or any time later.
+- **firewalld on by default**: zone \`public\`, inbound closed except DHCPv6; SSH only when enabled.
+- **NVIDIA auto-detect**: the NVIDIA stack goes on only when an NVIDIA GPU is present; DKMS when a
+  chosen kernel has no prebuilt module (\`[hardware] nvidia = "auto" | "yes" | "no"\`).
+- Day-one desktop: Firefox, PipeWire, Spectacle, Noto fonts + emoji, Flatpak, power profiles,
+  Bluetooth; \`[multilib]\` enabled for Steam and Wine.
+
 ### Verified in this release (QEMU/KVM, OVMF)
-- Offline install of the full KDE desktop with a dead mirror pinned: no network used.
+- Offline install of the full KDE desktop with a dead mirror pinned: no network used; NVIDIA DKMS
+  modules built for both default kernels.
+- Daily-driver scenario: Plasma Wayland session, Dolphin/Konsole/Kate open, archive round trip,
+  network + HTTPS, PipeWire, firewall state, snapshot, first full \`samurai update\`, app install,
+  clean reboot.
 - LUKS2 + btrfs subvolumes, multi-kernel boot entries (linux-cachyos, linux-zen), SDDM up, no failed units.
-- GPU stacks installed and checked by package: Mesa/RADV/ANV/NVK, Intel media, NVIDIA open modules per kernel.
 - Staged updates from the signed \`[samurai]\` repo, snapshot + rescue rollback, attended wizard install.
 
 Source, specs and VM tests: <https://github.com/GenorTG/samurai-os>. Website: <https://genortg.github.io/samurai-os/>.

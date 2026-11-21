@@ -364,10 +364,11 @@ case "$NVIDIA_MODE" in
     *) die "hardware.nvidia must be auto, yes or no (got: $NVIDIA_MODE)" ;;
 esac
 GPU_PKGS=(mesa vulkan-radeon vulkan-intel vulkan-nouveau intel-media-driver libva-intel-driver)
-# headers for every selected kernel: DKMS modules (NVIDIA, VirtualBox,
-# v4l2loopback...) build against them, and the kernel choices list them
+# kernel headers only when DKMS needs them: linux-cachyos-headers pulls
+# clang/llvm/lld and CachyOS's own pahole (newer than extra's, which repo
+# order cannot pick on its own); `samurai apps` adds headers on demand.
 KERNEL_HEADERS=()
-for k in "${KERNEL_ARR[@]}"; do KERNEL_HEADERS+=("$k-headers"); done
+PIN_PKGS=()      # repo-qualified packages for the ONLINE path only
 NVIDIA_PKGS=()
 if [ "$WANT_NVIDIA" -eq 1 ]; then
     NVIDIA_PKGS=(nvidia-utils nvidia-settings)
@@ -382,6 +383,10 @@ if [ "$WANT_NVIDIA" -eq 1 ]; then
     done
     if [ "${NEED_DKMS:-0}" -eq 1 ]; then
         NVIDIA_PKGS+=(dkms nvidia-open-dkms)
+        for k in "${KERNEL_ARR[@]}"; do
+            KERNEL_HEADERS+=("$k-headers")
+            case "$k" in linux-cachyos|linux-cachyos-lts) PIN_PKGS=(cachyos/pahole) ;; esac
+        done
     else
         NVIDIA_PKGS+=("${prebuilt[@]}")
     fi
@@ -482,7 +487,7 @@ fi
 if [ "$OFFLINE_OK" -ne 1 ]; then
     pacman -Sy --noconfirm --needed archlinux-keyring 2>/dev/null || true
     pacstrap -K /mnt base "${KERNEL_ARR[@]}" linux-firmware mkinitcpio \
-        "${GPU_PKGS[@]}" "${KERNEL_HEADERS[@]}" sudo fish zsh python pciutils \
+        "${GPU_PKGS[@]}" "${KERNEL_HEADERS[@]}" "${PIN_PKGS[@]}" sudo fish zsh python pciutils \
         "${BLDR_PKGS[@]}" snapper snap-pac 2>&1 | TLOG "$LOG"
 fi
 [ -d /mnt/etc ] || die "install failed (offline and network paths both)"
