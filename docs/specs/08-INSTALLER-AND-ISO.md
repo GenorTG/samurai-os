@@ -14,11 +14,16 @@
   install commands, and `sshd` can be started from the live menu for a remote terminal install.
 - Live graphics: Mesa for AMD/Intel/VMs, nouveau for NVIDIA. A boot menu entry "NVIDIA
   (proprietary)" loads the NVIDIA open modules live for GPUs nouveau cannot drive (Blackwell).
-- Offline package cache on the ISO: base, kernels, KDE, firmware, and AMD/Intel/Nouveau/NVIDIA
-  graphics stacks. NVIDIA packages come from configured Arch/CachyOS repositories; custom
-  gpu-unlock firmware/modules remain excluded under ADR-0008.
-  Everything else in the catalog needs network. The installer marks those choices "downloads".
-- Size budget: ≤ 2 GiB (spec 02). The size report per build lists the cache's biggest packages.
+- Two flavors (`SAMURAI_ISO_FLAVOR`): **online** (netinstall, ~1.3 GB, packages from the mirrors)
+  and **offline** (~4.6 GB). The offline ISO carries a local pacman repository
+  (`/usr/share/samurai/pkg-cache/samurai-offline.db` + packages): base, kernels, KDE day-one set,
+  firmware, firewalld, and AMD/Intel/Nouveau/NVIDIA graphics stacks. The installer resolves the
+  machine's exact set against it (`pacman --sysroot -S`), and postinstall uses the same repo, so
+  an offline install gets the same packages an online one would. NVIDIA packages come from
+  configured Arch/CachyOS repositories; custom gpu-unlock firmware/modules remain excluded
+  under ADR-0008. Catalog apps need network; offline installs record them as first-boot notes.
+- Release assets: GitHub limits files to 2 GiB, so the offline ISO ships split in 1900 MiB parts
+  with a `SHA256SUMS` covering parts and the joined image (`ci/release-iso.sh`).
 
 ## One install profile, two front-ends
 Both installers are only UIs that produce one **install profile** (`install-profile.toml`). One

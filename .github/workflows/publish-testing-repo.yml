@@ -25,14 +25,33 @@ jobs:
     environment: samurai-testing
     timeout-minutes: 90
     steps:
+      - name: Check environment secrets
+        id: secrets
+        shell: bash
+        env:
+          HAS_KEY: ${{ secrets.SAMURAI_SIGNING_SUBKEY != '' }}
+          HAS_TOKEN: ${{ secrets.SAMURAI_REPO_TOKEN != '' }}
+        run: |
+          # Until docs/KEYS.md's samurai-testing secrets exist, skip cleanly
+          # instead of failing every push to main.
+          if [ "$HAS_KEY" = true ] && [ "$HAS_TOKEN" = true ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::samurai-testing secrets not configured (docs/KEYS.md); skipping publish"
+          fi
+
       - name: Check out source
+        if: steps.secrets.outputs.ready == 'true'
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Set monotonic testing package release
+        if: steps.secrets.outputs.ready == 'true'
         shell: bash
         run: printf 'SAMURAI_PKGREL_OVERRIDE=%s%06d\n' "$(date -u +%Y%m%d)" "$GITHUB_RUN_NUMBER" >> "$GITHUB_ENV"
 
       - name: Import package signing subkey
+        if: steps.secrets.outputs.ready == 'true'
         shell: bash
         env:
           SAMURAI_SIGNING_SUBKEY: ${{ secrets.SAMURAI_SIGNING_SUBKEY }}
@@ -47,9 +66,11 @@ jobs:
           printf '%s\n' "$primary_fingerprint" > "$HOME/samurai-keys/primary-fingerprint.txt"
 
       - name: Build signed package repository
+        if: steps.secrets.outputs.ready == 'true'
         run: ci/build-repo.sh build/repo
 
       - name: Publish complete repository to GitHub Releases
+        if: steps.secrets.outputs.ready == 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.SAMURAI_REPO_TOKEN }}
