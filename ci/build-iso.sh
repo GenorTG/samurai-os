@@ -129,12 +129,21 @@ pacman --dbpath /tmp/freshdb -Sw --noconfirm --cachedir /b/offline-pkgs \
     firefox pipewire pipewire-pulse pipewire-alsa wireplumber spectacle \
     noto-fonts noto-fonts-emoji flatpak power-profiles-daemon bluez bluez-utils \
     firewalld plasma-firewall \
-    samurai-release samurai-mirrorlist samurai-keyring
-cp /var/lib/pacman/sync/*.db /b/offline-pkgs/
+    samurai-release samurai-mirrorlist samurai-keyring openssh \
+    cachyos/pahole
+# cachyos/pahole: linux-cachyos-headers needs pahole>=1:1.32-2, newer than
+# extra (repo order makes plain "pahole" resolve to extra and fail)
+# Local repository: the installer RESOLVES against it (pacman -S), so a
+# machine gets only the packages it needs, never the whole cache.
+repo-add -q /b/offline-pkgs/samurai-offline.db.tar.gz /b/offline-pkgs/*.pkg.tar.zst
+rm -f /b/offline-pkgs/*.old
 '
 mkdir -p "$profile_dir/airootfs/usr/share/samurai/pkg-cache"
-find "$out_dir/offline-pkgs" -maxdepth 1 -type f ! -name '*.sig' \
-    -exec cp {} "$profile_dir/airootfs/usr/share/samurai/pkg-cache/" \;
+# -L: samurai-offline.db / .files are symlinks to the .tar.gz archives
+find "$out_dir/offline-pkgs" -maxdepth 1 \( -type f -o -type l \) ! -name '*.sig' \
+    -exec cp -L {} "$profile_dir/airootfs/usr/share/samurai/pkg-cache/" \;
+[ -f "$profile_dir/airootfs/usr/share/samurai/pkg-cache/samurai-offline.db" ] ||
+    { echo "error: offline repository database missing" >&2; exit 1; }
 echo "==> offline cache: $(ls "$profile_dir/airootfs/usr/share/samurai/pkg-cache" | wc -l) files"
 else
     echo "==> online flavor: no baked package cache (installer uses the mirrors)"

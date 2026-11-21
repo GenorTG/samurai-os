@@ -127,7 +127,7 @@
             <div><dt>0</dt><dd>Arch packages rebuilt or patched</dd></div>
             <div><dt>2</dt><dd>kernels by default: linux-cachyos + linux-zen</dd></div>
             <div><dt>LUKS2</dt><dd>full-root encryption, on by default</dd></div>
-            <div><dt>8</dt><dd>VM test scenarios, from boot to rollback</dd></div>
+            <div><dt>9</dt><dd>VM test scenarios, from boot to a day of real use</dd></div>
           </dl>
         </div>
 
@@ -245,9 +245,10 @@
             <article class="w-card" aria-labelledby="f-gpu">
               <div class="card-head"><p class="kind">Hardware</p><span class="w-seal">VM: packages only</span></div>
               <h3 id="f-gpu" class="w-display">GPU driver stacks</h3>
-              <p class="w-muted">Mesa with Vulkan for AMD and Intel (plus Intel VA-API), Nouveau Vulkan, and the
-                NVIDIA open kernel modules matched to each selected kernel, with <code>nvidia-utils</code>. The
-                suite asserts the packages; no physical GPU has been tested yet.</p>
+              <p class="w-muted">Mesa with Vulkan for AMD and Intel (plus Intel VA-API) and Nouveau Vulkan, always.
+                The NVIDIA open modules go on only when an NVIDIA GPU is detected (or forced in the profile):
+                prebuilt when every chosen kernel has a package, DKMS otherwise. The VM suite builds the DKMS
+                modules for both default kernels; no physical GPU has been tested yet.</p>
             </article>
           </li>
           <li>
@@ -273,7 +274,7 @@
           </li>
           <li>
             <article class="w-card" aria-labelledby="f-vm">
-              <div class="card-head"><p class="kind">Process</p><span class="w-seal">8 scenarios</span></div>
+              <div class="card-head"><p class="kind">Process</p><span class="w-seal">9 scenarios</span></div>
               <h3 id="f-vm" class="w-display">Proven in a VM first</h3>
               <p class="w-muted">A headless QEMU/KVM + OVMF harness drives the ISO over serial and the guest
                 agent: ISO boot, default install, guided install, KDE, offline install, rollback, update from an
@@ -293,6 +294,7 @@
 usage: samurai &lt;command&gt; [args]
 
   update      staged system update
+  apps        optional apps: list/search/info/install/remove/bundles
   snap        list/create/delete/diff/repair/rollback
   rescue      mount/chroot/bootloader/initramfs/kernel/rollback
   version     print the CLI version</code></pre>
@@ -316,7 +318,7 @@ usage: samurai &lt;command&gt; [args]
           <article class="w-card dl-card" aria-labelledby="dl-online">
             <div class="card-head"><p class="kind">Netinstall</p><span class="w-seal quiet">needs network</span></div>
             <h3 id="dl-online" class="w-display">Online ISO</h3>
-            <p class="size">The smaller download.</p>
+            <p class="size">About 1.3 GB.</p>
             <ul class="w-dash">
               <li>Live system plus the installer; packages are fetched during the install.</li>
               <li>You start on today's versions from Arch, CachyOS and <code>[samurai]</code>.</li>
@@ -331,7 +333,7 @@ usage: samurai &lt;command&gt; [args]
           <article class="w-card w-card-accent dl-card" aria-labelledby="dl-offline">
             <div class="card-head"><p class="kind">Full desktop</p><span class="w-seal">no network needed</span></div>
             <h3 id="dl-offline" class="w-display">Offline ISO</h3>
-            <p class="size">Several GB, shipped in parts.</p>
+            <p class="size">About 4.5 GB, shipped in parts.</p>
             <ul class="w-dash">
               <li>KDE Plasma, <code>linux-cachyos</code> + <code>linux-zen</code> and the AMD, Intel, Nouveau and NVIDIA driver packages baked in.</li>
               <li>Installs with no network at all; run <code>samurai update</code> afterwards.</li>
@@ -426,11 +428,28 @@ usage: samurai &lt;command&gt; [args]
     <section id="apps" class="w-section" aria-labelledby="apps-title">
       <div class="w-container">
         <div class="section-head">
-          <p class="w-eyebrow">The armoury · being built</p>
+          <p class="w-eyebrow">The armoury</p>
           <h2 id="apps-title" class="w-display">Optional apps, at install or any time later</h2>
-          <p class="lead">A <code>samurai apps</code> catalog is being built on top of Garuda's setup-wizard
-            list, imported as data, plus our own additions. The plan: pick apps during the install or any time
-            afterwards, and offer only what resolves to a real repository.</p>
+          <p class="lead"><code>samurai apps</code> reads one catalog: Garuda's setup-wizard list, imported
+            as data, plus our own additions. Pick apps in the install profile or any time afterwards; every
+            package is checked against the enabled repositories before anything runs, so you never get halfway
+            into a transaction that cannot finish.</p>
+        </div>
+        <div class="grid grid-2 mt-l">
+          <div>
+            <h3 class="w-display" style="font-size:1.35rem">One transaction, no partial upgrades</h3>
+            <p class="w-muted mt-s">Installs are a single <code>pacman -S --needed</code>, shown before it runs.
+              The tool never syncs databases on its own: if they are stale it sends you to
+              <code>samurai update</code> first. Bundles skip what is not available yet and say why.</p>
+            <p class="w-muted mt-s">Bundles: <code>@gaming</code>, <code>@dev</code>, <code>@creative</code>,
+              <code>@office</code>, <code>@media</code>, <code>@streaming</code>.</p>
+          </div>
+          <div class="code" data-copy>
+<pre><code><span class="prompt">$ </span>samurai apps search obs
+<span class="prompt">$ </span>samurai apps info @gaming
+<span class="prompt">$ </span>samurai apps install @dev btop
+<span class="prompt">$ </span>samurai apps list --installed --json</code></pre>
+          </div>
         </div>
 
         <h3 class="w-display mt-l" style="font-size:1.35rem">From Garuda's list <span class="w-faint small">(16 categories, 175 apps)</span></h3>
@@ -483,6 +502,7 @@ usage: samurai &lt;command&gt; [args]
               <li>Signed <code>[samurai]</code> repository and database (<code>SigLevel = Required DatabaseRequired</code>); Arch's signing used as is.</li>
               <li>Root account locked; your user is in <code>wheel</code>.</li>
               <li>Install profiles are checked against a strict allowlist: no free-form shell, every value quoted, passwords only as crypt hashes.</li>
+              <li>firewalld on by default: zone <code>public</code>, inbound closed except DHCPv6; SSH opens only when you enable the SSH server.</li>
               <li>No SSH server unless you ask for one.</li>
               <li>Signing subkey for publishing kept in a protected CI environment; the primary key stays offline.</li>
             </ul>
@@ -491,7 +511,7 @@ usage: samurai &lt;command&gt; [args]
             <div class="card-head"><p class="kind">Specified</p><span class="w-seal quiet">roadmap · M8</span></div>
             <h3 id="sec-next" class="w-display">Coming next</h3>
             <ul class="w-dash no">
-              <li>firewalld enabled with inbound denied, and one-click presets for KDE Connect, Steam, Sunshine and more.</li>
+              <li>One-click firewall presets for KDE Connect, Steam, Sunshine and more.</li>
               <li>Secure Boot with your own keys (sbctl, Microsoft keys kept for option ROMs) and Limine's config checksum enrolled.</li>
               <li>Optional TPM2 unlock with a PIN by default, plus a one-time recovery key.</li>
               <li>Kernel and sysctl hardening; AppArmor at boot; unprivileged user namespaces kept for Flatpak, Steam and browser sandboxes.</li>
@@ -562,8 +582,10 @@ usage: samurai &lt;command&gt; [args]
           <details>
             <summary>What about NVIDIA?</summary>
             <div class="answer">
-              <p>The installer adds NVIDIA's open kernel modules matched to each kernel you pick, prebuilt for
-                <code>linux-cachyos</code> and the standard Arch kernels, DKMS for the rest. NVIDIA's open modules
+              <p>When an NVIDIA GPU is present, the installer adds NVIDIA's open kernel modules: the prebuilt
+                package when every kernel you picked has one (<code>linux-cachyos</code>, <code>linux</code>,
+                <code>linux-lts</code>), otherwise DKMS for all of them, because the module packages conflict
+                with each other. NVIDIA's open modules
                 cover Turing (RTX 20 / GTX 16) and newer; older cards get Nouveau. CUDA and other GPU extras come
                 with a later milestone.</p>
             </div>
@@ -624,7 +646,7 @@ usage: samurai &lt;command&gt; [args]
           <ol class="road">
             <li>
               <div class="meta"><h3 class="w-display">Toolbox CLI</h3><span class="w-seal quiet">next</span></div>
-              <p>The Rust <code>samurai</code> CLI with health checks and fixes, cleaning, diagnostics, firewall and Tailscale pages; app catalog and <code>samurai apps</code>.</p>
+              <p>The Rust <code>samurai</code> CLI with health checks and fixes, cleaning, diagnostics, firewall and Tailscale pages; a Qt toolbox on top of <code>samurai apps</code>.</p>
             </li>
             <li>
               <div class="meta"><h3 class="w-display">Drivers and developer setup</h3><span class="w-seal quiet">planned</span></div>

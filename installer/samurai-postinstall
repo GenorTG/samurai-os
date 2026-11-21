@@ -12,6 +12,16 @@ PROFILE="${1:?usage: samurai-postinstall /path/to/profile.toml}"
 [ -f "$PROFILE" ] || { echo "profile not found: $PROFILE" >&2; exit 1; }
 
 log() { printf '%s %s\n' "$(date -Is)" "$*"; }
+# Offline installs: samurai-install binds the medium's local repository into
+# the target and passes its pacman config here. Every install below goes
+# through pac, so online and offline installs resolve the same package sets.
+pac() {
+    if [ -n "${SAMURAI_PACMAN_CONF:-}" ]; then
+        pacman --config "$SAMURAI_PACMAN_CONF" "$@"
+    else
+        pacman "$@"
+    fi
+}
 log "samurai-postinstall starting"
 
 read -r HOSTNAME TZ LOCALE KB \
@@ -122,7 +132,7 @@ if [ "${#PACKAGES[@]}" -gt 0 ]; then
     done
     if [ "${#MISSING[@]}" -gt 0 ]; then
         log "installing missing [samurai] packages: ${MISSING[*]}"
-        pacman -S --noconfirm --needed "${MISSING[@]}"
+        pac -S --noconfirm --needed "${MISSING[@]}"
     else
         log "[samurai] packages already present (offline cache path)"
     fi
@@ -138,19 +148,7 @@ case "$DESKTOP" in
         DESKTOP_PKGS=(plasma-meta sddm konsole dolphin kate ark gwenview okular
             firefox pipewire pipewire-pulse pipewire-alsa wireplumber spectacle
             noto-fonts noto-fonts-emoji flatpak power-profiles-daemon bluez bluez-utils)
-        if [ "${SAMURAI_OFFLINE:-0}" = 1 ]; then
-            MISSING_DESKTOP=()
-            for p in "${DESKTOP_PKGS[@]}"; do
-                pacman -Q "$p" >/dev/null 2>&1 || MISSING_DESKTOP+=("$p")
-            done
-            if [ "${#MISSING_DESKTOP[@]}" -gt 0 ]; then
-                log "FATAL: offline KDE cache missing packages: ${MISSING_DESKTOP[*]}"
-                exit 16
-            fi
-            log "KDE packages already present (offline cache path)"
-        else
-            pacman -S --noconfirm --needed "${DESKTOP_PKGS[@]}" || { log "FATAL: KDE install failed"; exit 16; }
-        fi
+        pac -S --noconfirm --needed "${DESKTOP_PKGS[@]}" || { log "FATAL: KDE install failed"; exit 16; }
         DM=sddm
         # Breeze Dark default for every new user (Genor 2026-11-17)
         install -d /etc/skel/.config
@@ -205,13 +203,7 @@ case "$FW" in
     firewalld|ufw)
         FW_PKGS=("$FW")
         [ "$DESKTOP" = kde ] && FW_PKGS+=(plasma-firewall)
-        if [ "${SAMURAI_OFFLINE:-0}" = 1 ]; then
-            for p in "${FW_PKGS[@]}"; do
-                pacman -Q "$p" >/dev/null 2>&1 || { log "FATAL: offline cache missing firewall package $p"; exit 17; }
-            done
-        else
-            pacman -S --noconfirm --needed "${FW_PKGS[@]}" || { log "FATAL: firewall install failed"; exit 17; }
-        fi
+        pac -S --noconfirm --needed "${FW_PKGS[@]}" || { log "FATAL: firewall install failed"; exit 17; }
         if [ "$FW" = firewalld ]; then
             # offline config: firewall-offline-cmd works without the daemon (chroot)
             firewall-offline-cmd --set-default-zone=public >/dev/null
@@ -234,7 +226,7 @@ case "$FW" in
     none) log "firewall: none (profile choice)" ;;
 esac
 if [ "$SSHD" = yes ]; then
-    if [ "${SAMURAI_OFFLINE:-0}" != 1 ]; then pacman -S --noconfirm --needed openssh; fi
+    pac -S --noconfirm --needed openssh || log "ssh: openssh not installable now"
     if pacman -Q openssh >/dev/null 2>&1; then
         systemctl enable sshd.service && log "ssh: sshd enabled"
     else
