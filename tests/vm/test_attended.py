@@ -121,11 +121,13 @@ def test_attended_install(mirror):
         # maps the LUKS as luks-<uuid>, so assert the root FS via findmnt
         vm.send("echo SHELL=$(getent passwd samurai | cut -d: -f7); "
                 "test -f /boot/grub/grub.cfg && echo GRUB-OK; "
+                "grep -q '^\\[cachyos\\]$' /etc/pacman.conf && echo CACHYOS-REPO-OK; "
                 "cat /etc/hostname; "
                 "findmnt -no FSTYPE /\n")
         acc = vm.wait_for("btrfs", timeout=60)
         assert "SHELL=/bin/fish" in acc, acc[-800:]
         assert "GRUB-OK" in acc, acc[-800:]
+        assert "CACHYOS-REPO-OK" in acc, acc[-800:]
         assert "samurai" in acc, acc[-800:]
 
         # final agent asserts: the guest agent can be slow right after boot

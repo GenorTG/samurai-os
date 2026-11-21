@@ -19,6 +19,14 @@ gh_repo="GenorTG/samurai-repo"
 
 cd "$repo_dir/$channel"
 
+# Bootstrap a channel release on its first publish. Later runs replace the
+# same rolling release's assets package-first and database-last below.
+if ! gh release view "$channel" --repo "$gh_repo" >/dev/null 2>&1; then
+    gh release create "$channel" --repo "$gh_repo" \
+        --title "Samurai package repository ($channel)" \
+        --notes "Rolling signed pacman repository channel. Assets are replaced by the Samurai OS build workflow."
+fi
+
 # flat db/file copies under the names pacman requests (no symlinks on Releases)
 for pair in "samurai.db.tar.gz samurai.db" "samurai.db.tar.gz.sig samurai.db.sig" \
             "samurai.files.tar.gz samurai.files" "samurai.files.tar.gz.sig samurai.files.sig"; do

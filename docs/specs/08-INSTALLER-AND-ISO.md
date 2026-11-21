@@ -14,7 +14,9 @@
   install commands, and `sshd` can be started from the live menu for a remote terminal install.
 - Live graphics: Mesa for AMD/Intel/VMs, nouveau for NVIDIA. A boot menu entry "NVIDIA
   (proprietary)" loads the NVIDIA open modules live for GPUs nouveau cannot drive (Blackwell).
-- Offline package cache on the ISO: base, kernels, KDE, firmware, NVIDIA/AMD/Intel driver stacks.
+- Offline package cache on the ISO: base, kernels, KDE, firmware, and AMD/Intel/Nouveau/NVIDIA
+  graphics stacks. NVIDIA packages come from configured Arch/CachyOS repositories; custom
+  gpu-unlock firmware/modules remain excluded under ADR-0008.
   Everything else in the catalog needs network. The installer marks those choices "downloads".
 - Size budget: ≤ 2 GiB (spec 02). The size report per build lists the cache's biggest packages.
 

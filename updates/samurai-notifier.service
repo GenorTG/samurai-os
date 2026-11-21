@@ -3,4 +3,4 @@ Description=Samurai OS update checker (user)
 
 [Service]
 Type=oneshot
-ExecStart=%h/.local/bin/samurai-notifier
+ExecStart=/usr/local/bin/samurai-notifier

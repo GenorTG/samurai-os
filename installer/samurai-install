@@ -338,6 +338,22 @@ fi
 
 ### Base install ###
 log "installing base system"
+# GPU module package must match the selected kernel; install only one NVIDIA
+# module provider per kernel, while always including the common userspace stack.
+GPU_PKGS=(mesa vulkan-radeon vulkan-intel vulkan-nouveau nvidia-utils nvidia-settings)
+KERNEL_HEADERS=()
+for k in "${KERNEL_ARR[@]}"; do
+    case "$k" in
+        linux-cachyos) GPU_PKGS+=(linux-cachyos-nvidia-open) ;;
+        linux) GPU_PKGS+=(nvidia-open) ;;
+        linux-lts) GPU_PKGS+=(nvidia-open-lts) ;;
+        linux-zen|linux-cachyos-lts)
+            GPU_PKGS+=(dkms nvidia-open-dkms)
+            KERNEL_HEADERS+=("$k-headers")
+            ;;
+    esac
+done
+GPU_PKGS+=(intel-media-driver libva-intel-driver)
 # archive-pinned installs (spec 11 update-from-archive): the profile's
 # repos.arch_mirror replaces the live mirrorlist so pacstrap AND the target
 # download from the pinned snapshot; the updater rewrites it on first update
@@ -375,31 +391,64 @@ if [ "$DESKTOP" = kde ] && [ -d "$OFFLINE_DIR" ] && compgen -G "$OFFLINE_DIR/*.p
     pacman-key --gpgdir /mnt/etc/pacman.d/gnupg --init >/dev/null 2>&1 || true
     # signatures were verified when the cache was built; the ISO itself is
     # the trust anchor. -U needs no repos, no sync dbs, no mirrorlist.
-    printf '[options]\nSigLevel = Never\nLocalFileSigLevel = Never\nArchitecture = auto\n' > /tmp/pacman-offline.conf
+    # pacman --sysroot resolves --config inside the target; stage it there so
+    # hooks and libalpm use the target root rather than the live ISO.
+    mkdir -p /mnt/tmp
+    printf '[options]\nSigLevel = Never\nLocalFileSigLevel = Never\nArchitecture = auto\n' > /mnt/tmp/pacman-offline.conf
+    # sysroot hooks execute in the target chroot. Supply the pseudo-filesystems
+    # needed by mkinitcpio and pacman-key; non-recursive binds avoid importing
+    # busy live-ISO device/pts, efivarfs, cgroup, archiso and runtime mounts.
+    mkdir -p /mnt/dev /mnt/proc /mnt/sys /mnt/run
+    mount --bind /dev /mnt/dev
+    mount --make-rslave /mnt/dev
+    mount -t proc proc /mnt/proc
+    mount --bind /sys /mnt/sys
+    mount --make-rslave /mnt/sys
+    mount --bind /run /mnt/run
+    mount --make-rslave /mnt/run
     # kernel selection: drop UNCHOSEN kernels (and their -headers) from the
     # list; match the exact kernel package names only — a blanket "linux-*"
     # case would eat linux-firmware and friends (seen 2026-11-20)
     PKG_LIST=()
+    NEED_DKMS=0
+    for k in "${KERNEL_ARR[@]}"; do
+        case "$k" in linux-zen|linux-cachyos-lts) NEED_DKMS=1 ;; esac
+    done
     for f in "$OFFLINE_DIR"/*.pkg.tar.zst; do
         b=$(basename "$f"); keep=1
         for k in linux linux-lts linux-zen linux-cachyos linux-cachyos-lts; do
             case " ${KERNEL_ARR[*]} " in *" $k "*) continue ;; esac
             case "$b" in "$k"-[0-9]*|"$k"-headers-[0-9]*) keep=0 ;; esac
         done
+        case "$b" in
+            linux-cachyos-nvidia-open-[0-9]*)
+                case " ${KERNEL_ARR[*]} " in *" linux-cachyos "*) ;; *) keep=0 ;; esac ;;
+            nvidia-open-[0-9]*)
+                case " ${KERNEL_ARR[*]} " in *" linux "*) ;; *) keep=0 ;; esac ;;
+            nvidia-open-lts-[0-9]*)
+                case " ${KERNEL_ARR[*]} " in *" linux-lts "*) ;; *) keep=0 ;; esac ;;
+            nvidia-open-dkms-[0-9]*|dkms-[0-9]*)
+                [ "$NEED_DKMS" -eq 1 ] || keep=0 ;;
+        esac
         [ "$keep" = 1 ] && PKG_LIST+=("$f")
     done
     set +e
-    pacman --config /tmp/pacman-offline.conf -r /mnt -U --noconfirm "${PKG_LIST[@]}" 2>&1 | TLOG "$LOG"
+    # --root relocates pacman's files but is not suitable for a mounted guest:
+    # transaction hooks then inspect the live ISO instead of the target. --sysroot
+    # makes libalpm operate on the mounted installation, including kernel hooks.
+    pacman --config /tmp/pacman-offline.conf --sysroot /mnt -U --noconfirm "${PKG_LIST[@]}" 2>&1 | TLOG "$LOG"
     PACSTAT=${PIPESTATUS[0]}
     set -e
+    # Package hooks may start a GPG agent inside the target chroot. Its
+    # /dev/null descriptors pin this devtmpfs bind, so stop it from the same
+    # root/homedir namespace before unmounting.
+    chroot /mnt gpgconf --homedir /etc/pacman.d/gnupg --kill gpg-agent >/dev/null 2>&1 || true
+    rm -f /mnt/tmp/pacman-offline.conf
+    umount /mnt/proc
+    umount /mnt/sys
+    umount /mnt/run
     if [ "$PACSTAT" -eq 0 ]; then
         OFFLINE_OK=1
-        # -U carries no config: copy the live medium's repo config over so
-        # the installed system updates from the same repos (cachyos + samurai,
-        # ADR-0007)
-        cp /etc/pacman.conf /mnt/etc/pacman.conf
-        mkdir -p /mnt/etc/pacman.d
-        cp -a /etc/pacman.d/. /mnt/etc/pacman.d/ 2>/dev/null || true
         log "offline install: closure installed from baked cache"
     else
         log "offline cache incomplete for this set — falling back to network install over the partial target"
@@ -409,9 +458,18 @@ if [ "$DESKTOP" = kde ] && [ -d "$OFFLINE_DIR" ] && compgen -G "$OFFLINE_DIR/*.p
 fi
 if [ "$OFFLINE_OK" -ne 1 ]; then
     pacman -Sy --noconfirm --needed archlinux-keyring 2>/dev/null || true
-    pacstrap -K /mnt base "${KERNEL_ARR[@]}" linux-firmware mkinitcpio sudo fish python pciutils "${BLDR_PKGS[@]}" snapper snap-pac 2>&1 | TLOG "$LOG"
+    pacstrap -K /mnt base "${KERNEL_ARR[@]}" linux-firmware mkinitcpio \
+        "${GPU_PKGS[@]}" "${KERNEL_HEADERS[@]}" sudo fish python pciutils \
+        "${BLDR_PKGS[@]}" snapper snap-pac 2>&1 | TLOG "$LOG"
 fi
 [ -d /mnt/etc ] || die "install failed (offline and network paths both)"
+# The live ISO's pacman config enables CachyOS and Samurai. pacstrap's -C
+# affects package resolution only; it does not install that config into the
+# target. Copy it in both online and offline installs so the repos remain
+# enabled after reboot (ADR-0007).
+cp /etc/pacman.conf /mnt/etc/pacman.conf
+mkdir -p /mnt/etc/pacman.d
+cp -a /etc/pacman.d/. /mnt/etc/pacman.d/ 2>/dev/null || true
 
 # the postinstall runs in the TARGET: bring it + its deps over first
 # (same bug class as above: the target has neither the script nor the
@@ -451,6 +509,14 @@ chmod 644 /mnt/etc/samurai-install-env
 log "running samurai-postinstall"
 arch-chroot /mnt env SAMURAI_CHROOT=1 SAMURAI_OFFLINE=$OFFLINE_OK /usr/local/bin/samurai-postinstall /var/lib/samurai/install-profile.toml 2>&1 | TLOG "$LOG"
 
+# A successful pacman transaction is not enough: kernel hooks can fail while
+# pacman itself exits 0. Refuse to produce an install whose selected Limine,
+# GRUB, systemd-boot, or rEFInd entries point at missing ESP artifacts.
+for k in "${KERNEL_ARR[@]}"; do
+    [ -s "/mnt/boot/vmlinuz-$k" ] || die "kernel image missing after postinstall: /boot/vmlinuz-$k"
+    [ -s "/mnt/boot/initramfs-$k.img" ] || die "initramfs missing after postinstall: /boot/initramfs-$k.img"
+done
+
 ### first snapshot: install-complete (spec 06). Created LIVE-side: the install
 ### chroot has no snapper daemon (and "/" isn't a mountpoint there), so the
 ### snap-pac hooks fire during no transaction and a fresh install would have
@@ -481,6 +547,8 @@ else
     log "WARNING: /mnt/.snapshots not mounted — skipping install-complete snapshot"
 fi
 
+# postinstall's pacman-key --init can start another target-root agent.
+chroot /mnt gpgconf --homedir /etc/pacman.d/gnupg --kill gpg-agent >/dev/null 2>&1 || true
 log "install complete; unmounting"
 # keep the install log on the installed system too (spec 08 forensics: the
 # log previously lived only on the live medium and vanished after reboot)

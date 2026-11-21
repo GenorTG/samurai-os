@@ -16,6 +16,12 @@ import time
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 WORK = REPO / ".vm"
+RUN_ID = os.environ.get("SAMURAI_VM_RUN_ID", "").strip()
+
+
+def _artifact_name(name: str) -> str:
+    """Keep outputs from a named validation run separate from prior evidence."""
+    return f"{RUN_ID}-{name}" if RUN_ID else name
 
 # Serial streams are full of ANSI/OSC noise (zsh colours split words like
 # 'root@samurai', boot menu box art). Matching happens on the cleaned text;
@@ -48,6 +54,7 @@ def _find_ovmf() -> tuple[str, str]:
 class VM:
     def __init__(self, name: str, iso: str | None = None, disk: str | None = None,
                  disk_size: str = "40G", ram: str = "4096", smp: str = "4"):
+        name = _artifact_name(name)
         self.name = name
         WORK.mkdir(parents=True, exist_ok=True)
         self.iso = iso
@@ -145,8 +152,9 @@ class VM:
             acc += self.serial_read(max_wait=1.5)
             if pattern in acc:
                 return acc
-            if "FATAL" in acc:
-                raise RuntimeError(f"serial FATAL while waiting for {pattern!r}:\n{acc[-800:]}")
+            errors = ("FATAL", "ERROR: Failed to install packages to new root", "error: target not found:")
+            if any(error in acc for error in errors):
+                raise RuntimeError(f"serial install error while waiting for {pattern!r}:\n{acc[-800:]}")
         raise TimeoutError(f"serial never showed {pattern!r}; last:\n{acc[-800:]}")
 
     def wait_for_any(self, patterns: list[str], timeout: float = 120.0,
@@ -208,6 +216,7 @@ class VM:
         log. Returns the PNG path.
         """
         import subprocess
+        name = _artifact_name(name)
         ppm = str(WORK / f"{name}.ppm")
         self.qmp_command("screendump", filename=ppm)
         target_dir = shots_dir or str(pathlib.Path.home() / ".openclaw/workspace/samurai-shots")

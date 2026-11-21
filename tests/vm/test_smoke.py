@@ -61,6 +61,13 @@ def test_install_default(mirror):
         assert out.strip() == "samurai-vm"
         _, out = qga.exec("head -1 /usr/lib/os-release")
         assert "Samurai OS" in out, out
+        _, out = qga.exec(
+            "awk '/^\\[samurai\\]$/{found=1; next} found && /^\\[/{exit} found{print}' /etc/pacman.conf"
+        )
+        assert "github.com/GenorTG/samurai-repo/releases/download/x86_64" in out, out
+        assert "SigLevel = Required DatabaseRequired" in out, out
+        _, out = qga.exec("test -s /etc/pacman.d/samurai-testing-mirrorlist && echo present")
+        assert out.strip() == "present", "testing release route must be installed for live testing"
         _, out = qga.exec("lsblk -no TYPE $(findmnt -n -o SOURCE / | sed 's/\\[.*\\]//')")
         assert "crypt" in out, "expected LUKS2 root"
         _, out = qga.exec("findmnt -n -o SOURCE /")

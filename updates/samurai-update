@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # samurai update — one staged wrapper around pacman -Syu (spec 03, ADR-0002).
-# M3: bash implementation; the static self-updating binary replaces it at M5
-# (spec 03 "Why stage 1 is not a partial-upgrade hazard" adapts then).
+# Shell executor packaged by samurai-tools; updates land in the normal full-system transaction.
 #
 # SECURITY POSTURE (Genor 2026-11-17): fail closed on every stage; no eval;
 # every substitution quoted; the profile never carries shell; interventions
@@ -64,14 +63,10 @@ avail_kb=$(df -Pk / | awk 'NR==2 {print $4}')
 ### Stage 1: self-update ###
 log "stage 1: self-update"
 pacman -Sy --noconfirm >/dev/null 2>&1 || die "pacman -Sy failed" 8
-for p in samurai-update samurai-keyring archlinux-keyring; do
+for p in samurai-keyring archlinux-keyring; do
     if pacman -Q "$p" >/dev/null 2>&1 && [ "$(pacman -Qu "$p" 2>/dev/null | grep -c "^$p ")" -gt 0 ]; then
         log "self-update: $p has an update; installing it alone"
         pacman -S --noconfirm --needed "$p" || die "self-update of $p failed" 9
-        if [ "$p" = samurai-update ]; then
-            log "re-executing the new updater"
-            exec "$(command -v samurai-update)" --no-snapshot=$NO_SNAPSHOT "${PACMAN_ARGS[@]}"
-        fi
     fi
 done
 

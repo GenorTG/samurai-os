@@ -20,16 +20,19 @@ auto_unlock_keyfile = true   # TEST AFFORDANCE ONLY: keyfile on ESP for headless
                              # boots. Real installs keep the passphrase prompt.
 
 [boot]
-kernels = ["linux"]          # M2 test set; default release profile: ["linux-cachyos", "linux-zen"]
+kernels = ["linux"]   # release default (ADR-0001); tests override to ["linux"]
 bootloader = "limine"        # ADR-0003: Limine + snapshot boot (M4); spike pending for Secure Boot
 
 [user]
 name = "samurai"
 shell = "bash"
 groups = ["wheel"]
-password_hash = "$6$dkLqiMB0cNUPvfXu$0cgTfPQGMB2JE5GIfcPUId67LqbnvKIV5.u3tWAAgEiCAROCkFGaji2c/wXvg5ULz8OtTdWP812qWfSl26McE."
+password_hash = "$6$RwZdGs.sJMwfuaYR$ckfUcnJp.CEFDBNpLoA0xjCKNsBnqGLlXDRdZ893fjltO2lhE8OiwRH3UH8IvgTjpbavvtOp1spg1ivTZDTKU/"
 
 [packages]
+# Desktop: KDE Plasma is the default face of Samurai OS (Genor 2026-11-20);
+# alternatives gnome/xfce/lxqt/none arrive via the wizard or the toolbox.
+desktop = "none"
 # M2 install set: enough for a booting, testable system. Desktop/gaming/dev
 # packages arrive with their milestones (M6–M7); samurai-postinstall applies
 # whatever the profile lists, from repos the ISO trusts.
@@ -38,11 +41,13 @@ install = [
     "samurai-mirrorlist",
     "samurai-keyring",
     "qemu-guest-agent",
+    "networkmanager",
+    "wpa_supplicant",
 ]
 
 [repos]
 samurai = true
-cachyos = false              # enabled at M1 keys on release profile; test set is Arch-only
+cachyos = true               # [cachyos] is baked into the ISO (linux-cachyos + keyring)
 chaotic_aur = false
 arch_mirror = "auto"         # "auto" = live medium mirrors; or an https URL to pin
                              # (spec 11: Arch archive for update-from-archive testing)

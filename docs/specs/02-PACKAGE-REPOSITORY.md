@@ -70,7 +70,8 @@ is fixed in the M1 spike.)
 
 ## Build pipeline (GitHub Actions)
 1. **Trigger**: push to `main` touching `pkgbuilds/**`, `toolbox/**` or `settings/**`; also nightly and
-   manual dispatch.
+   manual dispatch. The current `Publish Samurai testing repository` workflow watches `pkgbuilds/**`
+   and the repo build/publish scripts, and can be manually dispatched from `main`.
 2. **Detect**: diff `pkgver-pkgrel` of each PKGBUILD against the published db; build only the
    changed packages, in dependency order.
 3. **Build**: in an `archlinux:base-devel` container, as a non-root builder user, `makepkg -s` with a
@@ -80,12 +81,45 @@ is fixed in the M1 spike.)
    on scripts.
 5. **Sign**: detached `.sig` per package with the CI signing subkey; `repo-add --sign --verify` for
    the db.
-6. **Publish to testing**: upload to `x86_64-testing`, rsync to the mirror's testing path.
+6. **Publish to testing**: upload to `x86_64-testing`, rsync to the mirror's testing path. The
+   workflow currently publishes signed GitHub Release assets to `GenorTG/samurai-repo` (creating the
+   channel release on its first publish); mirror sync remains a separate follow-up operation.
 7. **VM gate**: spec 11 `smoke` suite runs on genorbox1 against testing (self-hosted runner, labels
    `kvm`). This is the only self-hosted step. GitHub-hosted runners have no nested KVM we can rely on.
 8. **Promote**: on green (automatic for patch-only changes, manual approval otherwise), copy the
    same signed files to the stable `x86_64` release. No rebuild on promotion: stable gets exactly
    what was tested.
+
+### Live testing
+Installed systems use `samurai update` / `samurai-update`, which performs one `pacman -Syu`; it does
+not download GitHub assets directly. The installer configures the stable `[samurai]` repo to use the
+`GenorTG/samurai-repo` GitHub Release and requires signed databases and packages. For a test machine,
+enable the signed testing channel after install:
+
+```bash
+sudo python3 - <<'PY'
+from pathlib import Path
+
+path = Path('/etc/pacman.conf')
+text = path.read_text()
+if '[samurai-testing]' not in text:
+    stable = text.index('[samurai]')
+    testing = '[samurai-testing]\nInclude = /etc/pacman.d/samurai-testing-mirrorlist\nSigLevel = Required DatabaseRequired\n\n'
+    path.write_text(text[:stable] + testing + text[stable:])
+PY
+sudo samurai update
+```
+
+Keep `[samurai-testing]` above `[samurai]` so pacman prefers the testing packages; the mirrorlist
+package routes it to the `x86_64-testing` GitHub Release first. Remove the
+`[samurai-testing]` block to return to stable. Do not enable it on general-purpose installs; the
+testing channel can contain unpromoted builds.
+
+`samurai-tools` owns the installed update/CLI executors and notifier, and `samurai-release` depends on
+it. Therefore changes under `updates/` arrive through `samurai update` after the test channel is
+enabled; they do not require reinstalling the ISO. The first testing package also adopts the legacy
+copies previously staged by the installer. The VM update scenario enables testing ahead of stable,
+then asserts the executors are owned by `samurai-tools` after the transaction.
 
 ## Signing keys
 - One OpenPGP primary key (certify only) kept **offline** on Genor's machine plus a paper or USB

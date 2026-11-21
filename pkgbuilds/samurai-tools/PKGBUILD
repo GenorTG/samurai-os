@@ -1,0 +1,48 @@
+# Maintainer: Samurai OS <build@smart-samurai.pl>
+# The build driver stages executors and interventions from updates/ beside this file.
+pkgname=samurai-tools
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Samurai OS updater, CLI executors, and update notifier"
+arch=(any)
+url="https://github.com/GenorTG/samurai-os"
+license=(MIT)
+depends=(bash coreutils curl findutils gawk grep pacman python sed systemd util-linux)
+install=samurai-tools.install
+source=(
+    samurai
+    samurai-update
+    samurai-snap
+    samurai-rescue
+    samurai-notifier
+    samurai-notifier.service
+    samurai-notifier.timer
+    0001-update-mechanism-demo.toml
+    0001-update-mechanism-demo.sh
+)
+sha256sums=(
+    'c69c64bd21f2547161009deaa5ba6b2ee6ecc2bfcef4237dd40ee3204f159abd'
+    '62a24ef5c97a96175f2377985c81e908175fbe8467812b88be9fa76739c7a183'
+    'c40d42113ef381d346c9e0b39ad7c9feaca2b6d8c449d8ba3fe49360de1d45c7'
+    'd760a9feb18b891319a019de155088af306f9192040c219b3cd54f0fcd7c6469'
+    '078fa8417544a86a3de5d4a3b8e3fdc062b0d504e20f6f3f64836da8619091fb'
+    '58c20fc0d74b449b78eb3760d84843f7ef12fa307303189ab323fb2835a7588a'
+    '93d4f2758db7fc6667d18e16b38059efdf4046f815e620614a1d42b802ffaa96'
+    'e4ff4cf590773addbdff1332f98867061f811127cb9e932a0e13df46e0404197'
+    '565fd2adebacb84d85cee0b016e5e0800e48376cb182af6d4b2887db39661fab'
+)
+
+package() {
+    cd "$srcdir"
+    install -Dm755 samurai "$pkgdir/usr/local/bin/samurai"
+    install -Dm755 samurai-update "$pkgdir/usr/local/bin/samurai-update"
+    install -Dm755 samurai-snap "$pkgdir/usr/local/bin/samurai-snap"
+    install -Dm755 samurai-rescue "$pkgdir/usr/local/bin/samurai-rescue"
+    install -Dm755 samurai-notifier "$pkgdir/usr/local/bin/samurai-notifier"
+    install -Dm644 samurai-notifier.service "$pkgdir/usr/lib/systemd/user/samurai-notifier.service"
+    install -Dm644 samurai-notifier.timer "$pkgdir/usr/lib/systemd/user/samurai-notifier.timer"
+    install -Dm644 0001-update-mechanism-demo.toml \
+        "$pkgdir/usr/lib/samurai/interventions/0001-update-mechanism-demo.toml"
+    install -Dm755 0001-update-mechanism-demo.sh \
+        "$pkgdir/usr/lib/samurai/interventions/0001-update-mechanism-demo.sh"
+}

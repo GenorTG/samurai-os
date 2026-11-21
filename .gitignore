@@ -10,3 +10,5 @@ iso/airootfs/usr/share/samurai/pkg-cache/
 target/
 .tmp/
 build/
+__pycache__/
+*.pyc

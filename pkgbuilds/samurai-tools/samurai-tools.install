@@ -1,0 +1,27 @@
+_remove_legacy_unowned_files() {
+    local file
+    for file in \
+        /usr/local/bin/samurai \
+        /usr/local/bin/samurai-update \
+        /usr/local/bin/samurai-snap \
+        /usr/local/bin/samurai-rescue \
+        /usr/local/bin/samurai-notifier \
+        /usr/lib/samurai/interventions/0001-update-mechanism-demo.toml \
+        /usr/lib/samurai/interventions/0001-update-mechanism-demo.sh; do
+        if [[ -f "$file" ]] && ! pacman -Qo -- "$file" >/dev/null 2>&1; then
+            rm -f -- "$file"
+        fi
+    done
+}
+
+pre_install() {
+    _remove_legacy_unowned_files
+}
+
+post_install() {
+    systemctl --global enable samurai-notifier.timer >/dev/null 2>&1 || true
+}
+
+post_upgrade() {
+    systemctl --global enable samurai-notifier.timer >/dev/null 2>&1 || true
+}

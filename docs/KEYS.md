@@ -30,13 +30,31 @@ with it (`ci/build-repo.sh`); it never lands on disk in the container image.
 
 ## GitHub Actions
 
-The signing subkey is stored as a repo secret on `GenorTG/samurai-os`
-(`SAMURAI_SIGNING_SUBKEY`, armored) and written to a throwaway GNUPGHOME in CI.
-Only the subkey — never the primary. Set it with:
+The signing subkey is stored in the protected `samurai-testing` Actions environment on
+`GenorTG/samurai-os` (`SAMURAI_SIGNING_SUBKEY`, armored) and written to a throwaway GNUPGHOME in
+CI. Only the subkey — never the primary. Set it with:
 
 ```bash
-gh secret set SAMURAI_SIGNING_SUBKEY --repo GenorTG/samurai-os < <(export-armored-subkey)
+gh secret set SAMURAI_SIGNING_SUBKEY --env samurai-testing --repo GenorTG/samurai-os < <(export-armored-subkey)
 ```
+
+The `Publish Samurai testing repository` workflow runs on `main` when `pkgbuilds/` or its
+build/publish scripts change, and can also be dispatched manually from `main`. It publishes the
+signed package set to the `x86_64-testing` release in `GenorTG/samurai-repo`; it never promotes to
+stable. Configure its `samurai-testing` environment with these secrets:
+
+- `SAMURAI_SIGNING_SUBKEY`: the armored signing subkey above.
+- `SAMURAI_REPO_TOKEN`: fine-grained token scoped only to `GenorTG/samurai-repo`, with **Contents:
+  read and write** (needed to replace release assets).
+
+Set `SAMURAI_REPO_TOKEN` with `gh secret set SAMURAI_REPO_TOKEN --env samurai-testing --repo GenorTG/samurai-os`.
+
+Fork pull requests do not receive either secret. Keep environment deployment restrictions limited
+to `main`; test packages are intentionally available before stable promotion so a live test machine
+can validate them first. The workflow gives `samurai-tools` and `samurai-release` a monotonic
+date/run-number `pkgrel`, ensuring pacman sees changed update executors as upgrades without editing
+or committing generated version bumps. The release script creates the `x86_64-testing` rolling
+release on its first publish; no testing release currently exists.
 
 ## Backup (TODO: do once, then verify)
 

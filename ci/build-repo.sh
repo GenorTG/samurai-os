@@ -39,6 +39,7 @@ docker run --rm -i --name "$container" \
     -v "$out_dir":/out \
     -v "$keyfile":/keys/subkey.asc:ro \
     -e SAMURAI_SUBKEY="$subkey" \
+    -e SAMURAI_PKGREL_OVERRIDE="${SAMURAI_PKGREL_OVERRIDE:-}" \
     archlinux:base-devel \
     bash -es <<'EOS'
 set -euo pipefail
@@ -62,6 +63,18 @@ cd /build
 for src in /src/pkgbuilds/*/; do
     pkg="$(basename "$src")"
     cp -a "$src" "$pkg"
+    if [ "$pkg" = samurai-tools ]; then
+        for name in samurai samurai-update samurai-snap samurai-rescue samurai-notifier \
+                    samurai-notifier.service samurai-notifier.timer; do
+            cp -a "/src/updates/$name" "$pkg/"
+        done
+        cp -a /src/updates/interventions/0001-update-mechanism-demo.toml "$pkg/"
+        cp -a /src/updates/interventions/0001-update-mechanism-demo.sh "$pkg/"
+    fi
+    if [ -n "$SAMURAI_PKGREL_OVERRIDE" ] && \
+       { [ "$pkg" = samurai-tools ] || [ "$pkg" = samurai-release ]; }; then
+        sed -i "s/^pkgrel=.*/pkgrel=$SAMURAI_PKGREL_OVERRIDE/" "$pkg/PKGBUILD"
+    fi
     chown -R builder "$pkg"
     echo "==> makepkg $pkg"
     su builder -c "cd /build/$pkg && makepkg -sf --noconfirm"

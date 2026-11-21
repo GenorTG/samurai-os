@@ -14,13 +14,13 @@
 
 pkgname=samurai-release
 pkgver=0.0.1
-pkgrel=4
+pkgrel=5
 pkgdesc="Samurai OS identity: os-release hook + /etc/lsb-release"
 arch=(any)
 url="https://github.com/GenorTG/samurai-os"
 license=(MIT)
 groups=(samurai-base)
-depends=(filesystem)
+depends=(filesystem samurai-tools)
 conflicts=(lsb-release)
 replaces=(lsb-release)
 # satisfies open-vm-tools (and friends) which depend on 'lsb-release'

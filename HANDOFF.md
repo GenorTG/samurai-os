@@ -1,134 +1,42 @@
 # HANDOFF — samurai-os
 
 ## Mission
-A personal Arch-based distro: Arch repos unchanged, CachyOS + Chaotic-AUR below Arch, a small signed
-`[samurai]` repo built by GitHub Actions on GitHub Releases. Plus a Garuda-level toolbox, graphical +
-terminal guided installers fed by Garuda's app catalog, a dev environment (Python 3.10–3.14, uv,
-conda, Docker, AI CLIs), GPU setup (CUDA + local gpu-unlock build), and a customised KDE. Everything
-proven in QEMU VMs on genorbox1.
+Personal Arch-based distro: upstream Arch repos unchanged, CachyOS + Chaotic-AUR below Arch, signed Samurai repo, guided installer and CLI/toolbox. VM validation runs on genorbox1.
 
-## State (2026-11-20)
-- Specs 00–14, ADR-0001…0008, OPEN-QUESTIONS: **all 11 remaining questions answered** (Genor,
-  native form 2026-11-17). Decisions applied to the specs: name Samurai OS confirmed; toolbox
-  Qt6/QML; source repo public now (both repos at M1); KDE theme default **Breeze Dark** (Otto,
-  Scratchy optional); Miniforge; Python versions per-version checkboxes all unticked; Docker
-  group-vs-rootless chosen during install; AI CLIs all unticked; gpu-unlock includes fork recipes
-  for RTX 20 / non-4090 Ada with **every** recipe labelled "untested / potentially unstable"
-  (spec 07, ADR-0008); diagnostics manual opt-in only; testing genorbox1-first, plus M10a
-  `samurai drive write` (install-drive creator) so Genor can hand-test on his spare laptop.
-- Round 2 (Genor's brainstorm) folded in: installers (spec 08), dev env (spec 13), KDE setup
-  (spec 14), CUDA + gpu-unlock (spec 07, ADR-0008), repos default on (ADR-0007), kernels cachyos+zen
-  (ADR-0001), gaming/Wine (spec 10), firewall UX + Tailscale (spec 09).
-- `catalog/garuda-setup-wizard.toml`: 175 apps / 16 categories imported from Garuda toolbox
-  `setup-wizard.data.ts` via `scripts/import-garuda-catalog.py`. `catalog/samurai.toml`: our
-  choices/toggles/apps/overrides.
-- Package availability checked 2026-10-27 (Arch, AUR, Chaotic db): see `catalog/samurai.toml`
-  `source=`. Arch python = 3.14.8, cuda 13.4, uv 0.13.
-- Local git only. **GitHub repos approved (public now)** — created at M1 with the signing key.
+## State (2026-11-21)
+- Specs 00–14 and ADR-0001…0008 remain the product source of truth. All 11 open questions answered (Genor, 2026-11-17).
+- M0–M4 complete: Arch ISO identity; LUKS2/btrfs installer; update/notifier; rescue rollback; guided installer. See milestone notes below.
+- M5.5 offline release install is green: full KDE + `linux-cachyos` + `linux-zen` package closure baked into ISO; installation succeeds with `arch_mirror=https://offline.invalid/no-such-mirror`, reboots, and verifies installed system plus boot artifacts.
+- Driver coverage: base online installs select AMD/Intel/Nouveau stacks plus per-kernel NVIDIA open modules/userspace; the offline ISO bundles those stacks and the kernel-matched NVIDIA package alternatives, with the installer filtering to selected kernels. Custom gpu-unlock firmware/modules remain excluded under ADR-0008. Offline VM assertions cover installed GPU packages; no physical GPU hardware test has been run.
+- Live updates: installed systems get `[samurai]` from signed `GenorTG/samurai-repo` GitHub Releases and use `samurai update` / pacman for whole-system transactions. Added `samurai-tools` to package the updater/CLI/notifier and made `samurai-release` depend on it so executor changes arrive in place. `.github/workflows/publish-testing-repo.yml` publishes signed package builds to `x86_64-testing` on main changes/manual dispatch; test installs opt in via `[samurai-testing]`. Workflow requires `samurai-testing` environment secrets `SAMURAI_SIGNING_SUBKEY` and `SAMURAI_REPO_TOKEN`; stable promotion remains separate. VM assertions cover installed repo URL/signature policy/test mirrorlist; update scenario asserts package ownership after the testing transaction.
+- Update-route verification: `samurai-tools` built successfully in the Arch container (source checksums passed); install smoke against the existing f5 ISO passed **1 test in 541.30s**, including GitHub URL/signature and testing mirrorlist assertions. GitHub activation is not yet live: `samurai-testing` Actions environment returns 404 and `x86_64-testing` Release does not exist; configure the documented environment secrets, then first workflow publish bootstraps that release. No new ISO was built.
+- GPU ISO rebuild attempt: offline closure resolved to 844 files (including NVIDIA, Radeon, Intel and Nouveau stacks), but mkarchiso was stopped after repeated upstream 404/DNS timeouts while syncing/installing the live ISO packages. Existing f5 ISO is unchanged and does not contain the new install closure; retry build when mirrors recover, then run `tests/vm/test_offline.py` against it.
+- Latest verified ISO: `build/validation-2026.11.21f5/samurai-os-2026.11.21-x86_64.iso`, 3,466,493,952 bytes; SHA-256 `7b0807fe140c14564e01d718107d51ee1c79d8d95c69965d27b259ab51defd43`. Bootable ISO9660/MBR. Run `SAMURAI_TEST_ISO=<absolute ISO> SAMURAI_VM_RUN_ID=<unique-id> pytest -q -s tests/vm/test_offline.py`; verified run `20261121r6`: **1 passed in 358.18s**.
+- Offline path uses `pacman --sysroot /mnt -U`, target-staged config and non-recursive binds for /dev,/proc,/sys,/run. Hooks may start a target-root GPG agent pinning /mnt/dev/null; kill it inside chroot before each teardown boundary. Require selected kernel + initramfs files before unmount. Details in AGENTS.md Gotchas.
+- QGA is single-host-client: close GuestAgent before opening another or rebooting, or next guest-exec may connect but time out without a response.
+- Working tree contains changes beyond this milestone; review `git status` before staging anything. No public push without Genor explicit OK.
 
-## Next steps (updated 2026-11-20 after M4)
-1. M5: Rust CLI (`samurai` dispatcher) replacing the shell shim; keep `updates/` shell scripts as its executors until each is ported.
-2. M6/M7: KDE + catalog packages -> then the in-desktop walkthrough (menus, visuals, toolbox) Genor asked for.
-3. Check Otto/Scratchy licences before M7a; gpu-unlock hardware validation on stealth-dragon's 3090 (fork recipes too) to retire the "untested" labels.
+## Next
+1. M5: replace the Rust CLI shell shim; keep `updates/` shell scripts as executors until ported.
+2. M6/M7: KDE + catalog packages, then the requested in-desktop visual/toolbox walkthrough.
+3. Check Otto/Scratchy licences before M7a; validate gpu-unlock recipes on stealth-dragon 3090 before removing untested labels.
 
-## Commands
-- `bash scripts/install-hooks.sh` (per-commit build number).
-- `python3 -I scripts/import-garuda-catalog.py <setup-wizard.data.ts> catalog/garuda-setup-wizard.toml`
+## Commands and build gotchas
+- `bash scripts/install-hooks.sh` once per clone (per-commit BUILD bump).
+- `ci/build-iso.sh <absolute-fresh-output-dir>`; Arch tooling only inside archlinux containers. Fresh profile excludes old generated pkg-cache, then injects exact current offline closure.
+- VM artifacts live in ignored `.vm/`. Set both `SAMURAI_TEST_ISO` and unique `SAMURAI_VM_RUN_ID` to preserve evidence.
+- pacstrap `-C` is resolution-only; copy live `pacman.conf` and `pacman.d` into target after install. For offline installs validate cached packages locally; do not use `pacman -S`.
+- See `docs/specs/12-ROADMAP.md` for milestone sequencing.
 
-## Blockers
-- None currently. Public repos + signing key live since M1.
-## M0 done (2026-11-17)
-- `iso/`: archiso 92 releng profile, samurai-ified (name/label/publisher, hostname `samurai`,
-  motd + /etc/issue, `kernel_params_x86_64="console=tty1 console=ttyS0,115200"`, serial getty
-  autologin, pacman.conf with commented `[cachyos]`/`[chaotic-aur]`/`[samurai]` stubs — enabled at M1).
-- `ci/build-iso.sh`: archlinux:base-devel container, `--privileged` (pacstrap bind-mounts
-  proc/sys/dev — unprivileged fails), `pacman -Syu` FIRST (stale image openssl/pacman soname drift),
-  out_dir must be ABSOLUTE (relative arg = docker named volume!), work dir mounted for caching.
-- `ci/boot-vm.sh`: OVMF q35 + KVM, serial to build/serial.log, PASS = `root@samurai` on serial.
-- Verified: build/samurai-os-2026.11.17-x86_64.iso (1.3 GB) boots to root shell in OVMF VM. Boot ~40 s.
-## M1 done (2026-11-17)
-- GitHub (public, per Genor's "public now"): `GenorTG/samurai-os` (source, main pushed) +
-  `GenorTG/samurai-repo` (data-only, README initialized, release tag `x86_64` rolling:
-  keyring/mirrorlist/release packages + sigs, `samurai.db`/`samurai.files` + sigs uploaded LAST).
-- Keys (docs/KEYS.md): primary `DFE8C148C042AA3C199AAEA08436E12731EDD3FA` offline in
-  `~/samurai-keys/gnupg` (0700); signing subkey ed25519 `9849CC7F67786E5037FBB35B5385F81F2AD03400`
-  expires 2027-11-17. No passphrase yet (TODO). Backup of `~/samurai-keys/` still TODO.
-- `samurai-release` 0.0.1-4 design (spike-verified): NEVER lists /usr/lib/os-release (owned by
-  Arch `filesystem`; --overwrite leaves ambiguous ownership and a filesystem upgrade reverts
-  content). Hook + `samurai-apply-os-release` re-apply identity after every filesystem or
-  samurai-release transaction. `provides/conflicts/replaces=(lsb-release)` (provides satisfies
-  open-vm-tools). mktemp template must end in X.
-- `ci/build-repo.sh` gotchas learned: `docker run -i` REQUIRED when the script arrives via stdin
-  heredoc (without -i the container runs an empty script and exits 0); EOS terminator must not be
-  eaten by later edits; repo-add's trailing re-sign aborts harmlessly after both dbs are valid —
-  VERIFY dbs instead of trusting its exit code; chown handback must run on the HOST side.
-- makepkg gotchas: sha256sums=('SKIP') means "verify PGP instead" (use real sums); `*.asc`
-  sources are treated as detached signatures (key export renamed build-key.txt).
-- Checks: ci/check-no-shadowing + check-no-epoch; negative tests pass (reject 'linux', '1:2.0');
-  db name parsing must read %NAME% records, not entry dir names.
-- Spike transcript detail: `--noconfirm` does NOT answer conflict questions (default N) — use
-  `--ask 4`; raw.githubusercontent 404s are CDN cache lag; QEMU user-net host = 10.0.2.2.
-- ISO: serial autologin drop-in now targets serial-getty@ttyS0.service (getty@ttyS0 was wrong);
-  existing ISO predates the fix — rebuild before next VM run.
-## M2 done (2026-11-17)
-- Smoke suite GREEN from one command: `tests/vm/run-smoke.sh` (iso_boot + install_default, 2 passed
-  in ~3.5 min). Full proven cycle: profile -> strict validation -> erase+LUKS2+spec 06 subvolumes ->
-  pacstrap -> [samurai] repo from baked key (inline Server lines, NO pre-placed mirrorlist - the
-  package owns that path) -> postinstall -> systemd-boot -> LUKS auto-unlock via EMBEDDED keyfile
-  (mkinitcpio FILES=, rd.luks.key without keydev) -> rootflags=subvol=@ -> reboot -> installed system
-  verified via QGA (hostname, Samurai OS identity, crypt root, @ subvol, zero failed units).
-- The M2 install set: base + linux + linux-firmware + mkinitcpio + sudo + fish + python + pciutils +
-  samurai-{release,mirrorlist,keyring} + qemu-guest-agent. mkinitcpio is NOT in base. pacman vs
-  repo pitfalls: db csize must equal uploaded asset size (makepkg zstd not deterministic) - use
-  ci/publish-repo.sh for publishes (uploads full consistent set, db LAST, csize-verified).
-- Harness lessons: strip ANSI before matching (ESC ( B splits 'root@samurai'); qemu-ga here rejects
-  capture-output and returns buf-b64 from guest-file-read; serial_cmd needs a settle-nudge before
-  sending; OVMF prefers the CD - eject the ISO (QMP) before the reboot; mkarchiso stamp-skips on a
-  reused work dir; docker stdin needs -i for heredoc scripts; pkill -f self-matches the exec shell
-  (use -x or kill by PID).
-- Debug-disk trick: mount the failed run's qcow2 via the LIVE ISO + QGA (vda1 = ESP, vda2 = LUKS,
-  keyfile at /esp/keys/samurai.key) - found the missing FILES= line that way.
-## M3 done (2026-11-18)
-- `updates/samurai-update`: 11 stages per spec 03. Key fixes found by testing:
-  - HEADLESS detection: stdin not a TTY -> auto --noconfirm (pacman prompts abort on EOF);
-    interactive terminals still prompt.
-  - stage 6 failure detection: capture rc=${PIPESTATUS[0]} after pacman|tee (the pipeline masked
-    pacman failures — the updater reported success while nothing was installed).
-  - pacman -Qdt pipefail trap: an empty orphan query returned nonzero under `set -euo pipefail`
-    and killed the script in stage 9 — guard with `{ ... || true; } | wc -l`.
-  - preflight: use curl (ping/iputils is not in base).
-- Interventions: TOML + script + .done state, at-most-once; validator allowlist
-  (`updates/validate-interventions.py`); 0001 mechanism test green.
-- `updates/samurai-notifier` + user timer units (checkupdates, arch-audit security counts,
-  reboot-pending detection); never installs anything.
-- Installed-system networking: the pacstrap'd target has NO network config — postinstall writes
-  20-samurai.network (DHCP on en*/eth*/wl*) + the resolved stub. Without it the updater preflight
-  died on "no network".
-- Pinned mirrors (repos.arch_mirror profile key): pacman expands $repo/os/$arch ONLY when the
-  Server line contains them — a plain URL fetches <server>/core.db (404). Installer appends the
-  placeholders + strips a trailing slash. Archive layout: /repos/YYYY/MM/DD/ (FULL date).
-- ci/build-iso.sh: curl XferCommand with retries (pacman parallel libcurl downloads flaked against
-  the CDN); the container script is single-quoted — no apostrophes inside it ("pacman's" killed it).
-- Scenarios green: test_update.py (intervention fires once, idempotent) +
-  test_update_archive.py (2026/08/15 -> today, ~660 MiB backlog, boots healthy).
+## Milestones
+- **M0 (2026-11-17):** archiso 92 releng profile customized; OVMF serial boot verified.
+- **M1 (2026-11-17):** public source/data repos and signed rolling Samurai repo established; signing-key backup remains TODO.
+- **M2 (2026-11-17):** smoke suite green: LUKS2, btrfs @ subvolume, auto-unlock, installed identity and QGA verification.
+- **M3 (2026-11-18):** updater/notifier and archive update scenarios green; package mirror URLs must include `$repo/os/$arch`.
+- **M4 (2026-11-20):** rollback and attended wizard scenarios green. VM shutdown uses ACPI powerdown before forced quit to flush filesystems.
+- **M5.5 (2026-11-21):** offline KDE + multi-kernel install green as recorded above. Test asserts SDDM active, KDE packages/theme, no failed units, btrfs, generic linux absent, both selected kernels present, and both kernel/initramfs pairs under /boot.
 
-## M4 done (2026-11-20)
-- Rollback scenario GREEN: unattended install -> initramfs corrupted (verified) -> boot fails ->
-  live-ISO `samurai rescue rollback <snap>` -> reboot -> healthy system, `1 passed in 548.76s`.
-  Root cause of the earlier flakes: abrupt QMP `quit` killed guests mid-write; `vm.stop()` now does
-  ACPI `system_powerdown`, waits for flush, falls back to quit/kill. Rescue script also got an
-  /esp already-mounted guard, `.img.tmp` recovery and a zstd magic gate.
-- Attended (guided) installer GREEN: `samurai-install` with no --profile runs the wizard —
-  requirements, disk pick (lsblk TYPE=disk only), hostname, two-level timezone, LUKS2 on/off,
-  kernel multi-select (default = linux until the release ISO ships CachyOS keys), bootloader
-  choice (limine/grub/systemd-boot/refind), user + shell + password (openssl passwd -6 hash only).
-  Falls through to the validated unattended backend unchanged. `test_attended_install 1 passed
-  in 327.81s`: wizard -> LUKS2 passphrase -> GRUB install -> boot passphrase -> fish login as the
-  created user -> hostname/GRUB/btrfs/LUKS/profile/log asserts.
-- Bugs the test cycle caught: pacstrap quoted multi-word targets ("grub os-prober efibootmgr"),
-  CD-ROM offered as an erase target, install log only on the live medium (now copied into the
-  target), QGA chardev single-client (close GuestAgent objects or connect() hangs).
-- vm.py gained `screendump()` (QMP VGA -> PNG) for install-flow screenshots.
-- Commits: 2586cde (rollback GREEN), 7e9a54d (wizard WIP), 622272f (test-cycle fixes), 9a3527c (attended GREEN).
-- Next milestone (M5): the real Rust CLI replacing the shell shim; then M6/M7 desktop + toolbox GUI —
-  the KDE/menus/visuals walkthrough Genor wants needs those packages first.
+## Durable product decisions
+- Name Samurai OS; Qt6/QML toolbox; Breeze Dark default (Otto/Scratchy optional, licence check before use).
+- Python versions per-version opt-in; Miniforge; Docker group-vs-rootless selected during install; AI CLIs opt-in; diagnostics manual opt-in.
+- gpu-unlock includes fork recipes for RTX 20/non-4090 Ada, each labelled untested/potentially unstable; NVIDIA firmware/modules must never be published (ADR-0008).

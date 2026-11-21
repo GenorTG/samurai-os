@@ -126,8 +126,20 @@ DM=""
 case "$DESKTOP" in
     kde)
         log "desktop: KDE Plasma (Breeze Dark)"
-        pacman -S --noconfirm --needed plasma-meta plasma-wayland-session sddm konsole dolphin \
-            kwrite ark gwenview okular || { log "FATAL: KDE install failed"; exit 16; }
+        DESKTOP_PKGS=(plasma-meta sddm konsole dolphin kate ark gwenview okular)
+        if [ "${SAMURAI_OFFLINE:-0}" = 1 ]; then
+            MISSING_DESKTOP=()
+            for p in "${DESKTOP_PKGS[@]}"; do
+                pacman -Q "$p" >/dev/null 2>&1 || MISSING_DESKTOP+=("$p")
+            done
+            if [ "${#MISSING_DESKTOP[@]}" -gt 0 ]; then
+                log "FATAL: offline KDE cache missing packages: ${MISSING_DESKTOP[*]}"
+                exit 16
+            fi
+            log "KDE packages already present (offline cache path)"
+        else
+            pacman -S --noconfirm --needed "${DESKTOP_PKGS[@]}" || { log "FATAL: KDE install failed"; exit 16; }
+        fi
         DM=sddm
         # Breeze Dark default for every new user (Genor 2026-11-17)
         install -d /etc/skel/.config

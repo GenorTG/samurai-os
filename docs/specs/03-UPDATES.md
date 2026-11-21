@@ -16,7 +16,7 @@ where noted.
 | # | Stage | What it does | Refuses / warns when |
 |---|-------|--------------|----------------------|
 | 0 | Preflight | not booted from a snapshot; network up; pacman lock free (a stale lock with no pacman process is removed after a prompt); clock synced; free space on `/` ≥ download+install size + 2 GiB (btrfs-aware, `btrfs fi usage`); AC power on laptops | booted from snapshot → offer `samurai snap rollback`; low space → offer `samurai clean` |
-| 1 | Self-update | `pacman -Sy`, then if `samurai-update`, `samurai-keyring` or `archlinux-keyring` are outdated: `pacman -S --needed` those only, then re-exec the new updater | — |
+| 1 | Keyrings | `pacman -Sy`, then install only `samurai-keyring` / `archlinux-keyring` if outdated; the updater itself is updated inside the full transaction below | — |
 | 2 | Mirrors | refresh Arch mirrorlist if older than `mirrors.max_age_days` (default 7) | skippable: `--skip-mirrors` |
 | 3 | News | fetch Arch news since the last successful update; show new items; items matching our "manual intervention" list need an acknowledgement unless an intervention (below) handles them | unacknowledged intervention news → stop with exit 3 |
 | 4 | Pre interventions | run pending interventions of phase `pre` | an intervention fails → stop, nothing changed yet |
@@ -27,13 +27,11 @@ where noted.
 | 9 | Housekeeping | `paccache -rk3` (keep 3), `paccache -ruk0` (uninstalled); orphan notice (never auto-remove); Flatpak update if installed; AUR as the user only if `update.aur = true` | — |
 | 10 | Report | summary: counts, kernel changed, reboot needed (kernel, systemd, glibc, mesa, nvidia, plasma, dbus), `.pacnew` files, news shown. JSON with `--json`; desktop notification via the notifier | exit 2 if reboot needed |
 
-### Why stage 1 is not a partial-upgrade hazard
-`pacman -Sy` followed by installing a few packages is exactly how Arch systems get broken. It is
-safe here only because of these rules, which CI enforces for the self-update set:
-- `samurai-update` is a **static musl binary** with no library dependencies, so a new build never
-  needs a newer glibc than the one installed.
-- Keyring packages have no dependencies.
-- The self-update set never contains anything else.
+### Updater self-update safety
+The updater and CLI executors are owned by the `samurai-tools` package, pulled in by
+`samurai-release`. A full `pacman -Syu` updates them atomically with their dependencies; the newly
+installed updater runs on the next update. Do not install `samurai-tools` from a standalone
+`pacman -Sy` transaction. Stage 1 is limited to keyring packages, which have no dependencies.
 
 ### Kernel safety
 - The default install has two kernels: `linux-cachyos` (default) and `linux-zen` (spec 10). Both

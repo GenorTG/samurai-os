@@ -11,17 +11,33 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 out_dir="${1:-$repo_root/build}"
 out_dir="$(realpath -m "$out_dir")"   # docker needs an absolute path: a relative arg
                                    # becomes a named volume, not the host dir
+work_dir="$out_dir/work"
+profile_dir="$out_dir/profile"
 image="archlinux:base-devel"
 container="samurai-iso-build-$$"
 
 mkdir -p "$out_dir"
+# Build from a staged profile so generated packages cannot accumulate in the
+# checkout's airootfs between runs. Exclude the generated offline cache from
+# the source copy; this build will populate it from its exact resolved set.
+if [ -e "$profile_dir" ]; then
+    echo "error: build profile already exists: $profile_dir (choose a fresh output dir)" >&2
+    exit 2
+fi
+mkdir -p "$profile_dir"
+tar --exclude='./airootfs/usr/share/samurai/pkg-cache' -C "$repo_root/iso" -cf - . | tar -C "$profile_dir" -xf -
+
 # Sync the live-side tooling into the ISO airootfs. The airootfs files are
 # plain copies; without this step they silently drift from installer/ and
 # updates/ (same stale-state bug class as stale mkarchiso stamps, stale repo
 # db, stale qcow2 — a build would happily ship yesterday's installer).
-bin_dir="$repo_root/iso/airootfs/usr/local/bin"
-lib_dir="$repo_root/iso/airootfs/usr/lib/samurai"
-mkdir -p "$bin_dir" "$lib_dir"
+bin_dir="$profile_dir/airootfs/usr/local/bin"
+lib_dir="$profile_dir/airootfs/usr/lib/samurai"
+mkdir -p "$bin_dir" "$lib_dir" "$profile_dir/airootfs/etc"
+# mkarchiso uses iso/pacman.conf while building, but the live root otherwise
+# keeps Arch's stock config. Install the same repo set into the live ISO so
+# attended installs can resolve the CachyOS default kernel.
+cp -f "$repo_root/iso/pacman.conf" "$profile_dir/airootfs/etc/pacman.conf"
 for f in samurai-install samurai-postinstall validate-profile.py; do
     cp -f "$repo_root/installer/$f" "$bin_dir/$f"
 done
@@ -73,31 +89,39 @@ mkdir -p /b/offline-pkgs /tmp/freshdb
 # bash, coreutils — the -U target is empty and needs them all)
 pacman --dbpath /tmp/freshdb -Sy >/dev/null
 pacman --dbpath /tmp/freshdb -Sw --noconfirm --cachedir /b/offline-pkgs \
-    base linux-cachyos linux-zen linux linux-lts linux-firmware mkinitcpio \
+    base linux-cachyos linux-zen linux-zen-headers \
+    linux linux-headers linux-lts linux-lts-headers linux-cachyos-lts \
+    linux-firmware mkinitcpio dkms linux-cachyos-nvidia-open nvidia-open \
+    nvidia-open-lts nvidia-open-dkms nvidia-utils nvidia-settings \
+    mesa vulkan-radeon vulkan-intel vulkan-nouveau \
+    intel-media-driver libva-intel-driver \
     sudo fish zsh python pciutils snapper snap-pac \
     grub limine refind efibootmgr os-prober \
     networkmanager wpa_supplicant qemu-guest-agent archlinux-keyring cachyos-keyring \
-    plasma-meta sddm konsole dolphin kwrite ark gwenview okular \
+    plasma-meta sddm konsole dolphin kate ark gwenview okular \
     samurai-release samurai-mirrorlist samurai-keyring
 cp /var/lib/pacman/sync/*.db /b/offline-pkgs/
 '
-rm -rf "$repo_root/iso/airootfs/usr/share/samurai/pkg-cache"
-mkdir -p "$repo_root/iso/airootfs/usr/share/samurai/pkg-cache"
+mkdir -p "$profile_dir/airootfs/usr/share/samurai/pkg-cache"
 find "$out_dir/offline-pkgs" -maxdepth 1 -type f ! -name '*.sig' \
-    -exec cp {} "$repo_root/iso/airootfs/usr/share/samurai/pkg-cache/" \;
-echo "==> offline cache: $(ls "$repo_root/iso/airootfs/usr/share/samurai/pkg-cache" | wc -l) files"
+    -exec cp {} "$profile_dir/airootfs/usr/share/samurai/pkg-cache/" \;
+echo "==> offline cache: $(ls "$profile_dir/airootfs/usr/share/samurai/pkg-cache" | wc -l) files"
 # mkarchiso skips every stamped step when the work dir holds stamps from a
 # previous build — a reused work dir "succeeds" in 2 s and produces NO ISO.
-# (Same bug class: stale repo db in build-repo.sh, stale qcow2 in tests/vm.)
-# The container runs privileged, so leftovers are root-owned: clean via docker.
-docker run --rm -v "$repo_root/build":/b alpine sh -c 'rm -rf /b/work && mkdir -p /b/work'
+# Keep build outputs isolated: refuse a non-empty work dir rather than
+# deleting prior build artifacts. Use a fresh output directory for each build.
+if [ -d "$work_dir" ] && [ -n "$(find "$work_dir" -mindepth 1 -maxdepth 1 -print -quit)" ]; then
+    echo "error: non-empty mkarchiso work dir: $work_dir (choose a fresh output dir)" >&2
+    exit 2
+fi
+mkdir -p "$work_dir"
 
 echo "==> building ISO in $image (container $container)"
 docker run --rm --privileged \
     --name "$container" \
     -v "$repo_root":/src:ro \
     -v "$out_dir":/out \
-    -v "$repo_root/build/work":/work \
+    -v "$work_dir":/work \
     "$image" \
     bash -c '
 set -euo pipefail
@@ -121,8 +145,8 @@ pacman -S --noconfirm --needed archiso >/dev/null
 # under DatabaseOptional, and mkarchiso cannot answer the import prompt.
 # Import the keyring from the offline cache (already downloaded via the
 # 4-server fallback — the mirror desyncs, seen 2026-11-20)
-pacman -U --noconfirm /src/build/offline-pkgs/cachyos-keyring-*.pkg.tar.zst >/dev/null
-mkarchiso -v -w /work -o /out /src/iso
+pacman -U --noconfirm /out/offline-pkgs/cachyos-keyring-*.pkg.tar.zst >/dev/null
+mkarchiso -v -w /work -o /out /out/profile
 '
 
 echo "==> done:"

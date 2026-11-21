@@ -41,6 +41,21 @@ def installed_vm(mirror):
 
 def test_update_and_intervention(installed_vm):
     vm, ga = installed_vm
+    _, out = ga.exec(
+        "python3 - <<'PY'\n"
+        "from pathlib import Path\n"
+        "path = Path('/etc/pacman.conf')\n"
+        "text = path.read_text()\n"
+        "if '[samurai-testing]' not in text:\n"
+        "    stable = text.index('[samurai]')\n"
+        "    block = '[samurai-testing]\\nInclude = /etc/pacman.d/samurai-testing-mirrorlist\\nSigLevel = Required DatabaseRequired\\n\\n'\n"
+        "    path.write_text(text[:stable] + block + text[stable:])\n"
+        "PY\n"
+        "awk '/^\\[samurai-testing\\]$/{test=1} /^\\[samurai\\]$/{stable=1} END{if(test && stable) print \"TEST-CHANNEL-READY\"}' /etc/pacman.conf",
+        check=False,
+    )
+    assert "TEST-CHANNEL-READY" in out, out
+
     # run 1: the intervention fires
     code, out = ga.exec(
         "samurai-update >/dev/null 2>&1; echo UP-RC=$?; "
@@ -50,6 +65,8 @@ def test_update_and_intervention(installed_vm):
     assert "UP-RC=0" in out or "UP-RC=2" in out, out[-800:]
     assert "INT-RAN" in out, "intervention 0001 did not run"
     assert "INT-DONE" in out, "intervention 0001 not recorded in .done"
+    code, out = ga.exec("pacman -Q samurai-tools && pacman -Qo /usr/local/bin/samurai-update")
+    assert "samurai-tools" in out, f"updater executors are not package-managed: {out}"
 
     # run 2: idempotent — the intervention must NOT run again
     code, out = ga.exec(

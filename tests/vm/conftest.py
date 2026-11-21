@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import functools
 import http.server
+import os
 import pathlib
 import socketserver
 import subprocess
@@ -17,6 +18,12 @@ TEST_USER_PASSWORD = "smurai-smoke-2026"  # throwaway, VM-only
 
 
 def find_iso() -> pathlib.Path:
+    explicit = os.environ.get("SAMURAI_TEST_ISO")
+    if explicit:
+        iso = pathlib.Path(explicit)
+        if not iso.is_file():
+            pytest.fail(f"SAMURAI_TEST_ISO does not name a file: {iso}")
+        return iso
     built = sorted((REPO / "build").glob("samurai-os-*.iso"))
     if not built:
         pytest.skip("no built ISO in build/ — run ci/build-iso.sh first")
@@ -36,7 +43,11 @@ class Mirror:
     """Serves tests/vm/assets/ to the VM at http://10.0.2.2:8966/."""
 
     def __init__(self, port: int = 8966):
-        self.dir = REPO / "tests" / "vm" / "assets"
+        run_id = os.environ.get("SAMURAI_VM_RUN_ID", "").strip()
+        if run_id:
+            self.dir = REPO / ".vm" / f"assets-{run_id}"
+        else:
+            self.dir = REPO / "tests" / "vm" / "assets"
         handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(self.dir))
         socketserver.TCPServer.allow_reuse_address = True
         self.httpd = socketserver.TCPServer(("0.0.0.0", port), handler)

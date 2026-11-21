@@ -3,8 +3,8 @@ system installable without a lot of curls").
 
 The ISO bakes the default release profile's full package closure + sync dbs
 (/usr/share/samurai/pkg-cache). With desktop=kde the installer installs from
-those files via `pacman -r /mnt -U` — no repos, no dbs, no mirrorlist, no
-network.
+those files via `pacman --sysroot /mnt -U` — no repos, no dbs, no mirrorlist,
+no network.
 
 Proof: this profile pins arch_mirror to a DEAD server. If any network path
 were consulted, the install would fail. It must succeed offline.
@@ -55,6 +55,7 @@ def test_offline_install(mirror):
             "grep -c 'offline install: closure installed' /var/log/samurai/install.log"
         )
         assert ev.strip().endswith("1") or "1" in ev.split()[-1], f"offline path not taken: {ev[-400:]}"
+        ga.close()  # the QGA chardev accepts ONE host client: free it before reboot
 
         vm.eject_iso()
         vm.reboot()
@@ -63,20 +64,49 @@ def test_offline_install(mirror):
         ga2 = vm.qga(timeout=120)
         code, out = ga2.exec(
             "systemctl is-active sddm; "
-            "pacman -Q plasma-meta sddm networkmanager linux-cachyos 2>&1; "
+            "pacman -Q plasma-meta sddm networkmanager linux-cachyos linux-zen 2>&1; "
             "grep LookAndFeelPackage /etc/skel/.config/kdeglobals; "
             "systemctl --failed --no-legend | wc -l; "
             "findmnt -no FSTYPE /; "
-            "pacman -Q linux linux-zen 2>/dev/null | wc -l"
+            "pacman -Q linux 2>/dev/null | wc -l"
         )
         assert "active" in out.split("\n")[0], out[-800:]
         assert "plasma-meta" in out, out[-800:]
         assert "linux-cachyos" in out, out[-800:]
+        _, gpu_packages = ga2.exec(
+            "pacman -Q mesa vulkan-radeon vulkan-intel vulkan-nouveau "
+            "intel-media-driver libva-intel-driver nvidia-utils "
+            "linux-cachyos-nvidia-open linux-zen-headers nvidia-open-dkms"
+        )
+        assert all(
+            package in gpu_packages
+            for package in (
+                "mesa ",
+                "vulkan-radeon ",
+                "vulkan-intel ",
+                "vulkan-nouveau ",
+                "intel-media-driver ",
+                "libva-intel-driver ",
+                "nvidia-utils ",
+                "linux-cachyos-nvidia-open ",
+                "linux-zen-headers ",
+                "nvidia-open-dkms ",
+            )
+        ), gpu_packages[-1200:]
         assert "org.kde.breezedark.desktop" in out, out[-800:]
         assert "\n0" in out, out[-800:]
         assert "btrfs" in out, out[-800:]
-        # only the profile's kernels installed: linux and linux-zen absent
+        # both selected kernels installed; the unselected generic kernel absent
         assert out.strip().split("\n")[-1] == "0", out[-800:]
+
+        _, boot_files = ga2.exec(
+            "test -s /boot/vmlinuz-linux-cachyos && "
+            "test -s /boot/initramfs-linux-cachyos.img && "
+            "test -s /boot/vmlinuz-linux-zen && "
+            "test -s /boot/initramfs-linux-zen.img && echo OFFLINE-BOOT-FILES-OK"
+        )
+        assert "OFFLINE-BOOT-FILES-OK" in boot_files, boot_files[-800:]
+        ga2.close()
 
         vm.screendump("offline-01-greeter")
         vm.stop()

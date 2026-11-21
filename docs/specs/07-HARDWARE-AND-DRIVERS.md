@@ -20,6 +20,15 @@ What we change (checked against the chwd source, 2026-10-27):
   they change. We port the changes by hand; CachyOS is upstream for device knowledge.
 
 ## Profile coverage (v1)
+The base install (including the baked offline closure) includes Mesa's AMD, Intel and Nouveau
+userspace stacks and Vulkan drivers for Radeon/Intel/Nouveau. The offline closure also includes the
+standard NVIDIA userspace and kernel modules from their configured package repositories. The module
+package is filtered to the selected kernel: CachyOS prebuilt for `linux-cachyos`, Arch prebuilt for
+`linux`/`linux-lts`, and DKMS plus headers for `linux-zen`. Open modules support Turing and newer;
+older cards retain Nouveau until a suitable legacy branch is selected by the hardware-profile flow.
+ADR-0008's non-redistribution rule applies to the custom gpu-unlock firmware/module, not these
+standard repository driver packages.
+
 | Area | Profiles |
 |------|----------|
 | NVIDIA | open modules for Turing and newer (RTX 20xx–50xx; Blackwell needs open modules); legacy `580xx` branch for Maxwell/Pascal (GTX 9xx/10xx); Optimus laptops (`.prime` variants: nvidia-prime, switcheroo-control, nvidia-powerd where supported); nouveau fallback |
