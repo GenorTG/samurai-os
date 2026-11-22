@@ -222,7 +222,11 @@ pacman -S --noconfirm --needed archiso >/dev/null
 # Import the keyring from the offline cache (already downloaded via the
 # 4-server fallback — the mirror desyncs, seen 2026-11-20)
 if compgen -G "/out/offline-pkgs/cachyos-keyring-*.pkg.tar.zst" >/dev/null; then
-    pacman -U --noconfirm /out/offline-pkgs/cachyos-keyring-*.pkg.tar.zst >/dev/null
+    # copy WITHOUT the .sig: a keyring package cannot vouch for itself in this
+    # fresh container (its signer is not trusted yet); it was verified against
+    # the pinned CachyOS fingerprint when the cache was downloaded above
+    cp /out/offline-pkgs/cachyos-keyring-*.pkg.tar.zst /tmp/ck-cache.pkg.tar.zst
+    pacman -U --noconfirm /tmp/ck-cache.pkg.tar.zst >/dev/null
 else
     # online flavor: no offline cache, fetch the keyring through the same
     # 4-server fallback the offline download uses
