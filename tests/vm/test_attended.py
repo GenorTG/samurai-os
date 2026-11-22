@@ -51,7 +51,7 @@ def test_attended_install(mirror):
         vm.send("\n")
         time.sleep(1.0)
         vm.serial_read(max_wait=1.0)
-        vm.send("samurai-install\n")
+        vm.send("SAMURAI_SERIAL_CONSOLE=1 samurai-install\n")
 
         vm.screendump("attended-01-live")
         _answer(vm, "Disk to ERASE [1-", "1")
@@ -73,6 +73,7 @@ def test_attended_install(mirror):
         vm.send("2\n")                                   # fish
         _answer(vm, "User password (Enter = generate):", PASS)
         _answer(vm, "again:", PASS)
+        _answer(vm, "Firewall (firewalld, deny inbound) [Y/n]:", "")   # default: firewalld on
         vm.wait_for("Write this profile and continue?")  # summary block + prompt
         vm.screendump("attended-03-summary")
         vm.send("yes\n")
@@ -89,12 +90,13 @@ def test_attended_install(mirror):
         # /var/lib/samurai/... is asserted after the reboot — before the reboot
         # the live medium obviously has no /var/lib/samurai yet)
         ga = vm.qga(timeout=60)
-        _, profile = ga.exec("cat /tmp/samurai-attended.toml")
+        _, profile = ga.exec("cat /run/samurai-install/attended.toml")
         assert 'bootloader = "grub"' in profile, profile
         assert 'shell = "fish"' in profile, profile
         assert 'desktop = "none"' in profile, profile
         assert "auto_unlock_keyfile = false" in profile, profile
         assert "password_hash = " in profile, profile
+        assert 'firewall = "firewalld"' in profile, profile
         assert PASS not in profile, "plaintext password must never reach the profile"
         ga.close()  # the QGA chardev accepts ONE host client: free the slot
 

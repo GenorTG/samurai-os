@@ -8,13 +8,14 @@ dir="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../pkgbuilds" && pwd)}"
 
 fail=0
 for p in "$dir"/*/PKGBUILD; do
-    if grep -qE '^epoch=' "$p"; then
-        echo "EPOCH: '$(grep -E '^pkgname=' "$p" | cut -d= -f2)' sets an epoch" >&2
+    name="$(sed -n -E "s/^pkgname=\(?['\"]?([^'\") ]*).*/\1/p" "$p" | head -1)"
+    if grep -qE '^[[:space:]]*epoch=' "$p"; then
+        echo "EPOCH: '$name' sets an epoch" >&2
         fail=1
     fi
-    pkgver=$(grep -E '^pkgver=' "$p" | head -1 | cut -d= -f2)
+    pkgver="$(sed -n -E "s/^pkgver=['\"]?([^'\"]*)['\"]?.*/\1/p" "$p" | head -1)"
     case "$pkgver" in
-        *:*) echo "EPOCH: '$(grep -E '^pkgname=' "$p" | head -1 | cut -d= -f2)' has an epoch-style pkgver '$pkgver'" >&2; fail=1 ;;
+        *:*) echo "EPOCH: '$name' has an epoch-style pkgver '$pkgver'" >&2; fail=1 ;;
     esac
 done
 

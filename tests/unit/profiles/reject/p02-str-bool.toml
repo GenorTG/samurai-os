@@ -1,0 +1,15 @@
+version = 1
+[system]
+hostname = "h"
+timezone = "UTC"
+[disk]
+device = "/dev/vda"
+encryption = "false"
+auto_unlock_keyfile = "no"
+[boot]
+kernels = ["linux"]
+[user]
+name = "u"
+groups = ["wheel"]
+[packages]
+install = ["samurai-release"]

@@ -10,5 +10,8 @@ iso/airootfs/usr/share/samurai/pkg-cache/
 target/
 .tmp/
 build/
+# ci/release-iso.sh staging (split ISOs, SHA256SUMS, notes)
+dist/
 __pycache__/
 *.pyc
+.pytest_cache/

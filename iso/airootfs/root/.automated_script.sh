@@ -16,7 +16,13 @@ automated_script() {
     local script rt
     script="$(script_cmdline)"
     if [[ -n "${script}" && ! -x /tmp/startup_script ]]; then
-        if [[ "${script}" =~ ^((http|https|ftp|tftp)://) ]]; then
+        # Samurai OS: https or a local path only. Plain http/ftp/tftp let anyone on
+        # the network hand the live root a script to execute.
+        if [[ "${script}" =~ ^(http|ftp|tftp):// ]]; then
+            printf '%s: refusing non-https script URL %s\n' "$0" "${script}" >&2
+            return 1
+        fi
+        if [[ "${script}" =~ ^https:// ]]; then
             printf '%s: downloading %s\n' "$0" "${script}"
             # there's no synchronization for network availability before executing this script; to ensure the network
             # is online, we use a transient systemd service that depends on network-online.target to download the

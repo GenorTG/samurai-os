@@ -1,0 +1,113 @@
+name: Release ISO (draft)
+
+# DRAFT (spec 02 step 7 / spec 08): manual only. Needs a self-hosted runner with
+# labels [self-hosted, linux, kvm] (genorbox1) because mkarchiso needs a
+# privileged container and the smoke suite needs /dev/kvm; GitHub-hosted runners
+# cannot do either. Until that runner is registered a dispatch simply queues.
+#
+# Secrets (protected `samurai-release` environment, main only):
+#   SAMURAI_SIGNING_SUBKEY  armored signing subkey (same as samurai-testing) for SHA256SUMS.sig
+# The release itself is created on THIS repository with the job's GITHUB_TOKEN.
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "release" to publish v<VERSION> from main'
+        required: true
+        type: string
+      run_smoke:
+        description: Run the VM smoke suite before publishing
+        required: false
+        type: boolean
+        default: true
+
+permissions: {}
+
+concurrency:
+  group: release-iso
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: >-
+      github.repository == 'GenorTG/samurai-os' &&
+      github.ref == 'refs/heads/main' &&
+      inputs.confirm == 'release'
+    runs-on: [self-hosted, linux, kvm]
+    environment: samurai-release
+    timeout-minutes: 300
+    permissions:
+      contents: write   # push the tag, create the release, upload assets
+    steps:
+      - name: "Checkout (full history, for tags)"
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate VERSION and refuse an existing release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          version="$(tr -d '[:space:]' < VERSION)"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::VERSION '$version' is not MAJOR.MINOR.PATCH.BUILD"; exit 1; }
+          if gh release view "v$version" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::release v$version already exists; bump VERSION first"; exit 1
+          fi
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+
+      - name: Build online and offline ISOs
+        shell: bash
+        run: |
+          set -euo pipefail
+          SAMURAI_ISO_FLAVOR=online  ci/build-iso.sh "$PWD/build/release-online"
+          SAMURAI_ISO_FLAVOR=offline ci/build-iso.sh "$PWD/build/release-offline"
+          ls -lh build/release-online/*.iso build/release-offline/*.iso
+
+      - name: VM smoke suite
+        if: inputs.run_smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          iso="$(ls build/release-online/samurai-os-*-online-x86_64.iso)"
+          SAMURAI_TEST_ISO="$iso" SAMURAI_VM_RUN_ID="release-${GITHUB_RUN_ID}" tests/vm/run-smoke.sh "$iso"
+
+      - name: Import signing subkey for SHA256SUMS.sig
+        id: key
+        shell: bash
+        env:
+          SAMURAI_SIGNING_SUBKEY: ${{ secrets.SAMURAI_SIGNING_SUBKEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$SAMURAI_SIGNING_SUBKEY" ]; then
+            echo "::warning::SAMURAI_SIGNING_SUBKEY not set in samurai-release; SHA256SUMS will be unsigned"
+            echo "sign=" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          key_home="$HOME/samurai-keys/gnupg"
+          install -d -m 700 "$key_home" "$HOME/samurai-keys"
+          printf '%s\n' "$SAMURAI_SIGNING_SUBKEY" | gpg --batch --homedir "$key_home" --import 2>/dev/null
+          primary_fingerprint="$(sed -n -E 's/^_primary_fpr=([0-9A-F]{40})[[:space:]]*$/\1/p' pkgbuilds/samurai-keyring/PKGBUILD | head -1)"
+          test -n "$primary_fingerprint"
+          gpg --batch --homedir "$key_home" --with-colons --list-secret-keys "$primary_fingerprint" | grep -q '^ssb:' ||
+            { echo "::error::secret holds no secret subkey of $primary_fingerprint"; exit 1; }
+          printf '%s\n' "$primary_fingerprint" > "$HOME/samurai-keys/primary-fingerprint.txt"
+          echo "sign=--sign" >> "$GITHUB_OUTPUT"
+
+      - name: Tag, create the release and upload assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SIGN: ${{ steps.key.outputs.sign }}
+        run: |
+          set -euo pipefail
+          git config user.name "samurai-os release"
+          git config user.email "build@smart-samurai.pl"
+          gh auth setup-git   # lets `git push` of the tag use GITHUB_TOKEN
+          ci/release-iso.sh build/release-online/samurai-os-*-online-x86_64.iso \
+                            build/release-offline/samurai-os-*-offline-x86_64.iso $SIGN --publish
+
+      - name: Clean build artifacts
+        if: always()
+        run: rm -rf build/release-online build/release-offline dist "$HOME/samurai-keys"

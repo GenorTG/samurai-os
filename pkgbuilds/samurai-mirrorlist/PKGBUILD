@@ -5,16 +5,19 @@
 
 pkgname=samurai-mirrorlist
 pkgver=1
-pkgrel=1
+pkgrel=2
 pkgdesc="Samurai OS pacman mirrorlists ([samurai] and [samurai-testing])"
 arch=(any)
 url="https://github.com/GenorTG/samurai-repo"
 license=(MIT)
 groups=(samurai-base)
 depends=()
+# like pacman-mirrorlist: a locally edited mirrorlist survives upgrades as-is
+# and the new one lands next to it as .pacnew
+backup=(etc/pacman.d/samurai-mirrorlist etc/pacman.d/samurai-testing-mirrorlist)
 
 package() {
-    cd "$pkgdir"
+    cd "$pkgdir" || return 1
     install -d etc/pacman.d
 
     cat > etc/pacman.d/samurai-mirrorlist << 'EOF'
@@ -30,4 +33,5 @@ Server = https://github.com/GenorTG/samurai-repo/releases/download/x86_64-testin
 # fallback mirror
 Server = https://repo.smart-samurai.pl/samurai-testing/x86_64
 EOF
+    chmod 644 etc/pacman.d/samurai-mirrorlist etc/pacman.d/samurai-testing-mirrorlist
 }

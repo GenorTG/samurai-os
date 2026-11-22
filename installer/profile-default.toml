@@ -16,8 +16,10 @@ device = "/dev/vda"          # validated: must be a block device path
 layout = "erase"             # erase | alongside | manual (M2: erase only)
 filesystem = "btrfs"
 encryption = true            # LUKS2, default on (spec 08 page 3)
-auto_unlock_keyfile = true   # TEST AFFORDANCE ONLY: keyfile on ESP for headless
-                             # boots. Real installs keep the passphrase prompt.
+auto_unlock_keyfile = false  # true = VM-TEST AFFORDANCE ONLY: the LUKS key is stored
+                             # unencrypted on the ESP (headless boots). The validator
+                             # refuses true unless SAMURAI_TEST_AUTOKEY=1 is exported;
+                             # real installs keep the passphrase prompt.
 
 [boot]
 kernels = ["linux-cachyos", "linux-zen"]   # release default (ADR-0001); tests override to ["linux"]
@@ -26,8 +28,8 @@ bootloader = "limine"        # ADR-0003: Limine + snapshot boot (M4); spike pend
 [user]
 name = "samurai"
 shell = "fish"               # bash|fish|zsh; release default (Genor's pick); tests may override
-groups = ["wheel"]
-root_locked = true
+groups = ["wheel"]          # M2: exactly ["wheel"]; other groups come via samurai apps / toolbox
+root_locked = true           # always (spec 09); false is refused
 
 [packages]
 # Desktop: KDE Plasma is the default face of Samurai OS (Genor 2026-11-20);
@@ -50,7 +52,7 @@ install = [
 ]
 
 [repos]
-samurai = true
+samurai = true               # these three are fixed in M2; the validator refuses other values
 cachyos = true               # [cachyos] is baked into the ISO (linux-cachyos + keyring)
 chaotic_aur = false
 arch_mirror = "auto"         # "auto" = live medium mirrors; or an https URL to pin

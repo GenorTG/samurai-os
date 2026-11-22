@@ -1,27 +1,71 @@
 #!/usr/bin/env bash
-# samurai — CLI dispatcher (spec 01/04/06: one entry point, subcommand tools).
-# M4: thin shim over the stage tools; the Rust CLI (M5+) replaces this file
-# with the real binary behind the same interface.
+# samurai — CLI dispatcher (spec 01/04/06: one entry point, one tool per area).
+# Thin shim over the stage tools shipped by samurai-tools; the Rust CLI (M5+)
+# replaces this file behind the same interface.
 set -euo pipefail
 
-cmd="${1:-help}"; shift 2>/dev/null || true
+TOOLS_VERSION_FILE=/usr/share/samurai/tools-version
+HERE=$(dirname "$(readlink -f "$0")")
 
-case "$cmd" in
-    snap)    exec /usr/local/bin/samurai-snap "$@" ;;
-    rescue)  exec /usr/local/bin/samurai-rescue "$@" ;;
-    update)  exec /usr/local/bin/samurai-update "$@" ;;
-    apps)    exec /usr/local/bin/samurai-apps "$@" ;;
-    version) printf 'samurai (shim) 0.1.0\n' ;;
-    help|*)
-        cat <<'EOF'
+usage() {
+    cat <<'EOF'
 usage: samurai <command> [args]
 
-  update      staged system update (spec 03)
+commands
+  update      staged system update (spec 03): samurai update --help
   apps        optional apps from the catalog: list/search/info/install/remove/bundles
-  snap        snapshot manager (spec 06): list/create/delete/diff/repair/rollback
+  snap        snapshot manager (spec 06): list/create/delete/diff/restore-file/repair/rollback
   rescue      recovery tool (spec 06): mount/chroot/bootloader/initramfs/kernel/rollback
-  version     print the CLI version
+  status      last update check and last update report (user session)
+  version     print the samurai-tools version
+  help        this text
+
+Every command accepts --help. Exit codes follow each tool's --help; this
+dispatcher exits 2 for an unknown command.
 EOF
-        [ "$cmd" = help ] && exit 0 || exit 2
+}
+
+version() {
+    local v=""
+    if [ -r "$TOOLS_VERSION_FILE" ]; then
+        read -r v < "$TOOLS_VERSION_FILE" || true
+    fi
+    if [ -z "$v" ] && command -v pacman >/dev/null 2>&1; then
+        v=$(pacman -Q samurai-tools 2>/dev/null | awk '{print $2}') || true
+    fi
+    if [ -n "$v" ]; then
+        printf 'samurai %s (samurai-tools)\n' "$v"
+    else
+        printf 'samurai (unpackaged copy, not installed from samurai-tools)\n'
+    fi
+}
+
+run_tool() {   # $1 tool suffix, rest: its arguments
+    local name=$1 tool
+    shift
+    tool="$HERE/samurai-$name"
+    [ -x "$tool" ] || tool="/usr/local/bin/samurai-$name"
+    if [ ! -x "$tool" ]; then
+        printf 'samurai: command "%s" is not installed (%s missing)\n' "$name" "$tool" >&2
+        exit 2
+    fi
+    exec "$tool" "$@"
+}
+
+cmd="${1:-help}"
+if [ $# -gt 0 ]; then shift; fi
+
+case "$cmd" in
+    update)  run_tool update "$@" ;;
+    apps)    run_tool apps "$@" ;;
+    snap)    run_tool snap "$@" ;;
+    rescue)  run_tool rescue "$@" ;;
+    status)  run_tool notifier --status "$@" ;;
+    version|--version|-V) version ;;
+    help|--help|-h) usage ;;
+    *)
+        printf 'samurai: unknown command: %s\n\n' "$cmd" >&2
+        usage >&2
+        exit 2
         ;;
 esac

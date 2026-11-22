@@ -2,6 +2,10 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  <!-- GitHub Pages sends no custom headers, so the policy lives here. Everything the page
+       needs is same-origin; no inline styles or scripts (ci/check-site.py enforces it).
+       img-src data: is for the paper and ink textures styles.css draws as data: SVGs. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; upgrade-insecure-requests">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Samurai OS — plain Arch Linux with a sharpened edge</title>
   <meta name="description" content="Samurai OS is a personal Arch Linux based distribution: Arch packages unchanged, a thin signed layer on top, an encrypted btrfs installer, staged pacman updates, snapshots and rescue rollback. Early, VM-tested.">
@@ -30,7 +34,7 @@
   <a class="skip w-btn w-btn-primary" href="#main">Skip to content</a>
 
   <!-- Inline mark: follows the page's ink and vermilion. -->
-  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <svg class="svg-defs" width="0" height="0" aria-hidden="true" focusable="false">
     <defs>
       <filter id="brush" x="-10%" y="-10%" width="120%" height="120%">
         <feTurbulence type="fractalNoise" baseFrequency="0.06 0.18" numOctaves="2" seed="3"/>
@@ -59,12 +63,12 @@
     </defs>
   </svg>
 
-  <div class="status" role="note" aria-label="Project status">
+  <aside class="status" aria-label="Project status">
     <div class="w-container">
       <strong>Early · personal</strong>
       <span>One person's daily-driver project. Every feature listed as available passes a VM test; nothing is proven on physical hardware yet. Try it in a VM or on a spare machine.</span>
     </div>
-  </div>
+  </aside>
 
   <header class="w-header">
     <div class="w-container bar">
@@ -199,7 +203,9 @@
               <p class="w-muted">LUKS2 full-root encryption, on unless you say no. Inside it, btrfs with a flat
                 subvolume layout: <code>@</code>, <code>@home</code>, <code>@cache</code>, <code>@log</code>,
                 <code>@snapshots</code> and more, so rolling back the system never rolls back your files or logs.
-                A 2 GiB FAT32 ESP is mounted at <code>/boot</code>.</p>
+                A 2 GiB FAT32 ESP is mounted at <code>/boot</code>. Every install also gets CPU microcode in
+                the initramfs, zram swap (half of RAM, up to 8 GiB, zstd) and time sync with
+                <code>systemd-timesyncd</code>.</p>
             </article>
           </li>
           <li>
@@ -235,10 +241,11 @@
             <article class="w-card" aria-labelledby="f-offline">
               <div class="card-head"><p class="kind">Installer</p><span class="w-seal">VM-tested</span></div>
               <h3 id="f-offline" class="w-display">Offline install</h3>
-              <p class="w-muted">The offline ISO carries the whole default package set: KDE Plasma, both kernels
-                and the driver stacks. The test points the package mirror at an address that does not exist,
-                installs anyway, reboots and checks the result, including both kernel and initramfs pairs in
-                <code>/boot</code>.</p>
+              <p class="w-muted">The offline ISO carries a local pacman repository with the whole default package
+                set: KDE Plasma, both kernels and the driver stacks. The installer resolves against that
+                repository, so a machine gets only what its profile and hardware need. The test points the
+                package mirror at an address that does not exist, installs anyway, reboots and checks the result,
+                including both kernel and initramfs pairs in <code>/boot</code>.</p>
             </article>
           </li>
           <li>
@@ -259,7 +266,8 @@
                 news and stops on unhandled manual-intervention items, runs scripted fixes (interventions), takes a
                 snapshot, then one <code>pacman -Syu</code>, then checks DKMS, initramfs and boot entries. The
                 notifier, a systemd user timer, counts updates with <code>checkupdates</code> and never installs
-                anything itself.</p>
+                anything itself. <code>pacman-contrib</code>'s weekly <code>paccache</code> timer keeps the package
+                cache to the last few versions.</p>
             </article>
           </li>
           <li>
@@ -285,7 +293,7 @@
 
         <div class="grid grid-2 mt-l">
           <div>
-            <h3 class="w-display" style="font-size:1.35rem">One command, a few subcommands</h3>
+            <h3 class="w-display h3-sub">One command, a few subcommands</h3>
             <p class="w-muted mt-s">The <code>samurai</code> CLI is a small shell dispatcher today; the Rust CLI
               replaces it behind the same interface (spec 04).</p>
           </div>
@@ -311,7 +319,9 @@ usage: samurai &lt;command&gt; [args]
           <h2 id="download-title" class="w-display">Download</h2>
           <p class="lead">Two installers, both x86_64 UEFI. Both are on the
             <a class="w-link" href="https://github.com/GenorTG/samurai-os/releases/latest" rel="noopener">latest GitHub release</a>,
-            next to a <code>SHA256SUMS</code> file.</p>
+            next to a <code>SHA256SUMS</code> file and its signature. Releases are tagged
+            <code>v&lt;major.minor.patch.build&gt;</code>, starting at <code>v0.1.0.0</code>; the ISO file names
+            carry the build date.</p>
         </div>
 
         <div class="grid grid-2 mt-l">
@@ -348,7 +358,7 @@ usage: samurai &lt;command&gt; [args]
 
         <div class="grid grid-2 mt-l">
           <div>
-            <h3 class="w-display" style="font-size:1.35rem">Join the offline parts</h3>
+            <h3 class="w-display h3-sub">Join the offline parts</h3>
             <p class="w-muted mt-s">Download every <code>…offline-x86_64.iso.0*</code> part and
               <code>SHA256SUMS</code> into one folder. The shell sorts the parts in order.</p>
             <div class="code" data-copy>
@@ -356,11 +366,20 @@ usage: samurai &lt;command&gt; [args]
             </div>
           </div>
           <div>
-            <h3 class="w-display" style="font-size:1.35rem">Verify before you trust</h3>
+            <h3 class="w-display h3-sub">Verify before you trust</h3>
             <p class="w-muted mt-s">Check what you downloaded against the release's checksums.
               <code>--ignore-missing</code> skips files listed there that you did not download.</p>
             <div class="code" data-copy>
 <pre><code>sha256sum -c --ignore-missing SHA256SUMS</code></pre>
+            </div>
+            <p class="w-muted mt-s">A signed release also carries <code>SHA256SUMS.sig</code>, made with the
+              Samurai build key. Import the public key shipped in the
+              <a class="w-link" href="https://github.com/GenorTG/samurai-os/blob/main/pkgbuilds/samurai-keyring/build-key.txt" rel="noopener">samurai-keyring package</a>
+              (primary fingerprint <code>DFE8 C148 C042 AA3C 199A AEA0 8436 E127 31ED D3FA</code>) and check the
+              signature before the sums.</p>
+            <div class="code" data-copy>
+<pre><code>gpg --import build-key.txt
+gpg --verify SHA256SUMS.sig SHA256SUMS</code></pre>
             </div>
           </div>
         </div>
@@ -402,7 +421,8 @@ usage: samurai &lt;command&gt; [args]
           <li>
             <h3 class="w-display">Run the guided installer</h3>
             <p>It checks UEFI and RAM, lists the disks, asks its questions, shows a summary and waits for an
-              explicit <code>yes</code>. The LUKS passphrase is asked twice and never written to the profile.</p>
+              explicit <code>yes</code>. The LUKS passphrase is asked twice and never written to the profile.
+              The firewall question defaults to firewalld; answer <code>n</code> to install without one.</p>
             <div class="code" data-copy>
 <pre><code><span class="prompt"># </span>samurai-install</code></pre>
             </div>
@@ -437,7 +457,7 @@ usage: samurai &lt;command&gt; [args]
         </div>
         <div class="grid grid-2 mt-l">
           <div>
-            <h3 class="w-display" style="font-size:1.35rem">One transaction, no partial upgrades</h3>
+            <h3 class="w-display h3-sub">One transaction, no partial upgrades</h3>
             <p class="w-muted mt-s">Installs are a single <code>pacman -S --needed</code>, shown before it runs.
               The tool never syncs databases on its own: if they are stale it sends you to
               <code>samurai update</code> first. Bundles skip what is not available yet and say why.</p>
@@ -452,7 +472,7 @@ usage: samurai &lt;command&gt; [args]
           </div>
         </div>
 
-        <h3 class="w-display mt-l" style="font-size:1.35rem">From Garuda's list <span class="w-faint small">(16 categories, 175 apps)</span></h3>
+        <h3 class="w-display h3-sub mt-l">From Garuda's list <span class="w-faint small">(16 categories, 175 apps)</span></h3>
         <ul class="cat-list mt-s">
           <li><span>Development</span><span class="n">23</span></li>
           <li><span>Graphics</span><span class="n">19</span></li>
@@ -472,13 +492,13 @@ usage: samurai &lt;command&gt; [args]
           <li><span>Virtualization</span><span class="n">4</span></li>
         </ul>
 
-        <h3 class="w-display mt-m" style="font-size:1.35rem">Samurai additions</h3>
+        <h3 class="w-display h3-sub mt-m">Samurai additions</h3>
         <ul class="cat-list mt-s">
           <li class="ours"><span>Craft suite</span><span class="n">10</span></li>
           <li class="ours"><span>AI command-line tools</span><span class="n">7</span></li>
           <li class="ours"><span>Local AI (Ollama)</span><span class="n">1</span></li>
         </ul>
-        <p class="w-muted mt-m" style="max-width:48rem">The catalog also defines the bigger choices: desktop,
+        <p class="w-muted mt-m measure">The catalog also defines the bigger choices: desktop,
           kernels, browsers, conda flavour, firewall and reverse proxy, plus toggles for gaming, Docker, Tailscale,
           NVIDIA CUDA, Python versions and KDE monitor widgets. Firefox is the one browser ticked by default.</p>
       </div>
@@ -502,7 +522,7 @@ usage: samurai &lt;command&gt; [args]
               <li>Signed <code>[samurai]</code> repository and database (<code>SigLevel = Required DatabaseRequired</code>); Arch's signing used as is.</li>
               <li>Root account locked; your user is in <code>wheel</code>.</li>
               <li>Install profiles are checked against a strict allowlist: no free-form shell, every value quoted, passwords only as crypt hashes.</li>
-              <li>firewalld on by default: zone <code>public</code>, inbound closed except DHCPv6; SSH opens only when you enable the SSH server.</li>
+              <li>firewalld on by default: zone <code>public</code>, inbound closed except DHCPv6; SSH opens only when you enable the SSH server. The guided wizard asks (default yes); profiles set <code>[security] firewall</code>.</li>
               <li>No SSH server unless you ask for one.</li>
               <li>Signing subkey for publishing kept in a protected CI environment; the primary key stays offline.</li>
             </ul>

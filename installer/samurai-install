@@ -5,17 +5,24 @@
 # and call this (GUI wrapper comes at M5/M7).
 #
 # Usage: samurai-install [--profile FILE] [--disk /dev/...] [--yes]
-#   no --profile  => attended guided wizard (writes /tmp/samurai-attended.toml)
+#   no --profile  => attended guided wizard (writes $RUNDIR/attended.toml)
+# Environment (VM harness only):
+#   SAMURAI_TEST_AUTOKEY=1     lets the validator accept auto_unlock_keyfile
+#   SAMURAI_SERIAL_CONSOLE=1   adds console=ttyS0 to the installed cmdline
 # Security posture (Genor 2026-11-17): strict profile validation before any disk
 # is touched; no eval; every value quoted; all output logged for post-mortem.
 # Passwords never enter the profile in plaintext (crypt hash only, or the
-# postinstall generated-password path).
+# postinstall generated-password path). Secrets (keyfile, profile with hash,
+# log) are created under umask 077; world-readable files are made explicitly.
 set -euo pipefail
 
 PROFILE=""
 DISK_OVERRIDE=""
 ASSUME_YES=0
 LOG=/var/log/samurai/install.log
+RUNDIR=/run/samurai-install           # private scratch dir (0700) on the live tmpfs
+ROOTMAP="samurai-root"
+DEVICE_RE='^/dev/[a-z0-9]+$'          # same shape validate-profile.py enforces
 
 # tee-to-stdout deadlocks when stdout is an undrained tty (agent-launched
 # installs write to /dev/ttyS0 and nothing drains the host-side socket —
@@ -25,14 +32,42 @@ TLOG() { if [ -t 1 ]; then tee -a "$1"; else cat >> "$1"; fi; }
 
 log() { printf '%s %s\n' "$(date -Is)" "$*" >> "$LOG"; [ -t 1 ] && printf '%s %s\n' "$(date -Is)" "$*" >&2 || true; }
 die() { log "FATAL: $*"; echo "FATAL: $*" >&2; exit 1; }
+warn_banner() {   # red, impossible to miss, also in the log
+    local l; for l in "$@"; do printf '\033[1;31m!! %s\033[0m\n' "$l" >&2; log "WARNING: $l"; done
+}
+# pacman hooks may start a GPG agent inside the target chroot; its /dev/null
+# descriptors pin the devtmpfs bind, so stop it before every unmount
+kill_target_gpg_agent() {
+    [ -x /mnt/usr/bin/gpgconf ] || return 0
+    chroot /mnt gpgconf --homedir /etc/pacman.d/gnupg --kill gpg-agent >/dev/null 2>&1 || true
+}
+# Every exit path (die, set -e, Ctrl-C) leaves no mount, mapping or key behind,
+# so a rerun starts from a clean live system and the keyfile never outlives
+# the install. Runs after the normal unmount too (every step tolerates "already
+# done").
+cleanup() {
+    local rc=$?
+    trap - EXIT
+    if mountpoint -q /mnt 2>/dev/null; then
+        kill_target_gpg_agent
+        umount -R /mnt 2>/dev/null || umount -lR /mnt 2>/dev/null || true
+    fi
+    [ -e "/dev/mapper/$ROOTMAP" ] && cryptsetup close "$ROOTMAP" 2>/dev/null || true
+    [ -n "${keyfile:-}" ] && [ -f "$keyfile" ] && shred -u "$keyfile" 2>/dev/null || true
+    [ "$rc" -eq 0 ] || log "install aborted (exit $rc); live system cleaned up"
+    exit "$rc"
+}
+trap cleanup EXIT
 
 mkdir -p /var/log/samurai
+( umask 077; : >> "$LOG" )             # the log stays root-only (it is copied to the target)
+install -d -m 700 "$RUNDIR"
 log "samurai-install starting: $*"
 
 ### Attended guided wizard (spec 08 Guided mode) ###
 # Asks exactly the questions the profile schema supports; everything it does
-# not ask keeps the profile default. Writes /tmp/samurai-attended.toml and
-# falls through to the validated unattended backend unchanged.
+# not ask keeps the profile default. Writes $RUNDIR/attended.toml and falls
+# through to the validated unattended backend unchanged.
 wizard() {
     echo
     echo "  Samurai OS — guided install"
@@ -59,14 +94,18 @@ wizard() {
     WIZ_DISK=${disks[$((dnum-1))]%% *}
     echo "  -> $WIZ_DISK will be ERASED (all data lost)"
 
-    # identity
+    # identity (the validator re-checks everything; these early checks only
+    # give a readable error instead of a TOML parse failure)
     read -r -p "  Hostname [samurai]: " WIZ_HOST; WIZ_HOST=${WIZ_HOST:-samurai}
+    [[ $WIZ_HOST =~ ^[a-zA-Z0-9][a-zA-Z0-9-]{0,62}$ ]] || die "invalid hostname: $WIZ_HOST"
     echo "  Timezone regions:"
-    mapfile -t tzregions < <(find /usr/share/zoneinfo -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort)
+    mapfile -t tzregions < <(find /usr/share/zoneinfo -mindepth 1 -maxdepth 1 -type d \
+        ! -name posix ! -name right -printf '%f\n' | sort)
     i=1; for r in "${tzregions[@]}"; do printf '    %d) %s\n' "$i" "$r"; i=$((i+1)); done
     printf '    %d) UTC\n' "$i"; nregions=$i
     read -r -p "  Region number [UTC]: " trn
     WIZ_TZ=UTC
+    case "$trn" in ''|*[!0-9]*) trn="" ;; esac
     if [ -n "$trn" ] && [ "$trn" -ge 1 ] && [ "$trn" -lt "$nregions" ]; then
         region=${tzregions[$((trn-1))]}
         mapfile -t tzcities < <(find "/usr/share/zoneinfo/$region" -type f -printf '%P\n' | sort)
@@ -76,7 +115,7 @@ wizard() {
         [ "$cnum" -ge 1 ] && [ "$cnum" -le ${#tzcities[@]} ] || die "invalid city choice"
         WIZ_TZ="$region/${tzcities[$((cnum-1))]}"
     fi
-    [ -f "/usr/share/zoneinfo/$WIZ_TZ" ] || [ "$WIZ_TZ" = UTC ] || die "bad timezone: $WIZ_TZ"
+    [ -f "/usr/share/zoneinfo/$WIZ_TZ" ] || die "bad timezone: $WIZ_TZ"
 
     # encryption: on by default (spec 08 page 3). The LUKS passphrase itself is
     # asked later by the backend (masked, confirmed) — the wizard never sees it.
@@ -121,10 +160,12 @@ wizard() {
 
     # user
     read -r -p "  Username [samurai]: " WIZ_USER; WIZ_USER=${WIZ_USER:-samurai}
+    [[ $WIZ_USER =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || die "invalid username: $WIZ_USER"
     echo "  Shell: 1) bash  2) fish  3) zsh"
     read -r -p "  Choice [1]: " ssel; ssel=${ssel:-1}
     case "$ssel" in 1) WIZ_SHELL=bash ;; 2) WIZ_SHELL=fish ;; 3) WIZ_SHELL=zsh ;; *) die "invalid shell" ;; esac
-    # password: hashed with openssl passwd -6 immediately; plaintext never
+    # password: hashed with openssl passwd -6 immediately (via stdin: the
+    # plaintext never appears in a process argument list); plaintext never
     # reaches the profile file. Empty twice => postinstall generates one and
     # drops it in /root/initial-credentials (0600).
     read -r -s -p "  User password (Enter = generate): " p1; echo
@@ -132,8 +173,13 @@ wizard() {
     WIZ_PWHASH=""
     if [ -n "$p1" ]; then
         [ "$p1" = "$p2" ] || die "passwords do not match"
-        WIZ_PWHASH=$(openssl passwd -6 "$p1")
+        WIZ_PWHASH=$(printf '%s\n' "$p1" | openssl passwd -6 -stdin)
+        unset p1 p2
     fi
+
+    # firewall (spec 09 / ADR-0006): firewalld on by default
+    read -r -p "  Firewall (firewalld, deny inbound) [Y/n]: " fw
+    case "$fw" in n|N) WIZ_FW=none ;; *) WIZ_FW=firewalld ;; esac
 
     # summary + last-chance confirm (the backend asks its own Proceed? too)
     echo
@@ -142,14 +188,16 @@ wizard() {
     echo "  LUKS2:   $WIZ_ENC"
     echo "  host:    $WIZ_HOST | tz: $WIZ_TZ"
     echo "  kernels:$(echo $WIZ_KERNELS) | bootloader: $WIZ_BLDR"
-    echo "  desktop: $WIZ_DESKTOP"
+    echo "  desktop: $WIZ_DESKTOP | firewall: $WIZ_FW"
     echo "  user:    $WIZ_USER ($WIZ_SHELL)"
     echo "  ---------------------------------------------"
     read -r -p "  Write this profile and continue? [yes/no]: " go
     [ "$go" = yes ] || die "aborted at summary"
 
-    WIZ_PROFILE=/tmp/samurai-attended.toml
-    {
+    WIZ_PROFILE=$RUNDIR/attended.toml
+    (
+        umask 077
+        {
         printf 'version = 1\n\n[system]\nhostname = "%s"\ntimezone = "%s"\nlocale = "en_US.UTF-8"\nkeyboard = "us"\n\n' \
             "$WIZ_HOST" "$WIZ_TZ"
         printf '[disk]\ndevice = "%s"\nlayout = "erase"\nfilesystem = "btrfs"\nencryption = %s\nauto_unlock_keyfile = false\n\n' \
@@ -159,11 +207,11 @@ wizard() {
         printf '[user]\nname = "%s"\nshell = "%s"\ngroups = ["wheel"]\nroot_locked = true\n' \
             "$WIZ_USER" "$WIZ_SHELL"
         [ -n "$WIZ_PWHASH" ] && printf 'password_hash = "%s"\n' "$WIZ_PWHASH"
-        printf '\n[packages]\ndesktop = "%s"\ninstall = [\n    "samurai-release",\n    "samurai-mirrorlist",\n    "samurai-keyring",\n    "qemu-guest-agent",\n    "networkmanager",\n    "wpa_supplicant",\n]\n\n[repos]\nsamurai = true\ncachyos = true\nchaotic_aur = false\narch_mirror = "auto"\n\n[security]\nfirewall = "none"\nssh_server = false\n' \
-            "$WIZ_DESKTOP"
-    } > "$WIZ_PROFILE"
-    chmod 600 "$WIZ_PROFILE"
-    log "wizard wrote $WIZ_PROFILE (disk=$WIZ_DISK enc=$WIZ_ENC bldr=$WIZ_BLDR)"
+        printf '\n[packages]\ndesktop = "%s"\ninstall = [\n    "samurai-release",\n    "samurai-mirrorlist",\n    "samurai-keyring",\n    "qemu-guest-agent",\n    "networkmanager",\n    "wpa_supplicant",\n]\n\n[repos]\nsamurai = true\ncachyos = true\nchaotic_aur = false\narch_mirror = "auto"\n\n[security]\nfirewall = "%s"\nssh_server = false\n' \
+            "$WIZ_DESKTOP" "$WIZ_FW"
+        } > "$WIZ_PROFILE"      # redirect inside the subshell: the umask applies to the file
+    )
+    log "wizard wrote $WIZ_PROFILE (disk=$WIZ_DISK enc=$WIZ_ENC bldr=$WIZ_BLDR fw=$WIZ_FW)"
     PROFILE=$WIZ_PROFILE
 }
 
@@ -187,41 +235,50 @@ validator=/usr/local/bin/validate-profile.py
 python3 "$validator" "$PROFILE" || die "profile validation failed"
 
 # Apply the CLI disk override through the validator too (never bypass it).
+# The argument is bounded BEFORE it reaches sed: no sed metacharacters can
+# reach the replacement, and the result is validated again.
 if [ -n "$DISK_OVERRIDE" ]; then
-    sed -E "s|^device = .*|device = \"${DISK_OVERRIDE}\"|" "$PROFILE" > /tmp/profile-disk.toml
-    PROFILE=/tmp/profile-disk.toml
+    [[ $DISK_OVERRIDE =~ $DEVICE_RE ]] || die "--disk must look like /dev/<disk> (got: $DISK_OVERRIDE)"
+    ( umask 077; sed -E "s|^device = .*|device = \"${DISK_OVERRIDE}\"|" "$PROFILE" > "$RUNDIR/profile-disk.toml" )
+    PROFILE=$RUNDIR/profile-disk.toml
     python3 "$validator" "$PROFILE" || die "disk override failed validation"
 fi
 
-# Pull validated values (strict regexes already passed; read via toml for quoting)
-read -r HOSTNAME TZ DISK DEVICE_ENCRYPT AUTOKEY \
-    < <(python3 - "$PROFILE" <<'PY'
+# Pull validated values in ONE read (strict regexes already passed, so no
+# value contains whitespace or a newline; lists are space-joined). Fixed line
+# order, documented here and in the python block.
+{
+    read -r HOSTNAME
+    read -r TZ
+    read -r DISK
+    read -r DEVICE_ENCRYPT
+    read -r AUTOKEY
+    read -r -a KERNEL_ARR
+    read -r USER_NAME
+    read -r USER_SHELL
+    read -r BLDR
+    read -r NVIDIA_MODE
+    read -r ARCH_MIRROR
+    read -r DESKTOP
+} < <(python3 - "$PROFILE" <<'PY'
 import sys, tomllib
-p = tomllib.loads(open(sys.argv[1]).read())
-d = p.get("disk", {})
-s = p.get("system", {})
-print(s.get("hostname", "samurai"), s.get("timezone", "UTC"),
-      d.get("device", ""), int(bool(d.get("encryption", True))),
-      int(bool(d.get("auto_unlock_keyfile", False))))
+p = tomllib.loads(open(sys.argv[1], "rb").read().decode())
+s, d, b, u = p.get("system", {}), p.get("disk", {}), p.get("boot", {}), p.get("user", {})
+print(s.get("hostname", "samurai"))
+print(s.get("timezone", "UTC"))
+print(d.get("device", ""))
+print(int(d.get("encryption", True)))
+print(int(d.get("auto_unlock_keyfile", False)))
+print(" ".join(b.get("kernels", ["linux"])))
+print(u.get("name", "samurai"))
+print(u.get("shell", "bash"))
+print(b.get("bootloader", "limine"))
+print(p.get("hardware", {}).get("nvidia", "auto"))
+print(p.get("repos", {}).get("arch_mirror", "auto"))
+print(p.get("packages", {}).get("desktop", "kde"))
 PY
 ) || die "profile read failed"
-
-read -r -a KERNEL_ARR \
-    < <(python3 - "$PROFILE" <<'PY'
-import sys, tomllib
-p = tomllib.loads(open(sys.argv[1]).read())
-print(" ".join(p.get("boot", {}).get("kernels", ["linux"])))
-PY
-) || die "kernels read failed"
-read -r USER_NAME USER_SHELL BLDR \
-    < <(python3 - "$PROFILE" <<'PY'
-import sys, tomllib
-p = tomllib.loads(open(sys.argv[1]).read())
-u = p.get("user", {})
-print(u.get("name", "samurai"), u.get("shell", "bash"),
-      p.get("boot", {}).get("bootloader", "limine"))
-PY
-) || die "user read failed"
+[ -n "$DISK" ] && [ -n "$HOSTNAME" ] && [ ${#KERNEL_ARR[@]} -gt 0 ] || die "profile read incomplete"
 KERNELS="${KERNEL_ARR[*]}"
 # bootloader package set: limine is default (ADR-0003); grub/systemd-boot/refind
 # opt-in via [boot].bootloader. snapper/snap-pac stay unconditional (snapshots
@@ -237,13 +294,32 @@ case "$BLDR" in
     *)            die "unsupported bootloader: $BLDR" ;;
 esac
 
+### target disk sanity (the validator checked the shape; the live medium checks the facts) ###
 [ -b "$DISK" ] || die "not a block device: $DISK"
+[ "$(lsblk -dno TYPE "$DISK")" = disk ] || die "$DISK is not a whole disk"
+live_src=$(findmnt -no SOURCE /run/archiso/bootmnt 2>/dev/null || true)
+if [ -n "$live_src" ]; then
+    live_disk=$(lsblk -no PKNAME "$live_src" 2>/dev/null | head -1 || true)
+    [ -z "$live_disk" ] && live_disk=$(basename "$live_src")
+    [ "/dev/$live_disk" != "$DISK" ] || die "$DISK holds the live medium you booted from"
+fi
+if findmnt -rno SOURCE | grep -q -x -e "$DISK" -e "${DISK}[0-9]*" -e "${DISK}p[0-9]*"; then
+    die "$DISK has mounted partitions; unmount them first"
+fi
+# a previous attempt that died mid-way leaves /mnt and the mapping busy
+mountpoint -q /mnt && die "/mnt is still mounted (previous attempt?) — run: umount -R /mnt"
+[ -e "/dev/mapper/$ROOTMAP" ] && die "/dev/mapper/$ROOTMAP exists (previous attempt?) — run: cryptsetup close $ROOTMAP"
 
 cat >> "$LOG" <<EOF
 plan: erase $DISK, LUKS2=$DEVICE_ENCRYPT, hostname=$HOSTNAME, tz=$TZ
-plan: kernels=$KERNELS user=$USER_NAME shell=$USER_SHELL
+plan: kernels=$KERNELS user=$USER_NAME shell=$USER_SHELL bootloader=$BLDR desktop=$DESKTOP
 EOF
 echo "==> Plan: ERASE $DISK | LUKS2=$DEVICE_ENCRYPT | host=$HOSTNAME | kernels=$KERNELS"
+if [ "$AUTOKEY" -eq 1 ]; then
+    warn_banner "auto_unlock_keyfile=true: the LUKS key will be stored UNENCRYPTED on the ESP" \
+                "and inside the initramfs. Anyone holding the disk can read everything." \
+                "This is a VM-test affordance (SAMURAI_TEST_AUTOKEY=1), never for a real machine."
+fi
 if [ "$ASSUME_YES" -ne 1 ]; then
     read -r -p "Proceed? [yes/no] " answer
     [ "$answer" = "yes" ] || die "aborted by user"
@@ -254,32 +330,44 @@ log "partitioning $DISK"
 sgdisk -Z "$DISK"
 sgdisk -n 1:0:+2G -t 1:ef00 -c 1:esp "$DISK"   # ESP (2 GiB: kernels each snapshot entry needs, spec 06)
 sgdisk -n 2:0:0 -t 2:8304 -c 2:samurai-root "$DISK"  # Linux x86-64 root (/usr split ok)
-partprobe "$DISK"; sleep 1
-ESP="${DISK}1"; ROOTPART="${DISK}2"
-[ -b "$ESP" ] && [ -b "$ROOTPART" ] || die "partitioning failed"
+partprobe "$DISK"; udevadm settle
+# partition naming: sdX/vdX -> sdX1; nvmeXnY / mmcblkX -> nvmeXnYp1 (kernel rule:
+# a 'p' separator whenever the disk name ends in a digit)
+case "$DISK" in *[0-9]) PSEP=p ;; *) PSEP= ;; esac
+ESP="${DISK}${PSEP}1"; ROOTPART="${DISK}${PSEP}2"
+[ -b "$ESP" ] && [ -b "$ROOTPART" ] || die "partitioning failed (expected $ESP and $ROOTPART)"
 mkfs.fat -F32 -n ESP "$ESP"
 
 ### LUKS2 + btrfs subvolumes (spec 06 flat layout) ###
-ROOTMAP="samurai-root"
+# Explicit LUKS2 parameters on both paths (cryptsetup's compiled-in defaults
+# match today, but a default is not a decision): AES-XTS 512-bit, argon2id,
+# 2 s unlock cost. 4 KiB sectors only when the device reports them.
+LUKS_OPTS=(--type luks2 --batch-mode --cipher aes-xts-plain64 --key-size 512
+           --hash sha256 --pbkdf argon2id --iter-time 2000)
+if [ "$(blockdev --getpbsz "$ROOTPART" 2>/dev/null || echo 512)" -ge 4096 ]; then
+    LUKS_OPTS+=(--sector-size 4096)
+fi
+BTRFS_OPTS="compress=zstd:1,noatime,discard=async"
 if [ "$DEVICE_ENCRYPT" -eq 1 ]; then
-    keyfile=/run/samurai.key
-    dd if=/dev/urandom of="$keyfile" bs=512 count=8
-    chmod 600 "$keyfile"
     if [ "$AUTOKEY" -eq 1 ]; then
-        # headless/VM path: keyfile unlock, then it is also copied to the ESP
-        # below so the boot entry can unlock unattended. Profile-gated: real
-        # installs keep the passphrase prompt.
-        cryptsetup luksFormat --type luks2 --batch-mode \
-            --key-file "$keyfile" --pbkdf argon2id "$ROOTPART"
-        cryptsetup luksAddKey "$ROOTPART" "$keyfile" --key-file "$keyfile"
+        # headless/VM path: a random keyfile is the ONLY key; it is embedded in
+        # the initramfs and copied to the ESP below so the boot entry can unlock
+        # unattended. Profile-gated (validator + SAMURAI_TEST_AUTOKEY).
+        keyfile=$RUNDIR/luks.key
+        ( umask 077; head -c 4096 /dev/urandom > "$keyfile" )
+        cryptsetup luksFormat "${LUKS_OPTS[@]}" --key-file "$keyfile" "$ROOTPART"
+        cryptsetup open --allow-discards --key-file "$keyfile" "$ROOTPART" "$ROOTMAP"
     else
+        # real install: the passphrase is the only keyslot. No helper keyfile
+        # is ever added (an earlier version left a dead second slot behind).
         read -r -s -p "LUKS passphrase: " pass1; echo
         read -r -s -p "LUKS passphrase (again): " pass2; echo
         [ "$pass1" = "$pass2" ] || die "passphrases do not match"
-        printf '%s' "$pass1" | cryptsetup luksFormat --type luks2 --batch-mode "$ROOTPART"
-        printf '%s' "$pass1" | cryptsetup luksAddKey "$ROOTPART" "$keyfile"
+        [ ${#pass1} -ge 8 ] || die "passphrase too short (minimum 8 characters)"
+        printf '%s' "$pass1" | cryptsetup luksFormat "${LUKS_OPTS[@]}" "$ROOTPART"
+        printf '%s' "$pass1" | cryptsetup open --allow-discards --key-file - "$ROOTPART" "$ROOTMAP"
+        unset pass1 pass2
     fi
-    cryptsetup open "$ROOTPART" "$ROOTMAP" --key-file "$keyfile"
     ROOTDEV="/dev/mapper/$ROOTMAP"
 else
     ROOTDEV="$ROOTPART"
@@ -291,18 +379,27 @@ for sub in @ @home @root @srv @cache @log @tmp @containers @vm @snapshots; do
     btrfs subvolume create "/mnt/$sub"
 done
 umount /mnt
-mount -o subvol=@,compress=zstd:1,noatime "$ROOTDEV" /mnt
+mount -o "subvol=@,$BTRFS_OPTS" "$ROOTDEV" /mnt
 mkdir -p /mnt/{boot,home,root,srv,var/cache,var/log,var/tmp,var/lib/docker,var/lib/containers,var/lib/libvirt/images,.snapshots}
-mount -o subvol=@home,compress=zstd:1,noatime "$ROOTDEV" /mnt/home
-mount -o subvol=@root,noatime "$ROOTDEV" /mnt/root
-mount -o subvol=@srv,noatime "$ROOTDEV" /mnt/srv
-mount -o subvol=@cache,noatime "$ROOTDEV" /mnt/var/cache
-mount -o subvol=@log,noatime "$ROOTDEV" /mnt/var/log
-mount -o subvol=@tmp,noatime "$ROOTDEV" /mnt/var/tmp
-mount -o subvol=@containers,noatime "$ROOTDEV" /mnt/var/lib/docker
-mount -o subvol=@vm,nodatacow,noatime "$ROOTDEV" /mnt/var/lib/libvirt/images
-mount -o subvol=@snapshots,noatime "$ROOTDEV" /mnt/.snapshots
-mount "$ESP" /mnt/boot
+mount -o "subvol=@home,$BTRFS_OPTS" "$ROOTDEV" /mnt/home
+mount -o "subvol=@root,$BTRFS_OPTS" "$ROOTDEV" /mnt/root
+mount -o "subvol=@srv,$BTRFS_OPTS" "$ROOTDEV" /mnt/srv
+mount -o "subvol=@cache,$BTRFS_OPTS" "$ROOTDEV" /mnt/var/cache
+mount -o "subvol=@log,$BTRFS_OPTS" "$ROOTDEV" /mnt/var/log
+mount -o "subvol=@tmp,$BTRFS_OPTS" "$ROOTDEV" /mnt/var/tmp
+mount -o "subvol=@containers,$BTRFS_OPTS" "$ROOTDEV" /mnt/var/lib/docker
+mount -o "subvol=@vm,noatime,discard=async" "$ROOTDEV" /mnt/var/lib/libvirt/images
+# no-CoW for VM images is a per-directory attribute, not a mount option
+# (btrfs applies nodatacow filesystem-wide, first mount wins)
+chattr +C /mnt/var/lib/libvirt/images
+mount -o "subvol=@snapshots,$BTRFS_OPTS" "$ROOTDEV" /mnt/.snapshots
+# pacman never changes the mode of a directory that already exists: the
+# mountpoints created above must carry the modes the filesystem package expects
+chmod 1777 /mnt/var/tmp
+chmod 750 /mnt/root /mnt/.snapshots
+# ESP: root-only (kernels, initramfs, and on the test path the keyfile); vfat has
+# no per-file modes, the mount masks are the permission. genfstab records them.
+mount -o fmask=0077,dmask=0077 "$ESP" /mnt/boot
 
 # mkinitcpio hooks go in BEFORE pacstrap so the kernel's own mkinitcpio hook
 # inside the transaction builds with OUR hooks, not the base defaults
@@ -314,7 +411,7 @@ if [ "$DEVICE_ENCRYPT" -eq 1 ]; then
     # mount it (autodetect prunes vfat otherwise) — learned the hard way
     MODULES="vfat nls_cp437 nls_ascii"
 fi
-mkdir -p /mnt/etc/mkinitcpio.conf.d
+install -d -m 755 /mnt/etc/mkinitcpio.conf.d
 {
     printf 'HOOKS=(%s)\n' "$HOOKS"
     [ -n "$MODULES" ] && printf 'MODULES=(%s)\n' "$MODULES"
@@ -322,18 +419,17 @@ mkdir -p /mnt/etc/mkinitcpio.conf.d
         printf 'FILES=(/etc/cryptsetup-keys.d/samurai-root.key)\n'
     fi
 } > /mnt/etc/mkinitcpio.conf.d/10-samurai.conf
+chmod 644 /mnt/etc/mkinitcpio.conf.d/10-samurai.conf
 
 ### LUKS boot wiring (before postinstall: boot entries reference the keyfile) ###
 if [ "$DEVICE_ENCRYPT" -eq 1 ] && [ "$AUTOKEY" -eq 1 ]; then
-    mkdir -p /mnt/boot/keys /mnt/etc/cryptsetup-keys.d
-    cp "$keyfile" /mnt/boot/keys/samurai.key
-    chmod 600 /mnt/boot/keys/samurai.key
-    # the unlock key is ALSO embedded in the initramfs (FILES= below): the
+    install -d -m 700 /mnt/boot/keys /mnt/etc/cryptsetup-keys.d
+    install -m 600 "$keyfile" /mnt/boot/keys/samurai.key
+    # the unlock key is ALSO embedded in the initramfs (FILES= above): the
     # ESP-mount-in-initramfs path proved fragile; reading the key from the
     # initramfs itself is deterministic. Same threat model: both live on the
     # unencrypted ESP. Real installs use the passphrase prompt or TPM (spec 09).
-    cp "$keyfile" /mnt/etc/cryptsetup-keys.d/samurai-root.key
-    chmod 600 /mnt/etc/cryptsetup-keys.d/samurai-root.key
+    install -m 600 "$keyfile" /mnt/etc/cryptsetup-keys.d/samurai-root.key
 fi
 
 ### Base install ###
@@ -345,12 +441,6 @@ log "installing base system"
 # Module providers CONFLICT with each other (all provide NVIDIA-MODULE):
 # prebuilt modules are used only when EVERY selected kernel has one;
 # otherwise nvidia-open-dkms builds for all selected kernels (+ headers).
-NVIDIA_MODE=$(python3 - "$PROFILE" <<'PY'
-import sys, tomllib
-p = tomllib.loads(open(sys.argv[1]).read())
-print(p.get("hardware", {}).get("nvidia", "auto"))
-PY
-) || die "hardware read failed"
 case "$NVIDIA_MODE" in
     yes) WANT_NVIDIA=1 ;;
     no) WANT_NVIDIA=0 ;;
@@ -398,37 +488,33 @@ GPU_PKGS+=("${NVIDIA_PKGS[@]}")
 # archive-pinned installs (spec 11 update-from-archive): the profile's
 # repos.arch_mirror replaces the live mirrorlist so pacstrap AND the target
 # download from the pinned snapshot; the updater rewrites it on first update
-ARCH_MIRROR=$(python3 - "$PROFILE" <<'PY'
-import sys, tomllib
-p = tomllib.loads(open(sys.argv[1]).read())
-print(p.get("repos", {}).get("arch_mirror", "auto"))
-PY
-)
 if [ "$ARCH_MIRROR" != "auto" ] && [ -n "$ARCH_MIRROR" ]; then
     log "mirrors: pinning to $ARCH_MIRROR"
     # strip a trailing slash and append $repo/os/$arch: pacman only expands
     # those placeholders when the Server line contains them — a plain URL
     # makes it fetch <server>/<repo>.db (the 404 we chased for an hour)
     printf 'Server = %s\n' "${ARCH_MIRROR%/}/\$repo/os/\$arch" > /etc/pacman.d/mirrorlist
+    chmod 644 /etc/pacman.d/mirrorlist
 fi
 
-# Desktop choice decides the offline path: the baked cache covers the KDE
-# release default set (Genor 2026-11-20: base version installable without
-# network). Other choices fall back to the network.
-read -r DESKTOP < <(python3 - "$PROFILE" <<'PY'
-import sys, tomllib
-p = tomllib.loads(open(sys.argv[1]).read())
-print(p.get("packages", {}).get("desktop", "kde"))
-PY
-) || die "desktop read failed"
+# One package set for both paths (offline repo or mirrors): base, kernels,
+# firmware + microcode, GPU stacks, bootloader, snapshots, shells, zram.
+BASE_PKGS=(base "${KERNEL_ARR[@]}" linux-firmware mkinitcpio
+    "${GPU_PKGS[@]}" "${KERNEL_HEADERS[@]}"
+    amd-ucode intel-ucode zram-generator pacman-contrib sudo fish zsh python pciutils
+    "${BLDR_PKGS[@]}" snapper snap-pac)
 
 OFFLINE_DIR=/usr/share/samurai/pkg-cache
 OFFLINE_OK=0
+PACSTAT=1
 # The offline ISO carries a local pacman repository (samurai-offline.db +
 # packages). pacman RESOLVES the exact set against it, the same way the online
 # path resolves against the mirrors: only what this machine needs is
 # installed (one NVIDIA provider, chosen kernels, chosen bootloader), not the
 # whole cache. postinstall uses the same repo through SAMURAI_PACMAN_CONF.
+# Desktop choice decides the offline path: the baked cache covers the KDE
+# release default set (Genor 2026-11-20: base version installable without
+# network). Other choices fall back to the network.
 OFFLINE_CONF=/etc/samurai-offline-pacman.conf      # inside the target
 OFFLINE_MNT=/var/cache/samurai-offline             # inside the target
 if [ "$DESKTOP" = kde ] && [ -f "$OFFLINE_DIR/samurai-offline.db" ]; then
@@ -442,8 +528,11 @@ if [ "$DESKTOP" = kde ] && [ -f "$OFFLINE_DIR/samurai-offline.db" ]; then
     # is already in the cache dir, so nothing is copied or downloaded.
     mount --bind "$OFFLINE_DIR" "/mnt$OFFLINE_MNT"
     mount -o remount,bind,ro "/mnt$OFFLINE_MNT"
-    # signatures were verified upstream when the cache was built; the ISO
-    # itself is the trust anchor
+    # Trust model of the offline repository: packages and their signatures
+    # were verified against the Arch, CachyOS and Samurai keyrings when
+    # ci/build-iso.sh downloaded them; the ISO image (sha256 + signature)
+    # is the trust anchor at install time, so this transaction does not
+    # re-verify per package. The repo config is deleted after postinstall.
     printf '%s\n' '[options]' 'Architecture = auto' 'SigLevel = Never' \
         'LocalFileSigLevel = Never' "CacheDir = $OFFLINE_MNT/" '' \
         '[samurai-offline]' "Server = file://$OFFLINE_MNT" > "/mnt$OFFLINE_CONF"
@@ -462,19 +551,15 @@ if [ "$DESKTOP" = kde ] && [ -f "$OFFLINE_DIR/samurai-offline.db" ]; then
     # --root would run hooks against the live ISO; --sysroot runs them in the
     # target (kernel images + initramfs land in the target's /boot)
     pacman --config "$OFFLINE_CONF" --sysroot /mnt -Sy --noconfirm 2>&1 | TLOG "$LOG"
-    pacman --config "$OFFLINE_CONF" --sysroot /mnt -S --noconfirm --needed \
-        base "${KERNEL_ARR[@]}" linux-firmware mkinitcpio \
-        "${GPU_PKGS[@]}" "${KERNEL_HEADERS[@]}" amd-ucode intel-ucode zram-generator pacman-contrib sudo fish zsh python pciutils \
-        "${BLDR_PKGS[@]}" snapper snap-pac archlinux-keyring cachyos-keyring 2>&1 | TLOG "$LOG"
+    pacman --config "$OFFLINE_CONF" --sysroot /mnt -S --noconfirm --needed -- \
+        "${BASE_PKGS[@]}" archlinux-keyring cachyos-keyring 2>&1 | TLOG "$LOG"
     PACSTAT=${PIPESTATUS[0]}
     set -e
-    # Package hooks may start a GPG agent inside the target chroot. Its
-    # /dev/null descriptors pin this devtmpfs bind, so stop it from the same
-    # root/homedir namespace before unmounting.
-    chroot /mnt gpgconf --homedir /etc/pacman.d/gnupg --kill gpg-agent >/dev/null 2>&1 || true
+    kill_target_gpg_agent
     umount /mnt/proc
     umount /mnt/sys
     umount /mnt/run
+    umount /mnt/dev 2>/dev/null || umount -l /mnt/dev 2>/dev/null || log "WARNING: /mnt/dev bind still busy (left for the final umount -R)"
     if [ "$PACSTAT" -eq 0 ]; then
         OFFLINE_OK=1
         log "offline install: closure installed from baked cache"
@@ -485,25 +570,33 @@ if [ "$DESKTOP" = kde ] && [ -f "$OFFLINE_DIR/samurai-offline.db" ]; then
     fi
 fi
 if [ "$OFFLINE_OK" -ne 1 ]; then
-    pacman -Sy --noconfirm --needed archlinux-keyring 2>/dev/null || true
-    pacstrap -K /mnt base "${KERNEL_ARR[@]}" linux-firmware mkinitcpio \
-        "${GPU_PKGS[@]}" "${KERNEL_HEADERS[@]}" "${PIN_PKGS[@]}" amd-ucode intel-ucode zram-generator pacman-contrib sudo fish zsh python pciutils \
-        "${BLDR_PKGS[@]}" snapper snap-pac 2>&1 | TLOG "$LOG"
+    pacman -Sy --noconfirm --needed archlinux-keyring 2>&1 | TLOG "$LOG" \
+        || log "WARNING: live keyring refresh failed (pacstrap verifies every package anyway)"
+    set +e
+    # no `--` here: pacstrap appends --config/--cachedir/--noconfirm AFTER the
+    # package list, and a `--` would turn them into package names. Every name
+    # in BASE_PKGS is a literal or comes from the validator's allowlists.
+    pacstrap -K /mnt "${BASE_PKGS[@]}" "${PIN_PKGS[@]}" 2>&1 | TLOG "$LOG"
+    PACSTAT=${PIPESTATUS[0]}
+    set -e
 fi
-[ -d /mnt/etc ] || die "install failed (offline and network paths both)"
-# The live ISO's pacman config enables CachyOS and Samurai. pacstrap's -C
-# affects package resolution only; it does not install that config into the
-# target. Copy it in both online and offline installs so the repos remain
-# enabled after reboot (ADR-0007).
-cp /etc/pacman.conf /mnt/etc/pacman.conf
-mkdir -p /mnt/etc/pacman.d
-cp -a /etc/pacman.d/. /mnt/etc/pacman.d/ 2>/dev/null || true
+[ "$PACSTAT" -eq 0 ] && [ -x /mnt/usr/bin/pacman ] || die "base install failed (exit $PACSTAT)"
+# The installed system gets its OWN pacman.conf (installer/pacman.conf.target):
+# stock options, unprivileged downloads, CheckSpace; repos core/extra/multilib/
+# cachyos in order. The live conf's archiso workarounds (curl XferCommand) stay
+# on the live medium. [samurai] is appended by postinstall (ADR-0007). Only the
+# mirrorlist is taken from the live system (reflector/pinned mirror), never
+# the live keyring or ISO-only hooks.
+PACMAN_CONF_TARGET=/usr/share/samurai/pacman.conf.target
+[ -f "$PACMAN_CONF_TARGET" ] || die "missing $PACMAN_CONF_TARGET on the live medium"
+install -m 644 "$PACMAN_CONF_TARGET" /mnt/etc/pacman.conf
+install -d -m 755 /mnt/etc/pacman.d
+install -m 644 /etc/pacman.d/mirrorlist /mnt/etc/pacman.d/mirrorlist
 
 # the postinstall runs in the TARGET: bring it + its deps over first
 # (same bug class as above: the target has neither the script nor the
 # baked [samurai] key/mirrorlist — the live ISO is not visible in the chroot)
-cp /usr/local/bin/samurai-postinstall /mnt/usr/local/bin/
-chmod 755 /mnt/usr/local/bin/samurai-postinstall
+install -m 755 /usr/local/bin/samurai-postinstall /mnt/usr/local/bin/samurai-postinstall
 # every samurai CLI tool + the app catalog: the installed system has the
 # toolbox from the first boot, even before samurai-tools arrives from the
 # repo (postinstall's pac passes --overwrite for exactly these paths: pacman
@@ -516,44 +609,63 @@ if [ -d /usr/share/samurai/catalog ]; then
     install -d /mnt/usr/share/samurai/catalog
     install -m 644 /usr/share/samurai/catalog/*.toml /mnt/usr/share/samurai/catalog/
 fi
-mkdir -p /mnt/usr/lib/samurai/interventions
-cp /usr/lib/samurai/interventions/* /mnt/usr/lib/samurai/interventions/ 2>/dev/null || true
-mkdir -p /mnt/usr/share/samurai
-cp /usr/share/samurai/build-key.txt /mnt/usr/share/samurai/ 2>/dev/null || true
-cp /usr/share/samurai/samurai-mirrorlist /mnt/usr/share/samurai/ 2>/dev/null || true
+install -d -m 755 /mnt/usr/lib/samurai/interventions /mnt/usr/share/samurai
+for f in /usr/lib/samurai/interventions/*; do
+    [ -f "$f" ] && cp -- "$f" /mnt/usr/lib/samurai/interventions/
+done
+for f in build-key.txt samurai-mirrorlist; do
+    [ -f "/usr/share/samurai/$f" ] && install -m 644 "/usr/share/samurai/$f" /mnt/usr/share/samurai/
+done
 
 genfstab -U /mnt >> /mnt/etc/fstab
 log "fstab written"
 
 ### Apply the profile in the target ###
-mkdir -p /mnt/var/lib/samurai
-cp "$PROFILE" /mnt/var/lib/samurai/install-profile.toml
+# The stored profile is root-only and never carries the password hash: it is
+# needed exactly once (now), and a world-readable sha512crypt hash is an
+# offline cracking target for every local user and sandboxed app.
+install -d -m 755 /mnt/var/lib/samurai
+( umask 077; grep -v '^password_hash = ' "$PROFILE" > /mnt/var/lib/samurai/install-profile.toml )
+chmod 600 /mnt/var/lib/samurai/install-profile.toml
 # pass the install-time facts to postinstall (never re-derive them in the
 # chroot: blkid/lsblk there gave garbage rd.luks params once already)
 ROOT_UUID=$(blkid -s UUID -o value "$ROOTDEV")
 LUKS_UUID=""; ESP_UUID=""
 [ "$DEVICE_ENCRYPT" -eq 1 ] && LUKS_UUID=$(cryptsetup luksUUID "$ROOTPART")
 ESP_UUID=$(blkid -s UUID -o value "$ESP")
-cat > /mnt/etc/samurai-install-env <<EOF
+[ -n "$ROOT_UUID" ] && [ -n "$ESP_UUID" ] || die "could not read the root/ESP UUIDs"
+[ "$DEVICE_ENCRYPT" -eq 0 ] || [ -n "$LUKS_UUID" ] || die "could not read the LUKS UUID"
+# The password hash travels in this root-only file (postinstall deletes the
+# line once the user exists), never in a process argument list or the
+# stored profile.
+PI_PWHASH=$(python3 - "$PROFILE" <<'PY'
+import sys, tomllib
+print(tomllib.loads(open(sys.argv[1], "rb").read().decode()).get("user", {}).get("password_hash", ""))
+PY
+) || die "profile read failed"
+( umask 077; cat > /mnt/var/lib/samurai/install-env <<EOF
 SAMURAI_ROOT_UUID=$ROOT_UUID
 SAMURAI_LUKS_UUID=$LUKS_UUID
 SAMURAI_ESP_UUID=$ESP_UUID
 SAMURAI_ENCRYPT=$DEVICE_ENCRYPT
 SAMURAI_AUTOKEY=$AUTOKEY
+SAMURAI_PWHASH=$PI_PWHASH
 EOF
-chmod 644 /mnt/etc/samurai-install-env
+)
+unset PI_PWHASH
 log "running samurai-postinstall"
 PI_CONF=""
 [ "$OFFLINE_OK" -eq 1 ] && PI_CONF="$OFFLINE_CONF"
 set +e
 arch-chroot /mnt env SAMURAI_CHROOT=1 SAMURAI_OFFLINE=$OFFLINE_OK SAMURAI_PACMAN_CONF="$PI_CONF" \
+    SAMURAI_SERIAL_CONSOLE="${SAMURAI_SERIAL_CONSOLE:-0}" \
     /usr/local/bin/samurai-postinstall /var/lib/samurai/install-profile.toml 2>&1 | TLOG "$LOG"
 # postinstall's exit status, not tee's: a FATAL in the target must fail the install
 PI_STAT=${PIPESTATUS[0]}
 set -e
 if [ "$OFFLINE_OK" -eq 1 ]; then
     # the medium's repo is install-time only: the installed system never sees it
-    chroot /mnt gpgconf --homedir /etc/pacman.d/gnupg --kill gpg-agent >/dev/null 2>&1 || true
+    kill_target_gpg_agent
     umount "/mnt$OFFLINE_MNT" 2>/dev/null || umount -l "/mnt$OFFLINE_MNT"
     rmdir "/mnt$OFFLINE_MNT" 2>/dev/null || true
     rm -f "/mnt$OFFLINE_CONF" /mnt/var/lib/pacman/sync/samurai-offline.db
@@ -566,6 +678,7 @@ fi
 for k in "${KERNEL_ARR[@]}"; do
     [ -s "/mnt/boot/vmlinuz-$k" ] || die "kernel image missing after postinstall: /boot/vmlinuz-$k"
     [ -s "/mnt/boot/initramfs-$k.img" ] || die "initramfs missing after postinstall: /boot/initramfs-$k.img"
+    [ -s "/mnt/boot/initramfs-$k-fallback.img" ] || die "fallback initramfs missing after postinstall: /boot/initramfs-$k-fallback.img"
 done
 
 ### first snapshot: install-complete (spec 06). Created LIVE-side: the install
@@ -574,11 +687,13 @@ done
 ### ZERO snapshots — the rescue/rollback path (M4) depends on this one.
 ### Layout matches snapper: /@snapshots/<num>/{info.xml,snapshot-subvol}.
 if [ -d /mnt/.snapshots ] && mountpoint -q /mnt/.snapshots; then
-    # NOTE: grep exits 1 when no numbered dirs exist (fresh install) — without
-    # "|| true" that status kills this set -e script silently (seen 2026-11-18:
-    # driver died right after postinstall with no message).
-    NEXTID=$(ls -1 /mnt/.snapshots 2>/dev/null | grep -E '^[0-9]+$' | sort -n | tail -1 || true)
-    NEXTID=$(( ${NEXTID:-0} + 1 ))
+    NEXTID=0
+    for d in /mnt/.snapshots/*/; do
+        d=$(basename "$d")
+        case "$d" in *[!0-9]*|'') continue ;; esac
+        [ "$d" -gt "$NEXTID" ] && NEXTID=$d
+    done
+    NEXTID=$((NEXTID + 1))
     log "snapshots: creating install-complete snapshot #$NEXTID"
     mkdir -p "/mnt/.snapshots/$NEXTID"
     btrfs subvolume snapshot -r /mnt "/mnt/.snapshots/$NEXTID/snapshot" 2>&1 | TLOG "$LOG" \
@@ -588,7 +703,7 @@ if [ -d /mnt/.snapshots ] && mountpoint -q /mnt/.snapshots; then
 <snapshot>
   <type>single</type>
   <num>$NEXTID</num>
-  <date>$(date '+%Y-%m-%d %H:%M:%S')</date>
+  <date>$(date -u '+%Y-%m-%d %H:%M:%S')</date>
   <uid>0</uid>
   <desc>install-complete</desc>
   <cleanup>number</cleanup>
@@ -598,14 +713,14 @@ else
     log "WARNING: /mnt/.snapshots not mounted — skipping install-complete snapshot"
 fi
 
-# postinstall's pacman-key --init can start another target-root agent.
-chroot /mnt gpgconf --homedir /etc/pacman.d/gnupg --kill gpg-agent >/dev/null 2>&1 || true
+kill_target_gpg_agent
 log "install complete; unmounting"
 # keep the install log on the installed system too (spec 08 forensics: the
 # log previously lived only on the live medium and vanished after reboot)
-mkdir -p /mnt/var/log/samurai
-cp "$LOG" /mnt/var/log/samurai/install.log
+install -d -m 755 /mnt/var/log/samurai
+install -m 600 "$LOG" /mnt/var/log/samurai/install.log
 umount -R /mnt
 [ "$DEVICE_ENCRYPT" -eq 1 ] && cryptsetup close "$ROOTMAP"
+[ -n "${keyfile:-}" ] && shred -u "$keyfile"
 log "DONE"
 echo "==> Install complete. Reboot to start the new system."

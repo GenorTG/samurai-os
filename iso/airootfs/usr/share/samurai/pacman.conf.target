@@ -1,0 +1,48 @@
+#
+# /etc/pacman.conf — Samurai OS installed system
+#
+# Source: installer/pacman.conf.target (shipped on the ISO as
+# /usr/share/samurai/pacman.conf.target; samurai-install copies it into the
+# target). The live ISO keeps its own /etc/pacman.conf (archiso workarounds:
+# curl XferCommand, CheckSpace off) — none of that belongs on a real system:
+# the stock internal downloader runs unprivileged as DownloadUser.
+#
+# [samurai] is appended by samurai-postinstall (spec 02, ADR-0007): below
+# every other repository so it can only ADD packages, never shadow Arch's.
+# See the pacman.conf(5) manpage for option and repository directives.
+
+[options]
+HoldPkg     = pacman glibc
+Architecture = auto
+Color
+CheckSpace
+ParallelDownloads = 5
+DownloadUser = alpm
+SigLevel    = Required DatabaseOptional
+LocalFileSigLevel = Optional
+
+#
+# REPOSITORIES — order matters: Arch first, additions below (spec 02)
+#
+[core]
+Include = /etc/pacman.d/mirrorlist
+
+[extra]
+Include = /etc/pacman.d/mirrorlist
+
+# Samurai OS: on by default (Steam, Wine, 32-bit GPU drivers in `samurai apps`)
+[multilib]
+Include = /etc/pacman.d/mirrorlist
+
+# CachyOS: the default kernel (linux-cachyos) and its NVIDIA modules. Packages
+# are signed with the CachyOS key (cachyos-keyring); the database signature is
+# verified when the mirror serves one.
+[cachyos]
+SigLevel = Required DatabaseOptional
+Server = https://nl.cachyos.org/repo/$arch/$repo
+Server = https://aur.cachyos.org/repo/$arch/$repo
+Server = https://mirror.cachyos.org/repo/$arch/$repo
+Server = https://build.cachyos.org/repo/$arch/$repo
+
+#[chaotic-aur]
+#Include = /etc/pacman.d/chaotic-mirrorlist

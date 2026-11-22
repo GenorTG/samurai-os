@@ -1,32 +1,174 @@
 #!/usr/bin/env bash
 # samurai-notifier — user-session update checker (spec 03).
-# Never installs anything: uses checkupdates (temp db copy) and reports counts.
-# Runs as a systemd USER timer (5 min after login, then every 6 h).
+# Never installs anything and never touches the real pacman databases:
+# checkupdates (pacman-contrib) syncs a private copy under $CHECKUPDATES_DB.
+# Runs from a systemd USER timer (5 min after login, then every 6 h), or by
+# hand: `samurai status`.
 set -euo pipefail
+export LC_ALL=C
+
+usage() {
+    cat <<'EOF'
+usage: samurai-notifier [--check | --status] [--json] [--help]
+
+Checks for pending updates as the logged-in user and writes the result to
+$XDG_STATE_HOME/samurai/update-check (key=value) and update-check.json.
+
+  (no option)   check, write the state files, send a desktop notification
+                when something needs attention
+  --check       check and print the state; no notification
+  --status      print the last check and the last `samurai update` report
+                without checking anything (`samurai status`)
+  --json        print the state as JSON
+  --help        this text
+
+Exit codes: 0 state written (also when updates are pending), 1 the check
+itself failed (network, pacman-contrib missing), 2 usage. Refuses to run as
+root: the notifier belongs to the user session.
+EOF
+}
+
+MODE=notify
+JSON=0
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --check) MODE=check ;;
+        --status) MODE=status ;;
+        --json) JSON=1 ;;
+        -h|--help) usage; exit 0 ;;
+        *) printf 'samurai-notifier: unknown option: %s\n' "$1" >&2; usage >&2; exit 2 ;;
+    esac
+    shift
+done
+
+if [ "$(id -u)" -eq 0 ]; then
+    printf 'samurai-notifier: runs in the user session, never as root (use: samurai update)\n' >&2
+    exit 2
+fi
 
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/samurai"
-mkdir -p "$STATE_DIR"
+CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/samurai"
+mkdir -p "$STATE_DIR" "$CACHE_DIR" && chmod 0700 "$STATE_DIR" "$CACHE_DIR"
+export CHECKUPDATES_DB="$CACHE_DIR/checkupdates-db"
+STATE="$STATE_DIR/update-check"
+REPORT=/var/lib/samurai/update-report.json
+LAST_UPDATE=/var/lib/samurai/last-update
+STALE_DAYS=14
 
-ARCH=0; SAMURAI=0; SECURITY=0; REBOOT=0
-mapfile -t updates < <(checkupdates 2>/dev/null || true)
-ARCH=${#updates[@]}
-for u in "${updates[@]}"; do
-    case "$u" in samurai-*) SAMURAI=$((SAMURAI+1)) ;; esac
-done
-if command -v arch-audit >/dev/null 2>&1 && [ "$ARCH" -gt 0 ]; then
-    SECURITY=$(printf '%s\n' "${updates[@]}" | awk '{print $1}' | arch-audit -u 2>/dev/null | wc -l)
+write_state() {   # ARCH SAMURAI SECURITY REBOOT STALE PACNEW ERROR CHECKED
+    {
+        printf 'checked=%s\n' "$CHECKED"
+        printf 'arch=%s\nsamurai=%s\nsecurity=%s\nreboot=%s\nstale_days=%s\npacnew=%s\nerror=%s\n' \
+            "$ARCH" "$SAMURAI" "$SECURITY" "$REBOOT" "$STALE" "$PACNEW" "$ERROR"
+    } > "$STATE.tmp" && mv -f "$STATE.tmp" "$STATE"
+    printf '{"schema": 1, "checked": "%s", "arch": %s, "samurai": %s, "security": %s, "reboot": %s, "stale_days": %s, "pacnew": %s, "error": %s}\n' \
+        "$CHECKED" "$ARCH" "$SAMURAI" "$SECURITY" "$REBOOT" "$STALE" "$PACNEW" "$ERROR" \
+        > "$STATE.json.tmp" && mv -f "$STATE.json.tmp" "$STATE.json"
+}
+
+print_state() {
+    if [ "$JSON" -eq 1 ]; then
+        [ -r "$STATE.json" ] && cat "$STATE.json" || printf '{"schema": 1, "error": 1}\n'
+    else
+        [ -r "$STATE" ] && cat "$STATE" || printf 'no update check yet\n'
+    fi
+}
+
+if [ "$MODE" = status ]; then
+    print_state
+    if [ "$JSON" -eq 0 ] && [ -r "$REPORT" ]; then
+        printf -- '--- last samurai update report (%s)\n' "$REPORT"
+        cat "$REPORT"
+    fi
+    exit 0
 fi
-# reboot pending: compare the running kernel with the newest installed one
-RUNNING=$(uname -r)
-NEWEST=$(ls /usr/lib/modules 2>/dev/null | sort -V | tail -1)
-[ "$RUNNING" != "$NEWEST" ] && REBOOT=1
 
-printf 'arch=%s samurai=%s security=%s reboot=%s\n' "$ARCH" "$SAMURAI" "$SECURITY" "$REBOOT" \
-    > "$STATE_DIR/update-check"
-if [ "$ARCH" -gt 0 ]; then
-    msg="updates available: $ARCH"
-    [ "$SECURITY" -gt 0 ] && msg="$msg (SECURITY: $SECURITY)"
-    [ "$REBOOT" -eq 1 ] && msg="$msg; reboot pending"
-    command -v notify-send >/dev/null 2>&1 && notify-send -a "Samurai OS" "$msg" || printf '%s\n' "$msg"
+ARCH=0; SAMURAI=0; SECURITY=0; REBOOT=0; STALE=0; PACNEW=0; ERROR=0
+CHECKED=$(date -Is)
+
+notify() {   # $1 summary, $2 body — desktop notification when a session bus is reachable
+    if command -v notify-send >/dev/null 2>&1 && [ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ]; then
+        notify-send -a "Samurai OS" -i system-software-update "$1" "$2" || true
+    fi
+}
+
+# checkupdates comes from pacman-contrib (a hard dependency of samurai-tools);
+# without it the check cannot run at all, so fail loudly: error state file,
+# non-zero exit (the timer shows a failed unit), stderr for the journal and a
+# desktop notification instead of a silent "no updates".
+if ! command -v checkupdates >/dev/null 2>&1; then
+    ERROR=1
+    write_state
+    [ "$MODE" = check ] || [ "$JSON" -eq 1 ] && print_state
+    printf 'samurai-notifier: checkupdates is missing — install pacman-contrib (sudo pacman -S pacman-contrib); update checks are DISABLED until then\n' >&2
+    [ "$MODE" = notify ] && notify "Samurai OS: update checks disabled" \
+        "checkupdates is missing — install pacman-contrib (sudo pacman -S pacman-contrib)"
+    exit 1
+fi
+
+# checkupdates: 0 updates listed, 2 nothing to do, 1 error (network, lock)
+set +e
+UPDATES=$(timeout 600 checkupdates 2>"$CACHE_DIR/checkupdates.err")
+RC=$?
+set -e
+case "$RC" in
+    0)
+        while read -r pkg _; do
+            [ -n "$pkg" ] || continue
+            case "$pkg" in samurai-*) SAMURAI=$((SAMURAI + 1)) ;; *) ARCH=$((ARCH + 1)) ;; esac
+        done <<< "$UPDATES"
+        ;;
+    2) : ;;
+    *) ERROR=1 ;;
+esac
+
+if [ "$ERROR" -eq 0 ] && [ $((ARCH + SAMURAI)) -gt 0 ] && command -v arch-audit >/dev/null 2>&1; then
+    # vulnerable packages that have an upgrade available
+    SECURITY=$(timeout 120 arch-audit -u 2>/dev/null | grep -c . || true)
+fi
+
+# reboot pending: the running kernel's modules were replaced, or the last
+# update finished after boot and asked for a reboot
+if [ ! -d "/usr/lib/modules/$(uname -r)" ]; then
+    REBOOT=1
+elif [ -r "$REPORT" ] && [ -r "$LAST_UPDATE" ]; then
+    BOOT_EPOCH=$(( $(date +%s) - $(cut -d. -f1 /proc/uptime) ))
+    if [ "$(stat -c %Y "$LAST_UPDATE")" -gt "$BOOT_EPOCH" ] && grep -q '"reboot_needed": true' "$REPORT"; then
+        REBOOT=1
+    fi
+fi
+
+if [ -r "$LAST_UPDATE" ]; then
+    STALE=$(( ( $(date +%s) - $(stat -c %Y "$LAST_UPDATE") ) / 86400 ))
+elif [ -r /var/log/pacman.log ]; then
+    FIRST=$(head -1 /var/log/pacman.log | sed -n 's/^\[\([^]]*\)\].*/\1/p')
+    [ -n "$FIRST" ] && STALE=$(( ( $(date +%s) - $(date -d "$FIRST" +%s 2>/dev/null || date +%s) ) / 86400 ))
+fi
+if command -v pacdiff >/dev/null 2>&1; then
+    PACNEW=$(pacdiff -o 2>/dev/null | grep -c '\.pacnew$' || true)
+fi
+
+write_state
+if [ "$MODE" = check ] || [ "$JSON" -eq 1 ]; then
+    print_state
+fi
+[ "$ERROR" -eq 0 ] || { printf 'samurai-notifier: checkupdates failed (rc=%s): %s\n' "$RC" \
+    "$(tail -1 "$CACHE_DIR/checkupdates.err" 2>/dev/null)" >&2; exit 1; }
+[ "$MODE" = notify ] || exit 0
+
+MSG=""
+if [ $((ARCH + SAMURAI)) -gt 0 ]; then
+    MSG="$((ARCH + SAMURAI)) update(s) available"
+    [ "$SAMURAI" -gt 0 ] && MSG="$MSG ($SAMURAI from Samurai OS)"
+    [ "$SECURITY" -gt 0 ] && MSG="$MSG — $SECURITY SECURITY fix(es)"
+fi
+[ "$REBOOT" -eq 1 ] && MSG="${MSG:+$MSG; }reboot pending"
+[ "$STALE" -ge "$STALE_DAYS" ] && MSG="${MSG:+$MSG; }not updated for $STALE days"
+[ "$PACNEW" -gt 0 ] && MSG="${MSG:+$MSG; }$PACNEW .pacnew file(s) to merge"
+if [ -n "$MSG" ]; then
+    printf '%s\n' "$MSG"
+    if command -v notify-send >/dev/null 2>&1 && [ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ]; then
+        notify-send -a "Samurai OS" -i system-software-update "Samurai OS" "$MSG — run: samurai update" || true
+    fi
 fi
 exit 0

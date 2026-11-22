@@ -50,12 +50,53 @@ case "$cmd" in
         echo "files: +created -deleted m=modified"
         ;;
 
+    restore-file)
+        require_snapper
+        [ "$(id -u)" -eq 0 ] || die "restore-file needs root"
+        [ $# -ge 2 ] || die "usage: samurai snap restore-file <snapshot-id> </absolute/path>"
+        id="$1"; path="$2"
+        case "$path" in /*) : ;; *) die "path must be absolute: $path" ;; esac
+        src="/.snapshots/$id/snapshot$path"
+        [ -e "$src" ] || die "not in snapshot $id: $path"
+        if [ -e "$path" ]; then
+            backup="$path.before-restore-$(date +%Y%m%d-%H%M%S)"
+            cp -a -- "$path" "$backup"
+            log "current version kept as $backup"
+        fi
+        cp -a -- "$src" "$path"
+        log "restored $path from snapshot $id"
+        ;;
+
     repair)
         require_snapper
-        snapper -c root list >/dev/null 2>&1 || { snapper -c root create-config /; log "recreated snapper config root"; }
-        snapper -c root set-config 'TIMELINE_CREATE="no"' 'NUMBER_LIMIT="20"' 'NUMBER_LIMIT_IMPORTANT="10"' 'EMPTY_PRE_POST_CLEANUP="yes"' 2>&1 | log || true
+        [ "$(id -u)" -eq 0 ] || die "repair needs root"
+        # snapperd only loads the configs listed in SNAPPER_CONFIGS
+        # (/etc/conf.d/snapper on Arch); a config file written by hand (the
+        # installer does that inside the chroot, where create-config cannot
+        # run) is "Unknown config" over D-Bus until it is listed there.
+        SYSCONF=/etc/conf.d/snapper
+        if [ -f "/etc/snapper/configs/$CONFIG" ] \
+           && ! grep -qsE "^SNAPPER_CONFIGS=\"?([^\"]* )?$CONFIG( [^\"]*)?\"?\$" "$SYSCONF"; then
+            if grep -qs '^SNAPPER_CONFIGS=' "$SYSCONF"; then
+                sed -i -E "s/^SNAPPER_CONFIGS=\"?([^\"]*)\"?\$/SNAPPER_CONFIGS=\"\\1 $CONFIG\"/; s/=\" /=\"/" "$SYSCONF"
+            else
+                printf 'SNAPPER_CONFIGS="%s"\n' "$CONFIG" >> "$SYSCONF"
+            fi
+            # a running snapperd read the old list at startup; D-Bus restarts it on demand
+            systemctl stop snapperd.service >/dev/null 2>&1 || true
+            log "registered config $CONFIG in $SYSCONF"
+        fi
+        if ! snapper -c "$CONFIG" list >/dev/null 2>&1; then
+            if [ -f "/etc/snapper/configs/$CONFIG" ]; then
+                snapper -c "$CONFIG" list 2>&1 | log || true
+                die "config $CONFIG exists but snapper cannot use it (see above) — check SUBVOLUME/FSTYPE in /etc/snapper/configs/$CONFIG"
+            fi
+            snapper -c "$CONFIG" create-config /
+            log "recreated snapper config $CONFIG"
+        fi
+        snapper -c "$CONFIG" set-config 'TIMELINE_CREATE="no"' 'NUMBER_LIMIT="20"' 'NUMBER_LIMIT_IMPORTANT="10"' 'EMPTY_PRE_POST_CLEANUP="yes"' 2>&1 | log || true
         systemctl enable snapper.timer snapper-cleanup.timer >/dev/null 2>&1 || true
-        log "snapper config root repaired"
+        log "snapper config $CONFIG repaired"
         ;;
 
     rollback)
@@ -68,7 +109,6 @@ case "$cmd" in
         if booted_from_snapshot; then
             die "booted from a snapshot: boot the CURRENT system first, then roll back (or use samurai rescue rollback)"
         fi
-        root_dev=$(findmnt -n -o SOURCE / | sed 's/\[.*\]//')
         # "|| true": grep exits 1 when OPTIONS has no subvol= entry — under
         # set -e that would kill this script silently (same bug class as the
         # NEXTID one, fixed 2026-11-18 in installer/samurai-install)
@@ -104,6 +144,6 @@ case "$cmd" in
         ;;
 
     *)
-        die "usage: samurai snap {list|create|delete|diff|repair|rollback} [args]" 2
+        die "usage: samurai snap {list|create|delete|diff|restore-file|repair|rollback} [args]" 2
         ;;
 esac

@@ -221,6 +221,18 @@ h1.w-display {
   line-height: 1.08;
   letter-spacing: -0.01em;
 }
+/* sub-headings inside sections (h3 next to a code block or list) */
+.h3-sub {
+  font-size: 1.35rem;
+}
+/* prose that should not run wider than a comfortable line */
+.measure {
+  max-width: 48rem;
+}
+/* the inline <svg> that only holds <defs>: out of flow, no size */
+.svg-defs {
+  position: absolute;
+}
 .w-eyebrow {
   font-size: 0.78rem;
   font-weight: 600;

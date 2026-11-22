@@ -1,18 +1,23 @@
 name: Publish Samurai testing repository
 
+# Spec 02 steps 3-6 for the testing channel. Secrets live in the protected
+# `samurai-testing` environment (docs/KEYS.md); forks and pull requests never
+# trigger this workflow and could not read the environment if they did.
 on:
   push:
     branches: [main]
     paths:
       - "pkgbuilds/**"
       - "updates/**"
+      - "catalog/**"
       - "ci/build-repo.sh"
       - "ci/publish-repo.sh"
+      - "ci/check-no-epoch"
+      - "ci/check-no-shadowing"
       - ".github/workflows/publish-testing-repo.yml"
   workflow_dispatch:
 
-permissions:
-  contents: read
+permissions: {}
 
 concurrency:
   group: samurai-testing-repository
@@ -20,10 +25,12 @@ concurrency:
 
 jobs:
   publish-testing:
-    if: github.ref == 'refs/heads/main'
+    if: github.repository == 'GenorTG/samurai-os' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: samurai-testing
     timeout-minutes: 90
+    permissions:
+      contents: read
     steps:
       - name: Check environment secrets
         id: secrets
@@ -43,7 +50,11 @@ jobs:
 
       - name: Check out source
         if: steps.secrets.outputs.ready == 'true'
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          # The checkout is bind-mounted into the build container; never leave
+          # GITHUB_TOKEN in .git/config where a PKGBUILD could read it.
+          persist-credentials: false
 
       - name: Set monotonic testing package release
         if: steps.secrets.outputs.ready == 'true'
@@ -60,9 +71,13 @@ jobs:
           test -n "$SAMURAI_SIGNING_SUBKEY"
           key_home="$HOME/samurai-keys/gnupg"
           install -d -m 700 "$key_home" "$HOME/samurai-keys"
-          printf '%s\n' "$SAMURAI_SIGNING_SUBKEY" | gpg --batch --homedir "$key_home" --import
-          primary_fingerprint="$(gpg --batch --homedir "$key_home" --with-colons --list-keys 'build@smart-samurai.pl' | awk -F: '$1 == "fpr" { print $10; exit }')"
+          printf '%s\n' "$SAMURAI_SIGNING_SUBKEY" | gpg --batch --homedir "$key_home" --import 2>/dev/null
+          # The primary fingerprint is pinned by the keyring package, not taken
+          # from whatever the secret contains: a swapped secret fails here.
+          primary_fingerprint="$(sed -n -E 's/^_primary_fpr=([0-9A-F]{40})[[:space:]]*$/\1/p' pkgbuilds/samurai-keyring/PKGBUILD | head -1)"
           test -n "$primary_fingerprint"
+          gpg --batch --homedir "$key_home" --with-colons --list-secret-keys "$primary_fingerprint" | grep -q '^ssb:' ||
+            { echo "::error::the SAMURAI_SIGNING_SUBKEY secret holds no secret subkey of $primary_fingerprint"; exit 1; }
           printf '%s\n' "$primary_fingerprint" > "$HOME/samurai-keys/primary-fingerprint.txt"
 
       - name: Build signed package repository
@@ -73,6 +88,7 @@ jobs:
         if: steps.secrets.outputs.ready == 'true'
         shell: bash
         env:
+          # fine-grained token, GenorTG/samurai-repo only, Contents read/write
           GH_TOKEN: ${{ secrets.SAMURAI_REPO_TOKEN }}
         run: |
           set -euo pipefail

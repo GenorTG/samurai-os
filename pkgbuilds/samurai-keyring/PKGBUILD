@@ -7,39 +7,55 @@
 
 pkgname=samurai-keyring
 pkgver=20261117
-pkgrel=1
+pkgrel=2
 pkgdesc="Samurai OS build keyring for pacman"
 arch=(any)
 url="https://github.com/GenorTG/samurai-os"
 license=(MIT)
 groups=(samurai-base)
 depends=('pacman')
-source=("build-key.txt" "samurai-populate.hook")
-sha256sums=('6443d0a8cfba757e4280a9fafc4208e85ba216b5ad83abe70fcf411f7795fd6a'
-           'cba519f060917199d2e7f611b106d36f4bcd526f7363a718e2c0d80e90f15a5b')
+install=samurai-keyring.install
+source=("build-key.txt")
+sha256sums=('6443d0a8cfba757e4280a9fafc4208e85ba216b5ad83abe70fcf411f7795fd6a')
 # The extension is .txt on purpose: makepkg treats *.asc sources as detached
 # PGP signatures and would try to verify a nonexistent 'build-key'.
-# Any key material change (rotation per docs/KEYS.md) must bump this sum in the
-# same commit; the CI keyring check re-verifies it against the offline keyring.
+# Any key material change (rotation per docs/KEYS.md) must bump this sum AND
+# the pinned fingerprint below in the same commit; ci/check-keyring verifies
+# both against the key file, docs/KEYS.md and the installer.
+
+# Pinned primary fingerprint. package() refuses a key file that does not carry
+# exactly this primary, so a swapped build-key.txt can never become a keyring.
+_primary_fpr=DFE8C148C042AA3C199AAEA08436E12731EDD3FA
 
 package() {
     local keydir=usr/share/pacman/keyrings
-    cd "$pkgdir"
+    local gnupghome
+    gnupghome="$(mktemp -d -p "$srcdir" gnupg.XXXXXX)"
+    chmod 700 "$gnupghome"
 
+    local got
+    got="$(gpg --batch --homedir "$gnupghome" --show-keys --with-colons "$srcdir/build-key.txt" \
+        | awk -F: '/^pub:/ {p=1; next} p && /^fpr:/ {print $10; exit}')"
+    if [ "$got" != "$_primary_fpr" ]; then
+        error "build-key.txt primary fingerprint '$got' is not the pinned '$_primary_fpr'"
+        return 1
+    fi
+
+    cd "$pkgdir" || return 1
     install -dm755 "$keydir"
 
     # <name>.gpg: gpg keyring file pacman-key --populate samurai imports
-    gpg --batch --homedir "$srcdir" --import-options import-export \
+    gpg --batch --homedir "$gnupghome" --import-options import-export \
         --import "$srcdir/build-key.txt" > "$keydir/samurai.gpg"
+    [ -s "$keydir/samurai.gpg" ] || { error "empty keyring export"; return 1; }
 
     # <name>-trusted: fingerprint:ownertrust lines (Arch keyring format).
     # Full trust (4) for the build key; ultimate (5) is never shipped.
-    printf 'DFE8C148C042AA3C199AAEA08436E12731EDD3FA:4:\n' > "$keydir/samurai-trusted"
+    printf '%s:4:\n' "$_primary_fpr" > "$keydir/samurai-trusted"
 
     # <name>-revoked: empty until a key is compromised; rotate via runbook.
     : > "$keydir/samurai-revoked"
 
-    # Populate hook: imports the keyring + trusted into the local keyring.
-    install -Dm644 "$srcdir/samurai-populate.hook" \
-        etc/pacman.d/hooks/samurai-populate.hook
+    chmod 644 "$keydir"/samurai.gpg "$keydir"/samurai-trusted "$keydir"/samurai-revoked
+    gpgconf --homedir "$gnupghome" --kill all 2>/dev/null || true
 }

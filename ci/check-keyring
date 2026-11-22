@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# The build key is pinned in several places that must agree, or installed
+# systems stop verifying [samurai] (spec 02 "Signing keys", docs/KEYS.md):
+#   - the public key shipped by pkgbuilds/samurai-keyring/build-key.txt,
+#   - the fingerprint written into samurai-trusted by that PKGBUILD,
+#   - the fingerprint docs/KEYS.md documents,
+#   - the fingerprint installer/samurai-postinstall locally signs,
+#   - the ISO's staged copy of the key (iso/airootfs/usr/share/samurai/build-key.txt).
+# Also: the shipped key must carry a signing subkey that is not expired, and the
+# PKGBUILD's sha256 of build-key.txt must match the file (a rotation that forgets
+# the checksum fails the package build later, in a far less obvious place).
+# Usage: ci/check-keyring   (needs gpg; no private material involved)
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_root"
+keyfile=pkgbuilds/samurai-keyring/build-key.txt
+pkgbuild=pkgbuilds/samurai-keyring/PKGBUILD
+fail=0
+note() { echo "  $*"; }
+bad() { echo "FAIL: $*" >&2; fail=1; }
+
+# 1. fingerprints of the shipped key
+colons="$(gpg --batch --show-keys --with-colons --with-subkey-fingerprints "$keyfile")"
+primary="$(awk -F: '/^pub:/ {p=1; next} p && /^fpr:/ {print $10; exit}' <<<"$colons")"
+[ -n "$primary" ] || { bad "no primary key in $keyfile"; exit 1; }
+note "shipped primary: $primary"
+now="$(date +%s)"
+sign_ok=0
+while IFS=: read -r kind validity _ _ _ _ expires _ _ _ _ caps _; do
+    [ "$kind" = sub ] || continue
+    [[ "$caps" == *s* ]] || continue
+    case "$validity" in e|r) note "signing subkey state '$validity' (expired/revoked)"; continue ;; esac
+    if [ -n "$expires" ] && [ "$expires" -le "$now" ]; then note "signing subkey expired at $(date -u -d "@$expires" +%F)"; continue; fi
+    sign_ok=1
+    [ -n "$expires" ] && note "signing subkey valid until $(date -u -d "@$expires" +%F)"
+done <<<"$colons"
+[ "$sign_ok" -eq 1 ] || bad "$keyfile carries no usable signing subkey (rotate: docs/KEYS.md)"
+
+# 2. the PKGBUILD pins the same fingerprint in samurai-trusted
+pinned="$(sed -n -E 's/^_primary_fpr=([0-9A-F]{40})[[:space:]]*$/\1/p' "$pkgbuild" | head -1)"
+[ -n "$pinned" ] || bad "$pkgbuild has no _primary_fpr=<40 hex> line"
+[ "$pinned" = "$primary" ] || bad "PKGBUILD _primary_fpr pins '$pinned', key file has $primary"
+
+# 3. the PKGBUILD's checksum of the key file is current
+want="$(sha256sum "$keyfile" | cut -d' ' -f1)"
+grep -q "$want" "$pkgbuild" || bad "PKGBUILD sha256sums lacks the current build-key.txt sum $want"
+
+# 4. docs and installer agree (read-only: they are other owners' files)
+grep -q "$primary" docs/KEYS.md || bad "docs/KEYS.md does not mention $primary"
+grep -q "lsign-key $primary" installer/samurai-postinstall || bad "installer/samurai-postinstall does not lsign $primary"
+
+# 5. the ISO stages the identical public key
+iso_key=iso/airootfs/usr/share/samurai/build-key.txt
+if [ -f "$iso_key" ]; then
+    cmp -s "$keyfile" "$iso_key" || bad "$iso_key differs from $keyfile"
+else
+    note "$iso_key not present (not staged in this tree)"
+fi
+
+[ "$fail" -eq 0 ] || { echo "==> FAIL: keyring consistency" >&2; exit 1; }
+echo "==> keyring OK: $primary pinned consistently"

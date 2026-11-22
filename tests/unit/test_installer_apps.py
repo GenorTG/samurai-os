@@ -73,6 +73,10 @@ def test_postinstall_syntax_and_apps_step():
 COPIES = {
     "iso/airootfs/usr/local/bin/samurai": "updates/samurai",
     "iso/airootfs/usr/local/bin/samurai-apps": "updates/samurai-apps",
+    "iso/airootfs/usr/local/bin/samurai-update": "updates/samurai-update",
+    "iso/airootfs/usr/local/bin/samurai-snap": "updates/samurai-snap",
+    "iso/airootfs/usr/local/bin/samurai-rescue": "updates/samurai-rescue",
+    "iso/airootfs/usr/local/bin/samurai-notifier": "updates/samurai-notifier",
     "iso/airootfs/usr/local/bin/validate-profile.py": "installer/validate-profile.py",
     "iso/airootfs/usr/local/bin/samurai-postinstall": "installer/samurai-postinstall",
     "iso/airootfs/usr/share/samurai/catalog/samurai.toml": "catalog/samurai.toml",
@@ -100,9 +104,19 @@ def test_pkgbuild_sources_and_checksums():
     origin = {"0001-update-mechanism-demo.toml": "updates/interventions/0001-update-mechanism-demo.toml",
               "0001-update-mechanism-demo.sh": "updates/interventions/0001-update-mechanism-demo.sh",
               "garuda-setup-wizard.toml": "catalog/garuda-setup-wizard.toml",
-              "samurai.toml": "catalog/samurai.toml"}
+              "samurai.toml": "catalog/samurai.toml",
+              # shell completions live beside the PKGBUILD (makepkg finds local sources there)
+              "samurai.bash": "pkgbuilds/samurai-tools/samurai.bash",
+              "samurai.fish": "pkgbuilds/samurai-tools/samurai.fish"}
     for src, digest in zip(sources, sums):
         path = REPO / origin.get(src, f"updates/{src}")
+        assert path.is_file(), src
         assert hashlib.sha256(path.read_bytes()).hexdigest() == digest, src
     assert "samurai-apps" in sources
     assert "/usr/share/samurai/catalog/samurai.toml" in text
+    # every staged source is installed by package()
+    for src in sources:
+        assert re.search(rf"install -Dm\d+ {re.escape(src)}\b", text), f"{src} not installed by package()"
+    assert "pacman-contrib" in _bash_array(text, "depends"), "checkupdates (samurai-notifier) needs pacman-contrib"
+    assert "usr/share/bash-completion/completions/samurai" in text
+    assert "usr/share/fish/vendor_completions.d/samurai.fish" in text

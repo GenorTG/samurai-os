@@ -1,0 +1,15 @@
+version = 1
+[system]
+hostname = "h"
+timezone = "UTC"
+[disk]
+device = "/dev/vda"
+encryption = true
+[boot]
+kernels = ["linux"]
+[user]
+name = "u"
+groups = ["wheel", "docker"]
+root_locked = false
+[packages]
+install = ["samurai-release"]

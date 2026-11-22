@@ -1,6 +1,24 @@
 [Unit]
-Description=Samurai OS update checker (user)
+Description=Samurai OS update checker (user session, never installs anything)
+Documentation=file:///usr/local/bin/samurai-notifier
+# a desktop session is not required: the state file is written either way
 
 [Service]
 Type=oneshot
 ExecStart=/usr/local/bin/samurai-notifier
+TimeoutStartSec=15min
+Nice=19
+IOSchedulingClass=idle
+# the checker only needs its own state/cache dirs and the network
+NoNewPrivileges=yes
+RestrictSUIDSGID=yes
+ProtectSystem=strict
+ReadWritePaths=%S/samurai %C/samurai
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native

@@ -1,30 +1,56 @@
 #!/usr/bin/env bash
 # Spec 02: [samurai] must never contain a package name that exists in Arch's
 # core/extra/multilib — [samurai] sits ABOVE Arch, so a name clash would shadow
-# Arch's package silently. CI fails on any clash.
+# Arch's package silently. CI fails on any.
+#
 # Usage: ci/check-no-shadowing [pkgbuilds-dir]
+# Arch's package names come from pacman (inside the build container) or from
+# the file $SAMURAI_ARCH_NAMES (default /tmp/arch-names; ci/test-repo-checks.sh
+# fills it from the repo dbs on hosts without pacman).
+#
+# `provides=` / `replaces=` of an Arch name are reported as WARNINGS: they do
+# not shadow by name, but `replaces` makes pacman swap the Arch package for ours
+# on `-Syu`. Each one is a deliberate decision recorded in the PKGBUILD.
 set -euo pipefail
 
 dir="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../pkgbuilds" && pwd)}"
+arch_names="${SAMURAI_ARCH_NAMES:-/tmp/arch-names}"
 
-# Query the live repo db for Arch's package names (run inside the build
-# container; outside it, /tmp/arch-names is used if present).
-arch_names=/tmp/arch-names
-if [ ! -f "$arch_names" ]; then
-    pacman -Slq core extra multilib > "$arch_names"
+if [ ! -s "$arch_names" ]; then
+    command -v pacman >/dev/null ||
+        { echo "error: no pacman and no $arch_names (run ci/test-repo-checks.sh to fetch Arch's names)" >&2; exit 2; }
+    # multilib is disabled in the stock archlinux image: query what exists
+    for repo in core extra multilib; do
+        pacman -Slq "$repo" 2>/dev/null || true
+    done | sort -u > "$arch_names"
+    [ -s "$arch_names" ] || { echo "error: pacman returned no package names (run pacman -Sy first)" >&2; exit 2; }
 fi
+
+# first value of a `key=(...)` / `key=...` PKGBUILD array, names only
+pkgbuild_names() {   # $1 = PKGBUILD, $2 = key
+    sed -n -E "s/^$2=\(?([^)#]*)\)?.*/\1/p" "$1" | tr -d "'\"" | tr ' ' '\n' | sed 's/[<>=].*//' | grep -v '^$' || true
+}
 
 fail=0
 for p in "$dir"/*/PKGBUILD; do
-    name=$(grep -E '^pkgname=' "$p" | head -1 | cut -d= -f2)
-    if grep -qx "$name" "$arch_names"; then
-        echo "SHADOWING: '$name' exists in Arch repos and would be shadowed by [samurai]" >&2
-        fail=1
-    fi
+    for name in $(pkgbuild_names "$p" pkgname); do
+        if grep -qx "$name" "$arch_names"; then
+            echo "SHADOWING: '$name' exists in Arch repos and would be shadowed by [samurai]" >&2
+            fail=1
+        fi
+    done
+    pkg="$(pkgbuild_names "$p" pkgname | head -1)"
+    for key in replaces provides; do
+        for name in $(pkgbuild_names "$p" "$key"); do
+            if grep -qx "$name" "$arch_names"; then
+                echo "WARNING: '$pkg' ${key}=${name}, an Arch package name (deliberate? see the PKGBUILD)" >&2
+            fi
+        done
+    done
 done
 
 if [ "$fail" -eq 1 ]; then
     echo "==> FAIL: shadowing check" >&2
     exit 1
 fi
-echo "==> no-shadowing OK ($(find "$dir" -name PKGBUILD | wc -l) packages)"
+echo "==> no-shadowing OK ($(find "$dir" -name PKGBUILD | wc -l) packages against $(wc -l < "$arch_names") Arch names)"

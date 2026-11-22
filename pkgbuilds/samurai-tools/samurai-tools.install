@@ -1,3 +1,6 @@
+# shellcheck shell=bash
+# sourced by pacman (no shebang); the ISO-copied toolbox paths are unowned
+# files that would otherwise conflict with this package's own copies.
 _remove_legacy_unowned_files() {
     local file
     for file in \

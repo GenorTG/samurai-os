@@ -2,8 +2,10 @@
 Description=Run the Samurai OS update checker 5 min after login, then every 6 h
 
 [Timer]
-OnBootSec=5min
+OnStartupSec=5min
 OnUnitActiveSec=6h
+RandomizedDelaySec=10min
+AccuracySec=5min
 Persistent=true
 
 [Install]

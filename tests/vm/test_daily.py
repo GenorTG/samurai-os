@@ -61,7 +61,7 @@ def test_daily_driver(mirror):
         ga = vm.ensure_qga()
         _, out = ga.exec(
             "curl -fsSL http://10.0.2.2:8966/profile-daily.toml -o /tmp/p.toml "
-            "&& SAMURAI_TEST_AUTOKEY=1 samurai-install --profile /tmp/p.toml --disk /dev/vda --yes "
+            "&& SAMURAI_TEST_AUTOKEY=1 SAMURAI_SERIAL_CONSOLE=1 samurai-install --profile /tmp/p.toml --disk /dev/vda --yes "
             ">/dev/null 2>&1; rc=$?; echo DAILY-INSTALL-RC=$rc; "
             "[ $rc -eq 0 ] || tail -n 60 /var/log/samurai/install.log",
             timeout=INSTALL_TIMEOUT,

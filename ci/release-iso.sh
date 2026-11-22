@@ -93,6 +93,7 @@ the public key that ships in the [\`samurai-keyring\` package](https://github.co
 (primary fingerprint \`DFE8C148 C042AA3C 199AAEA0 8436E127 31EDD3FA\`, see \`docs/KEYS.md\`):
 
 \`\`\`sh
+curl -fsSLO https://raw.githubusercontent.com/GenorTG/samurai-os/main/pkgbuilds/samurai-keyring/build-key.txt
 gpg --import build-key.txt
 gpg --verify SHA256SUMS.sig SHA256SUMS
 \`\`\`"
@@ -135,9 +136,12 @@ copy it onto a Ventoy stick), boot it and run \`samurai-install\` for the guided
   repository on the medium, so a machine gets only what it needs.
 - **\`samurai apps\`**: optional apps and bundles (\`@gaming\`, \`@dev\`, \`@creative\`, \`@office\`,
   \`@media\`, \`@streaming\`) from one catalog, at install time (\`[packages] apps\`) or any time later.
-- **firewalld in the default install profile**: zone \`public\`, inbound closed except DHCPv6; SSH
-  only when \`ssh_server = true\`. The guided wizard does not ask about the firewall yet and leaves
-  it off; set \`[security] firewall = "firewalld"\` in a profile to get it.
+- **firewalld on by default**: zone \`public\`, inbound closed except DHCPv6; SSH only when
+  \`ssh_server = true\`. The guided wizard asks (default yes); profiles set \`[security] firewall\`.
+- **Base system defaults on every install**: CPU microcode (\`amd-ucode\`/\`intel-ucode\`, loaded by
+  the mkinitcpio \`microcode\` hook), zram swap (\`zram-generator\`, half of RAM up to 8 GiB, zstd),
+  NTP via \`systemd-timesyncd\`, and \`pacman-contrib\` (\`checkupdates\` for the notifier, a weekly
+  \`paccache\` timer for the package cache).
 - **NVIDIA auto-detect**: the NVIDIA stack goes on only when an NVIDIA GPU is present; DKMS when a
   chosen kernel has no prebuilt module (\`[hardware] nvidia = "auto" | "yes" | "no"\`).
 - Day-one desktop: Firefox, PipeWire, Spectacle, Noto fonts + emoji, Flatpak, power profiles,

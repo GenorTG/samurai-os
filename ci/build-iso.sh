@@ -51,6 +51,10 @@ cp -f "$repo_root/iso/pacman.conf" "$profile_dir/airootfs/etc/pacman.conf"
 for f in samurai-install samurai-postinstall validate-profile.py; do
     cp -f "$repo_root/installer/$f" "$bin_dir/$f"
 done
+# target pacman.conf template (samurai-install installs it on the new system)
+mkdir -p "$profile_dir/airootfs/usr/share/samurai"
+cp -f "$repo_root/installer/pacman.conf.target" "$profile_dir/airootfs/usr/share/samurai/pacman.conf.target"
+cp -f "$repo_root/installer/profile-default.toml" "$profile_dir/airootfs/usr/share/samurai/profile-default.toml"
 # every executable tool under updates/ (samurai, samurai-*): new tools ship
 # without editing this list
 for f in "$repo_root"/updates/samurai "$repo_root"/updates/samurai-*; do

@@ -1,0 +1,119 @@
+name: CI
+
+# Fast checks on every push and pull request: no ISO builds, no VMs, no secrets.
+# Pull requests from forks run with a read-only token and see no environment.
+on:
+  push:
+  pull_request:
+
+permissions: {}
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scripts:
+    name: Shell, PKGBUILD and workflow checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: bash -n on every shell script
+        shell: bash
+        run: |
+          set -euo pipefail
+          n=0
+          while IFS= read -r f; do
+            [ -f "$f" ] || continue   # iso/airootfs carries dangling symlinks on purpose
+            if head -c 200 "$f" | head -1 | grep -qE '^#!.*\b(ba)?sh\b'; then
+              bash -n "$f"; n=$((n + 1))
+            fi
+          done < <(git ls-files)
+          echo "bash -n OK on $n scripts"
+
+      - name: shellcheck (warnings fail in ci/, scripts/, pkgbuilds/; errors fail everywhere)
+        shell: bash
+        run: |
+          set -euo pipefail
+          shellcheck --version | head -2
+          own=(ci/*.sh ci/check-no-epoch ci/check-no-shadowing ci/check-keyring
+               scripts/install-hooks.sh scripts/git-hooks/pre-commit
+               pkgbuilds/samurai-release/samurai-apply-os-release)
+          shellcheck -S warning -x "${own[@]}"
+          others=()
+          while IFS= read -r f; do
+            [ -f "$f" ] || continue
+            case "$f" in ci/*|scripts/*|pkgbuilds/samurai-release/samurai-apply-os-release) continue ;; esac
+            head -1 "$f" | grep -qE '^#!.*\b(ba)?sh\b' && others+=("$f")
+          done < <(git ls-files)
+          shellcheck -S error "${others[@]}"
+
+      - name: Python byte-compile
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r f; do
+            [ -f "$f" ] || continue
+            case "$f" in *.py) ;; *) head -1 "$f" | grep -qE '^#!.*python' || continue ;; esac
+            python3 -I -m py_compile "$f"
+          done < <(git ls-files)
+
+      - name: Workflows parse as YAML and pin every action to a commit SHA
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -I -c 'import yaml' 2>/dev/null || sudo apt-get install -y -q python3-yaml
+          python3 -I - .github/workflows/*.yml <<'PY'
+          import re, sys, yaml
+          bad = 0
+          for path in sys.argv[1:]:
+              with open(path) as fh:
+                  yaml.safe_load(fh)
+              for n, line in enumerate(open(path), 1):
+                  # only the YAML key, not text that happens to contain "uses:"
+                  m = re.match(r"\s*-?\s*uses:\s*([^\s#]+)", line)
+                  if m and not m.group(1).startswith("./"):
+                      if not re.search(r"@[0-9a-f]{40}\s*#\s*v?\d", line):
+                          print(f"{path}:{n}: action not pinned to a commit SHA with a version comment: {line.strip()}")
+                          bad += 1
+          sys.exit(1 if bad else 0)
+          PY
+
+      - name: Repo rules (no epoch, no shadowing of Arch names, keyring pins agree)
+        shell: bash
+        run: |
+          set -euo pipefail
+          ci/test-repo-checks.sh
+          ci/check-keyring
+
+      - name: Site structure, accessibility and CSP
+        run: python3 -I ci/check-site.py site/index.html
+
+  unit:
+    name: Unit tests and profile validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Install pytest
+        run: python3 -m pip install --disable-pip-version-check "pytest>=8,<10"
+      - name: Unit tests
+        run: python3 -m pytest -q tests/unit
+      - name: Default install profile validates
+        run: python3 installer/validate-profile.py installer/profile-default.toml

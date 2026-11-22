@@ -1,0 +1,21 @@
+# shellcheck shell=bash
+# Same scheme as archlinux-keyring: (re)populate pacman's keyring from the
+# shipped samurai.gpg / samurai-trusted / samurai-revoked on install AND on
+# every upgrade, so a rotated or revoked key (docs/KEYS.md) takes effect with
+# the keyring package itself, before the next signed database is fetched.
+# Skipped when pacman-key has not been initialised yet (image builds,
+# pacstrap without -K); the installer runs `pacman-key --init` first.
+
+_populate() {
+    if usr/bin/pacman-key -l >/dev/null 2>&1; then
+        usr/bin/pacman-key --populate samurai
+    fi
+}
+
+post_install() {
+    _populate
+}
+
+post_upgrade() {
+    _populate
+}

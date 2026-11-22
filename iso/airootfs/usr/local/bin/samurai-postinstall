@@ -4,14 +4,38 @@
 # (and it inherits the driver's tee when driven by samurai-install).
 #
 # Security posture: profile is validated BEFORE we get here (the driver calls
-# validate-profile.py); values are never shell-interpolated beyond quoting;
-# sudoers is checked with visudo -c; root is locked unless root_locked=false.
+# validate-profile.py); values are never shell-interpolated beyond quoting and
+# every profile-derived argument list is terminated with `--`; sudoers is
+# checked with visudo -c; root is always locked; nothing that fails is hidden
+# behind `|| true` unless the failure is a documented no-op.
+# Environment (set by samurai-install):
+#   SAMURAI_CHROOT=1            running inside the install chroot
+#   SAMURAI_OFFLINE=1           offline medium: no repo sync, no catalog apps
+#   SAMURAI_PACMAN_CONF=<file>  offline repository config for pac()
+#   SAMURAI_SERIAL_CONSOLE=1    VM harness: add console=ttyS0 to the cmdline
+# Install-time facts (UUIDs, encryption flags, the user's password hash) are
+# read from /var/lib/samurai/install-env (0600, written by the driver).
 set -euo pipefail
 
 PROFILE="${1:?usage: samurai-postinstall /path/to/profile.toml}"
 [ -f "$PROFILE" ] || { echo "profile not found: $PROFILE" >&2; exit 1; }
+INSTALL_ENV=/var/lib/samurai/install-env
 
 log() { printf '%s %s\n' "$(date -Is)" "$*"; }
+fatal() { log "FATAL: $1"; exit "${2:-1}"; }
+# systemctl enable with the failure visible and fatal: a typo'd unit name used
+# to disable snapshot cleanup silently (2026-11-22)
+enable_unit() {
+    local out
+    if out=$(systemctl enable "$@" 2>&1); then
+        log "service: $* enabled"
+    else
+        fatal "systemctl enable $* failed: $out" 18
+    fi
+}
+# key=value reader for the install-env file (never sourced: a config file is
+# data, not code)
+env_get() { { grep -s "^$1=" "$INSTALL_ENV" || true; } | head -1 | cut -d= -f2-; }
 # Offline installs: samurai-install binds the medium's local repository into
 # the target and passes its pacman config here. Every install below goes
 # through pac, so online and offline installs resolve the same package sets.
@@ -25,86 +49,81 @@ SAMURAI_OWNED_OVERWRITE=(
     --overwrite '/usr/share/samurai/catalog/*'
     --overwrite '/usr/lib/samurai/interventions/*'
 )
+# pac -S [options] -- packages : options first, then the package list after
+# `--` so a package name can never be parsed as a pacman option
 pac() {
+    local op="${1:?}"; shift
     local extra=()
-    [ "${1:-}" = -S ] && extra=("${SAMURAI_OWNED_OVERWRITE[@]}")
+    [ "$op" = -S ] && extra=("${SAMURAI_OWNED_OVERWRITE[@]}")
     if [ -n "${SAMURAI_PACMAN_CONF:-}" ]; then
-        pacman --config "$SAMURAI_PACMAN_CONF" "$@" "${extra[@]}"
+        pacman --config "$SAMURAI_PACMAN_CONF" "$op" "${extra[@]}" "$@"
     else
-        pacman "$@" "${extra[@]}"
+        pacman "$op" "${extra[@]}" "$@"
     fi
 }
+pac_install() { pac -S --noconfirm --needed -- "$@"; }
+installed() { pacman -Q -- "$1" >/dev/null 2>&1; }
 log "samurai-postinstall starting"
 
-read -r HOSTNAME TZ LOCALE KB \
-    < <(python3 - "$PROFILE" <<'PY'
+# Pull validated values in ONE read (strict regexes already passed, so no
+# value contains whitespace or a newline; lists are space-joined). Fixed line
+# order, documented here and in the python block.
+{
+    read -r HOSTNAME
+    read -r TZ
+    read -r LOCALE
+    read -r KB
+    read -r -a KERNEL_ARR
+    read -r BLDR
+    read -r UNAME
+    read -r USHELL
+    read -r ENCRYPT
+    read -r AUTOKEY
+    read -r -a PACKAGES
+    read -r DESKTOP
+    read -r -a APPS
+    read -r FW
+    read -r SSHD
+} < <(python3 - "$PROFILE" <<'PY'
 import sys, tomllib
-p = tomllib.loads(open(sys.argv[1]).read())
-s = p.get("system", {})
-print(s.get("hostname", "samurai"), s.get("timezone", "UTC"),
-      s.get("locale", "en_US.UTF-8"), s.get("keyboard", "us"))
+p = tomllib.loads(open(sys.argv[1], "rb").read().decode())
+s, d, b, u = p.get("system", {}), p.get("disk", {}), p.get("boot", {}), p.get("user", {})
+pk, sec = p.get("packages", {}), p.get("security", {})
+print(s.get("hostname", "samurai"))
+print(s.get("timezone", "UTC"))
+print(s.get("locale", "en_US.UTF-8"))
+print(s.get("keyboard", "us"))
+print(" ".join(b.get("kernels", ["linux"])))
+print(b.get("bootloader", "limine"))
+print(u.get("name", "samurai"))
+print(u.get("shell", "bash"))
+print(int(d.get("encryption", True)))
+print(int(d.get("auto_unlock_keyfile", False)))
+print(" ".join(pk.get("install", [])))
+print(pk.get("desktop", "kde"))
+print(" ".join(pk.get("apps", [])))
+print(sec.get("firewall", "none"))
+print("yes" if sec.get("ssh_server", False) else "no")
 PY
-) || exit 1
-# kernels word-split into an array: a multi-kernel default (cachyos+zen)
-# shifted every later field in the combined read ("unsupported bootloader:
-# bash limine" — same bug class as the pacstrap target quoting)
-read -r -a KERNEL_ARR \
-    < <(python3 - "$PROFILE" <<'PY'
-import sys, tomllib
-p = tomllib.loads(open(sys.argv[1]).read())
-print(" ".join(p.get("boot", {}).get("kernels", ["linux"])))
-PY
-) || exit 1
-read -r BLDR \
-    < <(python3 - "$PROFILE" <<'PY'
-import sys, tomllib
-p = tomllib.loads(open(sys.argv[1]).read())
-print(p.get("boot", {}).get("bootloader", "limine"))
-PY
-) || exit 1
-KERNELS="${KERNEL_ARR[*]}"
-read -r UNAME USHELL UPWHASH < <(python3 - "$PROFILE" <<'PY'
-import sys, tomllib
-p = tomllib.loads(open(sys.argv[1]).read())
-u = p.get("user", {})
-print(u.get("name", "samurai"), u.get("shell", "bash"), u.get("password_hash", ""))
-PY
-) || exit 1
-read -r ENCRYPT AUTOKEY < <(python3 - "$PROFILE" <<'PY'
-import sys, tomllib
-p = tomllib.loads(open(sys.argv[1]).read())
-d = p.get("disk", {})
-print(int(bool(d.get("encryption", True))), int(bool(d.get("auto_unlock_keyfile", False))))
-PY
-) || exit 1
-read -r -a PACKAGES < <(python3 - "$PROFILE" <<'PY'
-import sys, tomllib
-p = tomllib.loads(open(sys.argv[1]).read())
-print(" ".join(p.get("packages", {}).get("install", [])))
-PY
-) || exit 1
-read -r DESKTOP < <(python3 - "$PROFILE" <<'PY'
-import sys, tomllib
-p = tomllib.loads(open(sys.argv[1]).read())
-print(p.get("packages", {}).get("desktop", "kde"))
-PY
-) || exit 1
-# catalog apps / @bundles (validated against the catalog allowlist upstream)
-read -r -a APPS < <(python3 - "$PROFILE" <<'PY'
-import sys, tomllib
-p = tomllib.loads(open(sys.argv[1]).read())
-print(" ".join(p.get("packages", {}).get("apps", [])))
-PY
-) || exit 1
+) || fatal "profile read failed"
+[ -n "$HOSTNAME" ] && [ ${#KERNEL_ARR[@]} -gt 0 ] && [ -n "$UNAME" ] || fatal "profile read incomplete"
+# the driver's facts win over the profile (it measured the real disk)
+v=$(env_get SAMURAI_ENCRYPT); [ -n "$v" ] && ENCRYPT=$v
+v=$(env_get SAMURAI_AUTOKEY); [ -n "$v" ] && AUTOKEY=$v
+UPWHASH=$(env_get SAMURAI_PWHASH)
+unset v
 
 ### identity ###
-log "identity: hostname=$HOSTNAME tz=$TZ locale=$LOCALE"
-echo "$HOSTNAME" > /etc/hostname
+log "identity: hostname=$HOSTNAME tz=$TZ locale=$LOCALE keymap=$KB"
+printf '%s\n' "$HOSTNAME" > /etc/hostname
+[ -f "/usr/share/zoneinfo/$TZ" ] || fatal "timezone file missing in the target: $TZ"
 ln -sfn "/usr/share/zoneinfo/$TZ" /etc/localtime
-sed -i "s|^#\(${LOCALE//./\\.}\)|\1|" /etc/locale.gen
-grep -q "^$LOCALE" /etc/locale.gen || echo "$LOCALE UTF-8" >> /etc/locale.gen
+# LOCALE matched ^[a-zA-Z]{2,3}(_[A-Za-z]{2,4})?\.[A-Za-z0-9-]+$ : the only
+# regex-special character it can contain is '.', escaped here
+sed -i "s|^#\(${LOCALE//./\\.} \)|\1|" /etc/locale.gen
+grep -q "^${LOCALE//./\\.} " /etc/locale.gen || fatal "locale $LOCALE is not listed in /etc/locale.gen"
 locale-gen
-echo "LANG=$LOCALE" > /etc/locale.conf
+printf 'LANG=%s\n' "$LOCALE" > /etc/locale.conf
 printf 'KEYMAP=%s\n' "$KB" > /etc/vconsole.conf
 cat > /etc/hosts <<EOF
 127.0.0.1	localhost
@@ -112,23 +131,25 @@ cat > /etc/hosts <<EOF
 127.0.1.1	$HOSTNAME.localdomain	$HOSTNAME
 EOF
 
-### [samurai] repo (spec 02): key staged from the live ISO ###
-# NOTE: the mirrorlist is NOT pre-placed — the samurai-mirrorlist package owns
-# /etc/pacman.d/samurai-mirrorlist and a pre-placed file breaks its install.
-# The bootstrap repo section carries inline Server lines instead.
+### [samurai] repo (spec 02, ADR-0007): key staged from the live ISO ###
 log "repos: enabling [samurai]"
 pacman-key --init
 if [ -f /usr/share/samurai/build-key.txt ]; then
     pacman-key --add /usr/share/samurai/build-key.txt
+    # pinned fingerprint: a swapped build-key.txt fails here (set -e)
     pacman-key --lsign-key DFE8C148C042AA3C199AAEA08436E12731EDD3FA
 fi
-# [samurai] may already be present (offline -U copies the live medium's
-# conf, which bakes the section): idempotent insert
+# Appended at the END of pacman.conf: below core/extra/multilib/cachyos, so
+# [samurai] can only add packages, never shadow an Arch one (spec 02 rule).
+# Bootstrap server list = the mirrorlist file the installer staged from the
+# ISO; once the samurai-mirrorlist package owns /etc/pacman.d/samurai-mirrorlist
+# the Include is switched to it (one source for the Server lines).
+SAMURAI_ML_BOOT=/usr/share/samurai/samurai-mirrorlist
+SAMURAI_ML=/etc/pacman.d/samurai-mirrorlist
 if ! grep -q '^\[samurai\]' /etc/pacman.conf; then
-sed -i '/^\[core\]/i [samurai]\
-Server = https://github.com/GenorTG/samurai-repo/releases/download/x86_64\
-Server = https://repo.smart-samurai.pl/samurai/x86_64\
-SigLevel = Required DatabaseRequired' /etc/pacman.conf
+    [ -f "$SAMURAI_ML_BOOT" ] || fatal "missing $SAMURAI_ML_BOOT (staged by samurai-install)"
+    printf '\n# Samurai OS repository (spec 02): signed packages AND database\n[samurai]\nSigLevel = Required DatabaseRequired\nInclude = %s\n' \
+        "$SAMURAI_ML_BOOT" >> /etc/pacman.conf
 fi
 if [ "${SAMURAI_OFFLINE:-0}" = 1 ]; then
     log "repos: offline install — no repo sync in the target"
@@ -137,17 +158,21 @@ else
 fi
 
 if [ "${#PACKAGES[@]}" -gt 0 ]; then
-    # offline -U installs already covered these; only fetch what is missing
+    # offline installs already covered these; only fetch what is missing
     MISSING=()
     for p in "${PACKAGES[@]}"; do
-        pacman -Q "$p" >/dev/null 2>&1 || MISSING+=("$p")
+        installed "$p" || MISSING+=("$p")
     done
     if [ "${#MISSING[@]}" -gt 0 ]; then
         log "installing missing [samurai] packages: ${MISSING[*]}"
-        pac -S --noconfirm --needed "${MISSING[@]}"
+        pac_install "${MISSING[@]}"
     else
         log "[samurai] packages already present (offline cache path)"
     fi
+fi
+if [ -f "$SAMURAI_ML" ] && grep -q "^Include = $SAMURAI_ML_BOOT\$" /etc/pacman.conf; then
+    sed -i "s|^Include = $SAMURAI_ML_BOOT\$|Include = $SAMURAI_ML|" /etc/pacman.conf
+    log "repos: [samurai] now uses $SAMURAI_ML (samurai-mirrorlist package)"
 fi
 
 ### desktop (spec 08: KDE Plasma default; alternatives opt-in) ###
@@ -160,7 +185,7 @@ case "$DESKTOP" in
         DESKTOP_PKGS=(plasma-meta sddm konsole dolphin kate ark gwenview okular
             firefox pipewire pipewire-pulse pipewire-alsa wireplumber spectacle
             noto-fonts noto-fonts-emoji flatpak power-profiles-daemon bluez bluez-utils)
-        pac -S --noconfirm --needed "${DESKTOP_PKGS[@]}" || { log "FATAL: KDE install failed"; exit 16; }
+        pac_install "${DESKTOP_PKGS[@]}" || fatal "KDE install failed" 16
         DM=sddm
         # SDDM greeter on Wayland under KWin with the Breeze theme (what the
         # Plasma "apply Plasma settings" button writes), so the login screen
@@ -192,89 +217,117 @@ EOF
         ;;
     gnome)
         log "desktop: GNOME"
-        pacman -S --noconfirm --needed gnome gnome-tweaks gdm || { log "FATAL: GNOME install failed"; exit 16; }
+        pac_install gnome gnome-tweaks gdm || fatal "GNOME install failed" 16
         DM=gdm
         ;;
     xfce)
         log "desktop: XFCE"
-        pacman -S --noconfirm --needed xfce4 xfce4-goodies sddm || { log "FATAL: XFCE install failed"; exit 16; }
+        pac_install xfce4 xfce4-goodies sddm || fatal "XFCE install failed" 16
         DM=sddm
         ;;
     lxqt)
         log "desktop: LXQt"
-        pacman -S --noconfirm --needed lxqt sddm || { log "FATAL: LXQt install failed"; exit 16; }
+        pac_install lxqt sddm || fatal "LXQt install failed" 16
         DM=sddm
         ;;
     none)
         log "desktop: none (CLI only)"
         ;;
     *)
-        log "FATAL: unsupported desktop: $DESKTOP"
-        exit 16
+        fatal "unsupported desktop: $DESKTOP" 16
         ;;
 esac
-[ -z "$DM" ] || { systemctl enable "$DM.service" && log "display manager: $DM enabled"; }
+[ -z "$DM" ] || enable_unit "$DM.service"
 for unit in bluetooth.service power-profiles-daemon.service; do
     if systemctl cat "$unit" >/dev/null 2>&1; then
-        systemctl enable "$unit" >/dev/null 2>&1 && log "service: $unit enabled"
+        enable_unit "$unit"
     fi
 done
 
 ### firewall (spec 09, ADR-0006: firewalld default; deny inbound except DHCPv6) ###
-FIREWALL=$(python3 - "$PROFILE" <<'PY'
-import sys, tomllib
-p = tomllib.loads(open(sys.argv[1]).read())
-s = p.get("security", {})
-print(s.get("firewall", "none"), "yes" if s.get("ssh_server", False) else "no")
-PY
-) || { log "FATAL: security read failed"; exit 17; }
-read -r FW SSHD <<<"$FIREWALL"
 case "$FW" in
     firewalld|ufw)
         FW_PKGS=("$FW")
         [ "$DESKTOP" = kde ] && FW_PKGS+=(plasma-firewall)
-        pac -S --noconfirm --needed "${FW_PKGS[@]}" || { log "FATAL: firewall install failed"; exit 17; }
+        pac_install "${FW_PKGS[@]}" || fatal "firewall install failed" 17
         if [ "$FW" = firewalld ]; then
-            # offline config: firewall-offline-cmd works without the daemon (chroot).
-            # It exits non-zero for no-ops (16 ZONE_ALREADY_SET, 11
-            # ALREADY_ENABLED), so each call is tolerated and the RESULT is checked.
-            fwo() { firewall-offline-cmd "$@" >/dev/null 2>&1 || true; }
+            # Offline config: firewall-offline-cmd works without the daemon
+            # (chroot) and writes /etc/firewalld/zones/public.xml.
+            # SYNTAX MATTERS: with --zone, removing a service is
+            # --remove-service-from-zone=NAME; plain --remove-service= is a
+            # lokkit compatibility option that firewall-offline-cmd rejects
+            # ("Can't use lokkit options with other options", rc 2) — this
+            # left ssh open in zone public on every install until 2026-11-22.
+            # Only the documented no-op codes are tolerated: 16 ZONE_ALREADY_SET,
+            # 11 ALREADY_ENABLED, 12 NOT_ENABLED.
+            fwo() {
+                local out rc=0
+                out=$(firewall-offline-cmd "$@" 2>&1) || rc=$?
+                case "$rc" in 0|11|12|16) ;; *) fatal "firewall-offline-cmd $* failed (rc=$rc): $out" 17 ;; esac
+            }
             fwo --set-default-zone=public
             for svc in $(firewall-offline-cmd --zone=public --list-services); do
-                [ "$svc" = dhcpv6-client ] || fwo --zone=public --remove-service="$svc"
+                [ "$svc" = dhcpv6-client ] || fwo --zone=public --remove-service-from-zone="$svc"
             done
             fwo --zone=public --add-service=dhcpv6-client
-            if [ "$SSHD" = yes ]; then fwo --zone=public --add-service=ssh; fi
+            [ "$SSHD" = yes ] && fwo --zone=public --add-service=ssh
+            # the RESULT is checked, exactly: default zone public, and its
+            # service list is {dhcpv6-client} (+ ssh only when the profile asked)
             FW_ZONE=$(firewall-offline-cmd --get-default-zone)
-            FW_SVCS=$(firewall-offline-cmd --zone=public --list-services)
-            [ "$FW_ZONE" = public ] || { log "FATAL: firewalld default zone is $FW_ZONE"; exit 17; }
-            case " $FW_SVCS " in *" dhcpv6-client "*) ;; *) log "FATAL: firewalld zone lacks dhcpv6-client"; exit 17 ;; esac
-            systemctl enable firewalld.service
+            FW_SVCS=$(firewall-offline-cmd --zone=public --list-services | tr ' ' '\n' | sort | tr '\n' ' ')
+            FW_WANT="dhcpv6-client "
+            [ "$SSHD" = yes ] && FW_WANT="dhcpv6-client ssh "
+            [ "$FW_ZONE" = public ] || fatal "firewalld default zone is $FW_ZONE" 17
+            [ "$FW_SVCS" = "$FW_WANT" ] || fatal "firewalld zone public allows '$FW_SVCS', wanted '$FW_WANT'" 17
+            [ -f /etc/firewalld/zones/public.xml ] || fatal "firewalld wrote no /etc/firewalld/zones/public.xml" 17
+            enable_unit firewalld.service
             log "firewall: firewalld, zone public: $FW_SVCS"
         else
-            ufw default deny incoming >/dev/null 2>&1 || true
-            ufw default allow outgoing >/dev/null 2>&1 || true
-            [ "$SSHD" = yes ] && ufw allow ssh >/dev/null 2>&1
+            # ufw's CLI mostly edits /etc/default/ufw and /etc/ufw/user.rules; in
+            # the chroot it may complain about the missing daemon, so the RESULT
+            # on disk is what gets checked, not the command status
+            ufw default deny incoming 2>&1 || log "ufw default deny incoming: nonzero (checking config)"
+            ufw default allow outgoing 2>&1 || log "ufw default allow outgoing: nonzero (checking config)"
+            if [ "$SSHD" = yes ]; then
+                ufw allow ssh 2>&1 || log "ufw allow ssh: nonzero (checking config)"
+                grep -q -- '--dport 22 ' /etc/ufw/user.rules || fatal "ufw: ssh rule missing in user.rules" 17
+            fi
             sed -i 's/^ENABLED=.*/ENABLED=yes/' /etc/ufw/ufw.conf
-            systemctl enable ufw.service
+            grep -q '^ENABLED=yes' /etc/ufw/ufw.conf || fatal "ufw.conf not enabled" 17
+            grep -q '^DEFAULT_INPUT_POLICY="DROP"' /etc/default/ufw || fatal "ufw: input policy is not DROP" 17
+            grep -q '^DEFAULT_OUTPUT_POLICY="ACCEPT"' /etc/default/ufw || fatal "ufw: output policy is not ACCEPT" 17
+            enable_unit ufw.service
             log "firewall: ufw (deny incoming)"
         fi
         ;;
     none) log "firewall: none (profile choice)" ;;
+    *) fatal "unsupported firewall: $FW" 17 ;;
 esac
 if [ "$SSHD" = yes ]; then
-    pac -S --noconfirm --needed openssh || log "ssh: openssh not installable now"
-    if pacman -Q openssh >/dev/null 2>&1; then
-        systemctl enable sshd.service && log "ssh: sshd enabled"
+    if pac_install openssh; then
+        # spec 09: key-only, no root. Root is locked anyway; passwords stay
+        # off so a fresh box is never brute-forceable before keys are placed
+        # (add them in ~/.ssh/authorized_keys from the console).
+        install -d -m 755 /etc/ssh/sshd_config.d
+        cat > /etc/ssh/sshd_config.d/10-samurai.conf <<'EOF'
+# Samurai OS (spec 09): key-only, no root login
+PermitRootLogin no
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitEmptyPasswords no
+MaxAuthTries 3
+EOF
+        enable_unit sshd.service
+        log "ssh: sshd enabled (key-only; add authorized_keys for $UNAME before relying on it)"
     else
-        log "ssh: openssh not available offline; enable after the first update"
+        log "WARNING: ssh: openssh not installable now (offline medium?); enable after the first update"
     fi
 fi
 
 # networking is a basic function (spec 09): NetworkManager always on when
 # the package is present (the baked offline set carries it)
-if pacman -Q networkmanager >/dev/null 2>&1; then
-    systemctl enable NetworkManager.service && log "network: NetworkManager enabled"
+if installed networkmanager; then
+    enable_unit NetworkManager.service
 fi
 
 ### brand the installed system (spec 14: welcome, not raw instructions) ###
@@ -317,7 +370,7 @@ if [ "${#APPS[@]}" -gt 0 ]; then
         # mirror has old-but-correct databases; vendor scripts wait for first boot
         if SAMURAI_CHROOT=1 SAMURAI_APPS_NOTES_FILE="$FIRSTBOOT_NOTES" /usr/local/bin/samurai-apps \
                 install --yes --with-upgrade --ignore-db-age --skip-unavailable --no-user-scripts \
-                "${APPS[@]}" 2>&1; then
+                -- "${APPS[@]}" 2>&1; then
             log "apps: done"
             APPS_DONE=1
         else
@@ -339,154 +392,179 @@ if [ "${#APPS[@]}" -gt 0 ]; then
 fi
 
 ### users ###
-if ! id -u "$UNAME" >/dev/null 2>&1; then
-    # The profile may carry a crypt password hash (sha512) for unattended
-    # installs; plaintext passwords are FORBIDDEN in profiles. Interactive
-    # installs prompt instead. A generated password lands at 0600 in /root.
+if ! id -u -- "$UNAME" >/dev/null 2>&1; then
+    useradd -m -G wheel -s "/bin/$USHELL" -- "$UNAME"
     if [ -n "$UPWHASH" ]; then
-        useradd -m -G wheel -s "/bin/$USHELL" "$UNAME"
-        usermod -p "$UPWHASH" "$UNAME"
+        # crypt hash from the profile (unattended installs): fed to chpasswd -e
+        # on stdin — never on a command line (visible in /proc/*/cmdline)
+        printf '%s:%s\n' "$UNAME" "$UPWHASH" | chpasswd -e
         log "user $UNAME created (password from profile hash)"
     else
-        genpass() { tr -dc 'A-Za-z0-9' </dev/urandom | head -c 24; }
-        UPASS="$(genpass)"
-        useradd -m -G wheel -s "/bin/$USHELL" "$UNAME"
+        # interactive installs without a hash: a generated password lands at
+        # 0600 in /root; plaintext passwords are FORBIDDEN in profiles
+        # no open-ended producer in the pipe: tr would die of SIGPIPE under pipefail
+        UPASS="$(head -c 96 /dev/urandom | base64 -w0 | tr -dc 'A-Za-z0-9' | head -c 24)"
+        [ ${#UPASS} -eq 24 ] || fatal "password generation failed"
         printf '%s:%s\n' "$UNAME" "$UPASS" | chpasswd
-        umask 077 && printf '%s : %s\n' "$UNAME" "$UPASS" > /root/initial-credentials && umask 022
+        ( umask 077; printf '%s : %s\n' "$UNAME" "$UPASS" > /root/initial-credentials )
+        unset UPASS
         log "user $UNAME created (initial password in /root/initial-credentials, 0600)"
     fi
 fi
-passwd -l root || true
+unset UPWHASH
+# the hash has served its purpose: it stays on no file of the installed system
+[ -f "$INSTALL_ENV" ] && sed -i '/^SAMURAI_PWHASH=/d' "$INSTALL_ENV"
+passwd -l root || fatal "could not lock root"
 
-# wheel sudo, verified before activation
-cat > /etc/sudoers.d/10-wheel <<'EOF'
+# wheel sudo, verified before activation (spec 09: timestamp_timeout=5)
+( umask 027; cat > /etc/sudoers.d/10-wheel <<'EOF'
+Defaults timestamp_timeout=5
 %wheel ALL=(ALL:ALL) ALL
 EOF
+)
 chmod 440 /etc/sudoers.d/10-wheel
-visudo -c -q || { rm -f /etc/sudoers.d/10-wheel; log "FATAL: sudoers check failed"; exit 1; }
+visudo -c -q || { rm -f /etc/sudoers.d/10-wheel; fatal "sudoers check failed"; }
 
 ### mkinitcpio (hooks are written pre-pacstrap by the driver) ###
-for k in $KERNELS; do
+# The kernel packages' hooks already built the images with our conf; this
+# rebuild is the explicit, fail-closed one the boot entries depend on.
+for k in "${KERNEL_ARR[@]}"; do
     log "mkinitcpio for $k"
-    mkinitcpio --preset "$k" 2>&1 || log "mkinitcpio exited nonzero for $k"
+    mkinitcpio --preset "$k" 2>&1 || fatal "mkinitcpio failed for $k" 19
 done
 
-ROOT_UUID="${SAMURAI_ROOT_UUID:-}"
-LUKS_UUID="${SAMURAI_LUKS_UUID:-}"
-ESP_UUID="${SAMURAI_ESP_UUID:-}"
-# fallbacks for manual runs (the installer env file is authoritative)
-if [ -z "$ROOT_UUID" ] && [ -f /etc/samurai-install-env ]; then
-    . /etc/samurai-install-env
-fi
-ROOT_UUID="${SAMURAI_ROOT_UUID:-$ROOT_UUID}"
-LUKS_UUID="${SAMURAI_LUKS_UUID:-$LUKS_UUID}"
-ESP_UUID="${SAMURAI_ESP_UUID:-$ESP_UUID}"
+ROOT_UUID="$(env_get SAMURAI_ROOT_UUID)"
+LUKS_UUID="$(env_get SAMURAI_LUKS_UUID)"
+ESP_UUID="$(env_get SAMURAI_ESP_UUID)"
+[ -n "$ROOT_UUID" ] || fatal "no SAMURAI_ROOT_UUID in $INSTALL_ENV (written by samurai-install)" 14
+log "disk facts: root=$ROOT_UUID esp=$ESP_UUID luks=${LUKS_UUID:-none} encrypt=$ENCRYPT autokey=$AUTOKEY"
+[ "$ENCRYPT" -eq 0 ] || [ -n "$LUKS_UUID" ] || fatal "encrypted install without SAMURAI_LUKS_UUID" 14
+# One kernel command line for every bootloader (same rd.luks / keyfile
+# contract, spec 08). The serial console is a VM-harness affordance: on real
+# hardware the last console= would make /dev/console a non-existent port and
+# hide every boot message.
+kernel_cmdline() {
+    local opts="root=UUID=$ROOT_UUID rw rootflags=subvol=@"
+    if [ "$ENCRYPT" -eq 1 ]; then
+        opts="$opts rd.luks.uuid=$LUKS_UUID rd.luks.options=$LUKS_UUID=discard"
+        if [ "$AUTOKEY" -eq 1 ]; then
+            # keyfile is EMBEDDED in the initramfs (mkinitcpio FILES=()) — no
+            # keydev mount needed during unlock
+            opts="$opts rd.luks.key=/etc/cryptsetup-keys.d/samurai-root.key"
+        fi
+    fi
+    if [ "$AUTOKEY" -eq 1 ] || [ "${SAMURAI_SERIAL_CONSOLE:-0}" = 1 ]; then
+        opts="$opts console=tty1 console=ttyS0,115200"
+    fi
+    printf '%s' "$opts"
+}
+KOPTS=$(kernel_cmdline)
+log "kernel cmdline: $KOPTS"
 # no /etc/crypttab: the initramfs unlock (rd.luks.uuid + embedded keyfile)
 # names the mapper luks-<uuid> and the fstab addresses everything by UUID —
 # a crypttab re-open of the same device just produces a failed unit.
-if [ "$BLDR" = limine ]; then
+case "$BLDR" in
+limine)
     log "bootloader: Limine (ADR-0003)"
     # UEFI install via the firmware fallback path; the config lives next to
     # the binary. boot(): inside the config refers to the ESP.
     install -d /boot/EFI/BOOT /boot/limine
     install -m644 /usr/share/limine/BOOTX64.EFI /boot/EFI/BOOT/BOOTX64.EFI
-    kopts="root=UUID=$ROOT_UUID rw rootflags=subvol=@ console=tty1 console=ttyS0,115200"
-    if [ "$ENCRYPT" -eq 1 ]; then
-        # LUKS_UUID comes from the installer env file (cryptsetup luksUUID on
-        # the live side); the in-chroot blkid/lsblk derivation produced garbage
-        [ -n "$LUKS_UUID" ] && kopts="$kopts rd.luks.uuid=$LUKS_UUID"
-        if [ "$AUTOKEY" -eq 1 ]; then
-            # keyfile is EMBEDDED in the initramfs (mkinitcpio FILES=()) — no
-            # keydev mount needed during unlock
-            kopts="$kopts rd.luks.key=/etc/cryptsetup-keys.d/samurai-root.key"
-        fi
-    fi
     {
         printf 'timeout: 3\n\n'
         printf '# Samurai OS boot entries (managed by samurai; snapshot\n'
         printf '# entries are added/removed by the snapshot boot sync)\n'
-        for k in $KERNELS; do
+        for k in "${KERNEL_ARR[@]}"; do
             printf '/Samurai OS (%s)\n' "$k"
             printf '    protocol: linux\n'
             printf '    path: boot():/vmlinuz-%s\n' "$k"
-            printf '    cmdline: %s\n' "$kopts"
+            printf '    cmdline: %s\n' "$KOPTS"
             printf '    module_path: boot():/initramfs-%s.img\n' "$k"
+            printf '\n'
+        done
+        for k in "${KERNEL_ARR[@]}"; do
+            printf '/Samurai OS (%s, fallback initramfs)\n' "$k"
+            printf '    protocol: linux\n'
+            printf '    path: boot():/vmlinuz-%s\n' "$k"
+            printf '    cmdline: %s\n' "$KOPTS"
+            printf '    module_path: boot():/initramfs-%s-fallback.img\n' "$k"
             printf '\n'
         done
     } > /boot/limine/limine.conf
     log "limine.conf: $(tr '\n' ' ' < /boot/limine/limine.conf)"
-    log "fstab: $(tr '\n' ' ' < /etc/fstab)"
-elif [ "$BLDR" = grub ]; then
+    ;;
+grub)
     log "bootloader: GRUB (user-selected)"
     # ESP is mounted at /boot; kernel cmdline matches the Limine branch so the
     # rescue/rollback path (rd.luks, embedded keyfile) behaves identically.
-    grub_opts="root=UUID=$ROOT_UUID rw rootflags=subvol=@ console=tty1 console=ttyS0,115200"
-    if [ "$ENCRYPT" -eq 1 ]; then
-        [ -n "$LUKS_UUID" ] && grub_opts="$grub_opts rd.luks.uuid=$LUKS_UUID"
-        if [ "$AUTOKEY" -eq 1 ]; then
-            grub_opts="$grub_opts rd.luks.key=/etc/cryptsetup-keys.d/samurai-root.key"
-        fi
-    fi
-    sed -i "s|^GRUB_CMDLINE_LINUX=.*|GRUB_CMDLINE_LINUX=\"$grub_opts\"|" /etc/default/grub
+    sed -i "s|^GRUB_CMDLINE_LINUX=.*|GRUB_CMDLINE_LINUX=\"$KOPTS\"|" /etc/default/grub
     sed -i 's|^GRUB_TIMEOUT=.*|GRUB_TIMEOUT=3|' /etc/default/grub
     grub-install --target=x86_64-efi --efi-directory=/boot \
-        --bootloader-id=SamuraiOS --recheck 2>&1 || { log "FATAL: grub-install failed"; exit 14; }
+        --bootloader-id=SamuraiOS --recheck 2>&1 || fatal "grub-install failed" 14
     grub-mkconfig -o /boot/grub/grub.cfg 2>&1 | tail -3
     log "grub.cfg written ($(grep -c menuentry /boot/grub/grub.cfg 2>/dev/null || echo '?') entries)"
-elif [ "$BLDR" = systemd-boot ]; then
+    ;;
+systemd-boot)
     log "bootloader: systemd-boot (user-selected)"
     # kernel-install/bootctl: hand-written entries, same cmdline contract
-    bootctl install --esp-path=/boot --no-variables 2>&1 || { log "FATAL: bootctl install failed"; exit 14; }
-    sd_opts="root=UUID=$ROOT_UUID rw rootflags=subvol=@ console=tty1 console=ttyS0,115200"
-    if [ "$ENCRYPT" -eq 1 ]; then
-        [ -n "$LUKS_UUID" ] && sd_opts="$sd_opts rd.luks.uuid=$LUKS_UUID"
-        if [ "$AUTOKEY" -eq 1 ]; then
-            sd_opts="$sd_opts rd.luks.key=/etc/cryptsetup-keys.d/samurai-root.key"
-        fi
-    fi
+    bootctl install --esp-path=/boot --no-variables 2>&1 || fatal "bootctl install failed" 14
     printf 'timeout 3\ndefault @saved\n' > /boot/loader/loader.conf
     install -d /boot/loader/entries
-    for k in $KERNELS; do
+    for k in "${KERNEL_ARR[@]}"; do
         {
             printf 'title   Samurai OS (%s)\n' "$k"
             printf 'linux   /vmlinuz-%s\n' "$k"
             printf 'initrd  /initramfs-%s.img\n' "$k"
-            printf 'options %s\n' "$sd_opts"
+            printf 'options %s\n' "$KOPTS"
         } > "/boot/loader/entries/samurai-$k.conf"
+        {
+            printf 'title   Samurai OS (%s, fallback initramfs)\n' "$k"
+            printf 'linux   /vmlinuz-%s\n' "$k"
+            printf 'initrd  /initramfs-%s-fallback.img\n' "$k"
+            printf 'options %s\n' "$KOPTS"
+        } > "/boot/loader/entries/samurai-$k-fallback.conf"
     done
     log "systemd-boot entries: $(ls /boot/loader/entries/)"
-elif [ "$BLDR" = refind ]; then
+    ;;
+refind)
     log "bootloader: rEFInd (user-selected)"
     # refind-install in chroot targets the ESP at /boot; kernel autodetect
     # plus our refind_linux.conf carrying the same cmdline contract
-    refind-install --yes 2>&1 || { log "FATAL: refind-install failed"; exit 14; }
-    rf_opts="root=UUID=$ROOT_UUID rw rootflags=subvol=@ console=tty1 console=ttyS0,115200"
-    if [ "$ENCRYPT" -eq 1 ]; then
-        [ -n "$LUKS_UUID" ] && rf_opts="$rf_opts rd.luks.uuid=$LUKS_UUID"
-        if [ "$AUTOKEY" -eq 1 ]; then
-            rf_opts="$rf_opts rd.luks.key=/etc/cryptsetup-keys.d/samurai-root.key"
-        fi
-    fi
+    refind-install --yes 2>&1 || fatal "refind-install failed" 14
     printf '%s\n%s\n%s\n' \
-        "\"Boot Samurai OS\" \"$rf_opts\"" \
-        "\"Boot Samurai OS (fallback)\" \"$rf_opts nomodeset\"" \
+        "\"Boot Samurai OS\" \"$KOPTS\"" \
+        "\"Boot Samurai OS (fallback)\" \"$KOPTS nomodeset\"" \
         "\"Boot to EFI shell\" \"\"" > /boot/refind_linux.conf
     log "refind_linux.conf: $(tr '\n' ' ' < /boot/refind_linux.conf)"
-else
-    log "bootloader $BLDR is not supported (Limine is the one per ADR-0003)"
-    exit 14
-fi
+    ;;
+*)
+    fatal "bootloader $BLDR is not supported (Limine is the one per ADR-0003)" 14
+    ;;
+esac
+log "fstab: $(tr '\n' ' ' < /etc/fstab)"
 
 ### services ###
 log "services"
-systemctl enable qemu-guest-agent.service 2>/dev/null || true
+# the guest agent gives the hypervisor root exec: wanted on VMs only (the
+# package stays in the profile list so a cloned image works under KVM)
+if installed qemu-guest-agent && systemd-detect-virt -q; then
+    enable_unit qemu-guest-agent.service
+fi
 # one network manager: NetworkManager on desktops, systemd-networkd otherwise
 # (both enabled race for the same interfaces)
-if pacman -Q networkmanager >/dev/null 2>&1; then
-    systemctl enable systemd-resolved.service
+if installed networkmanager; then
+    enable_unit systemd-resolved.service
 else
-    systemctl enable systemd-networkd.service systemd-resolved.service
+    # network config lives on the ISO, not in the pacstrap'd target (learned:
+    # the updater's preflight died on "no network"). Basic DHCP for networkd:
+    install -d -m 755 /etc/systemd/network
+    printf '[Match]\nName=en* eth* wl*\n\n[Network]\nDHCP=yes\n' > /etc/systemd/network/20-samurai.network
+    enable_unit systemd-networkd.service systemd-resolved.service
 fi
+# resolved stub for DNS (only if absent: other resolvers may own this path)
+[ -e /etc/resolv.conf ] || ln -s /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
+# time sync (NTP)
+enable_unit systemd-timesyncd.service
 
 ### snapshots (spec 06): snapper + snap-pac + maintenance timers ###
 log "snapshots: snapper root config + snap-pac"
@@ -499,18 +577,17 @@ if [ "${SAMURAI_CHROOT:-0}" != 1 ]; then
     SWAP_SNAPSHOTS=0
     if mountpoint -q /.snapshots; then
         log "snapshots: /.snapshots pre-mounted (@snapshots) — swapping out for create-config"
-        umount /.snapshots || { log "FATAL: cannot unmount /.snapshots"; exit 15; }
+        umount /.snapshots || fatal "cannot unmount /.snapshots" 15
         rmdir /.snapshots
         SWAP_SNAPSHOTS=1
     fi
     if ! snapper -c root create-config / 2>&1; then
-        log "FATAL: snapper create-config failed — no rollback support"
-        exit 15
+        fatal "snapper create-config failed — no rollback support" 15
     fi
     if [ "$SWAP_SNAPSHOTS" -eq 1 ]; then
-        btrfs subvolume delete /.snapshots 2>&1 | log || true  # the redundant one snapper just made
+        btrfs subvolume delete /.snapshots 2>&1 || log "WARNING: could not delete snapper's own /.snapshots subvolume"
         mkdir -p /.snapshots
-        mount /.snapshots || { log "FATAL: remount of @snapshots failed"; exit 15; }
+        mount /.snapshots || fatal "remount of @snapshots failed" 15
     fi
     snapper -c root set-config 'TIMELINE_CREATE="no"' \
         'NUMBER_LIMIT="20"' 'NUMBER_LIMIT_IMPORTANT="10"' \
@@ -525,7 +602,7 @@ else
     # shipped template. @snapshots stays mounted — no swap.
     if [ ! -f /etc/snapper/configs/root ]; then
         log "snapshots: writing root config from template (chroot-safe)"
-        mkdir -p /etc/snapper/configs
+        install -d -m 755 /etc/snapper/configs
         sed -e 's|^FSTYPE=.*|FSTYPE="btrfs"|' \
             -e 's|^SUBVOLUME=.*|SUBVOLUME="/"|' \
             -e 's|^TIMELINE_CREATE=.*|TIMELINE_CREATE="no"|' \
@@ -533,29 +610,42 @@ else
             -e 's|^NUMBER_LIMIT_IMPORTANT=.*|NUMBER_LIMIT_IMPORTANT="10"|' \
             -e 's|^EMPTY_PRE_POST_CLEANUP=.*|EMPTY_PRE_POST_CLEANUP="yes"|' \
             /usr/share/snapper/config-templates/default > /etc/snapper/configs/root \
-            || { log "FATAL: cannot write snapper root config"; exit 15; }
+            || fatal "cannot write snapper root config" 15
     fi
     [ -d /.snapshots ] || mkdir -p /.snapshots
     mountpoint -q /.snapshots \
         || log "WARNING: /.snapshots not mounted in-chroot (fstab mounts @snapshots at boot)"
 fi
-# snap-pac 3.x discovers snapper configs on its own (no /etc/snap-pac.conf)
-# pacman transactions: the important ones (kernel/systemd/glibc) get marked
-# important so their pre/post pairs survive cleanup (spec 06)
-install -d /etc/pacman.d/hooks
-printf '%s\n' '[Trigger]' 'Operation = Install' 'Operation = Upgrade' \
-    'Type = Package' 'Target = linux*' 'Target = systemd' 'Target = glibc' '' \
-    '[Action]' 'When = PreTransaction' 'Exec = /usr/bin/sh -c "snapper -c root set-description $(snapper -c root list | awk "END{print $1}") important 2>/dev/null || true"' \
-    > /etc/pacman.d/hooks/10-samurai-important-snap.hook
-systemctl enable snapper.timer snapper-cleanup.timer 2>&1 | log || true
-systemctl enable fstrim.timer 2>&1 | log || true
+# `snapper create-config` registers the config in /etc/conf.d/snapper; the
+# template path above does not, and without SNAPPER_CONFIGS="root" every
+# `snapper -c root ...` says "config does not exist" (samurai update exit 11)
+install -d -m 755 /etc/conf.d
+if grep -qs '^SNAPPER_CONFIGS=' /etc/conf.d/snapper; then
+    grep -q '^SNAPPER_CONFIGS=.*\broot\b' /etc/conf.d/snapper \
+        || sed -i 's|^SNAPPER_CONFIGS="\(.*\)"|SNAPPER_CONFIGS="\1 root"|; s|^SNAPPER_CONFIGS=" |SNAPPER_CONFIGS="|' /etc/conf.d/snapper
+else
+    printf 'SNAPPER_CONFIGS="root"\n' >> /etc/conf.d/snapper
+fi
+grep -q '^SNAPPER_CONFIGS=.*\broot\b' /etc/conf.d/snapper || fatal "could not register the snapper root config" 15
+# snap-pac 3.x: pre/post snapshots around every pacman transaction. Snapshots
+# touching the packages below carry userdata important=yes, which is what
+# NUMBER_LIMIT_IMPORTANT keys on (spec 06). Key names per snap-pac(8) and
+# /etc/snap-pac.ini as shipped by the package (lists are JSON).
+rm -f /etc/pacman.d/hooks/10-samurai-important-snap.hook   # replaced: it was unparseable by pacman
+cat > /etc/snap-pac.ini <<'EOF'
+# Samurai OS snap-pac configuration (written by samurai-postinstall; snap-pac(8))
+[root]
+snapshot = True
+cleanup_algorithm = number
+important_packages = ["linux", "linux-lts", "linux-zen", "linux-cachyos", "linux-cachyos-lts", "systemd", "glibc", "limine", "grub", "refind", "btrfs-progs", "snapper", "cryptsetup", "mkinitcpio"]
+important_commands = ["pacman -Syu", "pacman -Syyu"]
+EOF
+enable_unit snapper-cleanup.timer
+enable_unit fstrim.timer
 # pacman cache hygiene (pacman-contrib also provides checkupdates for the notifier)
-systemctl enable paccache.timer 2>&1 | log || true
-# readable pacman output on the installed system (cosmetic; config copied from the ISO)
-sed -i 's/^#Color$/Color/' /etc/pacman.conf
-# time sync (NTP) and compressed swap: half the RAM, capped, zstd (spec 10)
-systemctl enable systemd-timesyncd.service 2>&1 | log || true
-if pacman -Q zram-generator >/dev/null 2>&1; then
+enable_unit paccache.timer
+# compressed swap: half the RAM, capped, zstd (spec 06/10)
+if installed zram-generator; then
     cat > /etc/systemd/zram-generator.conf <<'EOF'
 [zram0]
 zram-size = min(ram / 2, 8192)
@@ -564,18 +654,15 @@ swap-priority = 100
 EOF
     log "swap: zram-generator configured (zram0 = min(ram/2, 8 GiB), zstd)"
 fi
-# network config lives on the ISO, not in the pacstrap'd target (learned: the
-# updater's preflight died on "no network"). Write the basic DHCP config:
-mkdir -p etc/systemd/network
-printf '[Match]\nName=en* eth* wl*\n\n[Network]\nDHCP=yes\n' > etc/systemd/network/20-samurai.network
-# resolved stub for DNS (only if absent: other resolvers may own this path)
-[ -e etc/resolv.conf ] || ln -s /run/systemd/resolve/stub-resolv.conf etc/resolv.conf
 
 ### fingerprint + install info ###
-mkdir -p /var/lib/samurai
+install -d -m 755 /var/lib/samurai
 { lspci -nn 2>/dev/null || true; lsusb 2>/dev/null || true; } | sed 's/^/  /' > /var/lib/samurai/hw-fingerprint
-cp "$PROFILE" /var/lib/samurai/install-profile.toml 2>/dev/null || true  # driver may have staged it already
-[ -f /var/lib/samurai/install-profile.toml ] || cp "$PROFILE" /var/lib/samurai/install-profile.toml
+if [ ! -f /var/lib/samurai/install-profile.toml ]; then
+    # manual run (the driver stages a hash-free copy at 0600 itself)
+    ( umask 077; grep -v '^password_hash = ' "$PROFILE" > /var/lib/samurai/install-profile.toml )
+fi
+chmod 600 /var/lib/samurai/install-profile.toml
 python3 - <<'PY' > /var/lib/samurai/install-info.json
 import json, os, platform, time
 print(json.dumps({"version": 1, "arch": platform.machine(),
