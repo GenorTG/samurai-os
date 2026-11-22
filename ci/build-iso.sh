@@ -55,6 +55,9 @@ done
 mkdir -p "$profile_dir/airootfs/usr/share/samurai"
 cp -f "$repo_root/installer/pacman.conf.target" "$profile_dir/airootfs/usr/share/samurai/pacman.conf.target"
 cp -f "$repo_root/installer/profile-default.toml" "$profile_dir/airootfs/usr/share/samurai/profile-default.toml"
+# license texts travel with the image (PolyForm Noncommercial notice, scope summary)
+mkdir -p "$profile_dir/airootfs/usr/share/licenses/samurai-os"
+cp -f "$repo_root/LICENSE" "$repo_root/LICENSING.md" "$profile_dir/airootfs/usr/share/licenses/samurai-os/"
 # every executable tool under updates/ (samurai, samurai-*): new tools ship
 # without editing this list
 for f in "$repo_root"/updates/samurai "$repo_root"/updates/samurai-*; do

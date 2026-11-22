@@ -112,6 +112,14 @@ def test_daily_driver(mirror):
             "curl -fsS -o /dev/null -w 'HTTP=%{http_code}\\n' https://archlinux.org/"
         ), ["connected", "HTTP=200"], timeout=90)
 
+        # storage layout (spec 06): container stores on their own subvolumes, licence shipped
+        _step(ga, "LAYOUT", (
+            "findmnt -no SOURCE /var/lib/docker /var/lib/containers /var/lib/libvirt/images /.snapshots | "
+            "grep -o '@[a-z]*' | sort | tr '\\n' ' '; echo; "
+            "test -s /usr/share/licenses/samurai-tools/LICENSE && echo LICENSE-OK; "
+            "pacman -Qi samurai-tools | grep -E '^Licenses'"
+        ), ["@containers @docker @snapshots @vm", "LICENSE-OK", "PolyForm-Noncommercial-1.0.0"], timeout=60)
+
         # hardware.nvidia = auto on a VM without an NVIDIA GPU: no NVIDIA stack
         _step(ga, "GPU-AUTO", (
             "pacman -Q mesa >/dev/null && ! pacman -Q nvidia-utils 2>/dev/null && echo NO-NVIDIA-OK"
