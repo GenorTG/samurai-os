@@ -122,7 +122,7 @@ pacman --dbpath /tmp/freshdb -Sw --noconfirm --cachedir /b/offline-pkgs \
     nvidia-open-lts nvidia-open-dkms nvidia-utils nvidia-settings \
     mesa vulkan-radeon vulkan-intel vulkan-nouveau \
     intel-media-driver libva-intel-driver \
-    amd-ucode intel-ucode zram-generator sudo fish zsh python pciutils snapper snap-pac \
+    amd-ucode intel-ucode zram-generator pacman-contrib sudo fish zsh python pciutils snapper snap-pac \
     grub limine refind efibootmgr os-prober \
     networkmanager wpa_supplicant qemu-guest-agent archlinux-keyring cachyos-keyring \
     plasma-meta sddm konsole dolphin kate ark gwenview okular \

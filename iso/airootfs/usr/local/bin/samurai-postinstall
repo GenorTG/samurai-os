@@ -549,6 +549,10 @@ printf '%s\n' '[Trigger]' 'Operation = Install' 'Operation = Upgrade' \
     > /etc/pacman.d/hooks/10-samurai-important-snap.hook
 systemctl enable snapper.timer snapper-cleanup.timer 2>&1 | log || true
 systemctl enable fstrim.timer 2>&1 | log || true
+# pacman cache hygiene (pacman-contrib also provides checkupdates for the notifier)
+systemctl enable paccache.timer 2>&1 | log || true
+# readable pacman output on the installed system (cosmetic; config copied from the ISO)
+sed -i 's/^#Color$/Color/' /etc/pacman.conf
 # time sync (NTP) and compressed swap: half the RAM, capped, zstd (spec 10)
 systemctl enable systemd-timesyncd.service 2>&1 | log || true
 if pacman -Q zram-generator >/dev/null 2>&1; then
