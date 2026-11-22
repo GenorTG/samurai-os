@@ -93,6 +93,10 @@ jobs:
           ci/test-repo-checks.sh
           ci/check-keyring
 
+      - name: REUSE compliance (every file maps to a license, see LICENSING.md)
+        run: |
+          python3 -m pip install --quiet "reuse[charset-normalizer]"
+          reuse lint
       - name: Site structure, accessibility and CSP
         run: python3 -I ci/check-site.py site/index.html
 

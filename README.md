@@ -85,6 +85,13 @@ Workflows: `ci.yml` (checks), `pages.yml` (site), `publish-testing-repo.yml` (si
 both ISOs, runs the smoke suite, signs `SHA256SUMS`, publishes `v<VERSION>`). Every action is pinned
 to a commit SHA. Signing keys and secrets: [`docs/KEYS.md`](docs/KEYS.md).
 
+## License
+Our code is **source-available and free for noncommercial use** under the
+[PolyForm Noncommercial License 1.0.0](LICENSE) (personal, hobby, research, education, charities,
+government). Commercial use needs a separate license: open an issue. Packages the ISO installs keep
+their own licenses; the ISO profile derived from archiso and the Garuda-derived catalog data stay
+GPL-3.0-or-later; fonts are OFL-1.1. See [`LICENSING.md`](LICENSING.md) and [`REUSE.toml`](REUSE.toml).
+
 ## Specs
 Start at [`docs/specs/00-OVERVIEW.md`](docs/specs/00-OVERVIEW.md). Decisions live in
 [`docs/adr/`](docs/adr/). Roadmap: [`docs/specs/12-ROADMAP.md`](docs/specs/12-ROADMAP.md).

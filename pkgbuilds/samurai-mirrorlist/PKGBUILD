@@ -5,18 +5,21 @@
 
 pkgname=samurai-mirrorlist
 pkgver=1
-pkgrel=2
+pkgrel=3
 pkgdesc="Samurai OS pacman mirrorlists ([samurai] and [samurai-testing])"
 arch=(any)
 url="https://github.com/GenorTG/samurai-repo"
-license=(MIT)
+license=('PolyForm-Noncommercial-1.0.0')
 groups=(samurai-base)
 depends=()
 # like pacman-mirrorlist: a locally edited mirrorlist survives upgrades as-is
 # and the new one lands next to it as .pacnew
 backup=(etc/pacman.d/samurai-mirrorlist etc/pacman.d/samurai-testing-mirrorlist)
+source=("LICENSE")
+sha256sums=('1be06492345bb03a60d13d23d744d979cc7cf1ce154da5227651f8dd78f25017')
 
 package() {
+    install -Dm644 "$srcdir/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
     cd "$pkgdir" || return 1
     install -d etc/pacman.d
 

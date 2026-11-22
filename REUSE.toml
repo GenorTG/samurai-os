@@ -1,0 +1,58 @@
+version = 1
+SPDX-PackageName = "Samurai OS"
+SPDX-PackageDownloadLocation = "https://github.com/GenorTG/samurai-os"
+SPDX-PackageComment = "Source-available (PolyForm Noncommercial). Packages that Samurai OS installs keep their own licenses; see LICENSING.md."
+
+# Annotations are applied in order; where several match, the LAST one wins
+# (precedence = "override" so these win over any in-file header).
+
+# Everything we wrote: free for noncommercial use.
+[[annotations]]
+path = "**"
+precedence = "override"
+SPDX-FileCopyrightText = "2026 GenorTG"
+SPDX-License-Identifier = "PolyForm-Noncommercial-1.0.0"
+
+# The ISO profile starts from Arch's archiso "releng" profile (GPL-3.0-or-later)
+# and our edits to those files stay under the same license.
+[[annotations]]
+path = "iso/**"
+precedence = "override"
+SPDX-FileCopyrightText = ["Arch Linux archiso contributors", "2026 GenorTG (modifications)"]
+SPDX-License-Identifier = "GPL-3.0-or-later"
+
+# ...except our own tools and data that build-iso.sh copies into the image.
+[[annotations]]
+path = [
+  "iso/airootfs/usr/local/bin/samurai*",
+  "iso/airootfs/usr/local/bin/validate-profile.py",
+  "iso/airootfs/usr/share/samurai/**",
+  "iso/airootfs/etc/samurai-*",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "2026 GenorTG"
+SPDX-License-Identifier = "PolyForm-Noncommercial-1.0.0"
+
+# Package-name lists imported as data from the Garuda Linux toolbox (GPL-3.0-or-later).
+[[annotations]]
+path = [
+  "catalog/garuda-setup-wizard.toml",
+  "iso/airootfs/usr/share/samurai/catalog/garuda-setup-wizard.toml",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "Garuda Linux toolbox authors"
+SPDX-License-Identifier = "GPL-3.0-or-later"
+
+# Website fonts (SIL Open Font License 1.1); each font ships its own notice.
+[[annotations]]
+path = ["site/fonts/*.woff2", "site/fonts/*-OFL.txt"]
+precedence = "override"
+SPDX-FileCopyrightText = ["2021 The Shippori Mincho Project Authors", "2019 IBM Corp."]
+SPDX-License-Identifier = "OFL-1.1"
+
+# The license texts themselves.
+[[annotations]]
+path = ["LICENSE", "LICENSING.md", "REUSE.toml"]
+precedence = "override"
+SPDX-FileCopyrightText = "2026 GenorTG"
+SPDX-License-Identifier = "PolyForm-Noncommercial-1.0.0"

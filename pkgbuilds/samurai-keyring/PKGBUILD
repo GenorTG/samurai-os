@@ -7,16 +7,17 @@
 
 pkgname=samurai-keyring
 pkgver=20261117
-pkgrel=2
+pkgrel=3
 pkgdesc="Samurai OS build keyring for pacman"
 arch=(any)
 url="https://github.com/GenorTG/samurai-os"
-license=(MIT)
+license=('PolyForm-Noncommercial-1.0.0')
 groups=(samurai-base)
 depends=('pacman')
 install=samurai-keyring.install
-source=("build-key.txt")
-sha256sums=('6443d0a8cfba757e4280a9fafc4208e85ba216b5ad83abe70fcf411f7795fd6a')
+source=("build-key.txt" "LICENSE")
+sha256sums=('6443d0a8cfba757e4280a9fafc4208e85ba216b5ad83abe70fcf411f7795fd6a'
+           '1be06492345bb03a60d13d23d744d979cc7cf1ce154da5227651f8dd78f25017')
 # The extension is .txt on purpose: makepkg treats *.asc sources as detached
 # PGP signatures and would try to verify a nonexistent 'build-key'.
 # Any key material change (rotation per docs/KEYS.md) must bump this sum AND
@@ -28,6 +29,7 @@ sha256sums=('6443d0a8cfba757e4280a9fafc4208e85ba216b5ad83abe70fcf411f7795fd6a')
 _primary_fpr=DFE8C148C042AA3C199AAEA08436E12731EDD3FA
 
 package() {
+    install -Dm644 "$srcdir/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
     local keydir=usr/share/pacman/keyrings
     local gnupghome
     gnupghome="$(mktemp -d -p "$srcdir" gnupg.XXXXXX)"

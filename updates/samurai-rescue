@@ -111,16 +111,16 @@ mount_install() {
     fi
     mkdir -p "$MOUNT_DIR"
     mount -o subvol=@,compress=zstd:1,noatime "$ROOTDEV" "$MOUNT_DIR"
-    for sub in home root srv cache log tmp containers vm; do
-        mkdir -p "$MOUNT_DIR"/var/"$sub" "$MOUNT_DIR"/.snapshots 2>/dev/null || true
-    done
+    # the real mount points (spec 06 layout), not one directory per subvolume name
+    mkdir -p "$MOUNT_DIR"/{home,root,srv,var/cache,var/log,var/tmp,var/lib/docker,var/lib/containers,var/lib/libvirt/images,.snapshots}
     mount -o subvol=@home,compress=zstd:1,noatime "$ROOTDEV" "$MOUNT_DIR"/home 2>/dev/null || true
     mount -o subvol=@root,noatime "$ROOTDEV" "$MOUNT_DIR"/root 2>/dev/null || true
     mount -o subvol=@cache,noatime "$ROOTDEV" "$MOUNT_DIR"/var/cache 2>/dev/null || true
     mount -o subvol=@log,noatime "$ROOTDEV" "$MOUNT_DIR"/var/log 2>/dev/null || true
     mount -o subvol=@tmp,noatime "$ROOTDEV" "$MOUNT_DIR"/var/tmp 2>/dev/null || true
-    mount -o subvol=@containers,noatime "$ROOTDEV" "$MOUNT_DIR"/var/lib/docker 2>/dev/null || true
-    mount -o subvol=@vm,nodatacow,noatime "$ROOTDEV" "$MOUNT_DIR"/var/lib/libvirt/images 2>/dev/null || true
+    mount -o subvol=@docker,noatime "$ROOTDEV" "$MOUNT_DIR"/var/lib/docker 2>/dev/null || true
+    mount -o subvol=@containers,noatime "$ROOTDEV" "$MOUNT_DIR"/var/lib/containers 2>/dev/null || true
+    mount -o subvol=@vm,noatime "$ROOTDEV" "$MOUNT_DIR"/var/lib/libvirt/images 2>/dev/null || true
     mount -o subvol=@snapshots,noatime "$ROOTDEV" "$MOUNT_DIR"/.snapshots 2>/dev/null || true
     # the ESP: same disk as the install (see find_esp for why this is not
     # derived from the mapper's PKNAME)
@@ -182,7 +182,6 @@ case "$cmd" in
         mount_install
         log "rescue: reinstalling kernel packages from the target's cache"
         arch-chroot "$MOUNT_DIR" bash -c '
-            for p in $(grep -E "^Install = " /etc/samurai-install-env 2>/dev/null | cut -d= -f2); do :; done
             cache=/var/cache/pacman/pkg
             for k in linux linux-lts linux-zen linux-cachyos; do
                 pkgs=$(ls $cache/$k-*-x86_64.pkg.tar.zst 2>/dev/null | tail -1) || true

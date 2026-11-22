@@ -54,7 +54,7 @@ setup is the same:
   `docker.socket` enabled (the daemon starts on first use).
 - NVIDIA machines also get `nvidia-container-toolkit`, configured for Docker, so `--gpus all` works
   in containers out of the box.
-- Data on the `@containers` subvolume (spec 06), outside root snapshots.
+- Data on the `@docker` subvolume (rootful Podman: `@containers`; rootless: under `~/.local/share/containers` in `@home`), outside root snapshots (spec 06).
 - **Docker mode is chosen during install (Genor 2026-11-17):** "docker group" or "rootless". The
   installer notes that group membership is equivalent to root; rootless trades a little convenience
   for safety. Rootless is also switchable later in the toolbox.

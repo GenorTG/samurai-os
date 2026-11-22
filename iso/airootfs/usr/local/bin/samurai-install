@@ -375,7 +375,7 @@ fi
 log "creating btrfs on $ROOTDEV"
 mkfs.btrfs -f -L samurai "$ROOTDEV"
 mount "$ROOTDEV" /mnt
-for sub in @ @home @root @srv @cache @log @tmp @containers @vm @snapshots; do
+for sub in @ @home @root @srv @cache @log @tmp @docker @containers @vm @snapshots; do
     btrfs subvolume create "/mnt/$sub"
 done
 umount /mnt
@@ -387,7 +387,10 @@ mount -o "subvol=@srv,$BTRFS_OPTS" "$ROOTDEV" /mnt/srv
 mount -o "subvol=@cache,$BTRFS_OPTS" "$ROOTDEV" /mnt/var/cache
 mount -o "subvol=@log,$BTRFS_OPTS" "$ROOTDEV" /mnt/var/log
 mount -o "subvol=@tmp,$BTRFS_OPTS" "$ROOTDEV" /mnt/var/tmp
-mount -o "subvol=@containers,$BTRFS_OPTS" "$ROOTDEV" /mnt/var/lib/docker
+# container stores live outside root snapshots (a rollback must never rewind
+# images and volumes): Docker and Podman/Buildah each get their own subvolume
+mount -o "subvol=@docker,$BTRFS_OPTS" "$ROOTDEV" /mnt/var/lib/docker
+mount -o "subvol=@containers,$BTRFS_OPTS" "$ROOTDEV" /mnt/var/lib/containers
 mount -o "subvol=@vm,noatime,discard=async" "$ROOTDEV" /mnt/var/lib/libvirt/images
 # no-CoW for VM images is a per-directory attribute, not a mount option
 # (btrfs applies nodatacow filesystem-wide, first mount wins)

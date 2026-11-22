@@ -14,11 +14,11 @@
 
 pkgname=samurai-release
 pkgver=0.0.1
-pkgrel=6
+pkgrel=7
 pkgdesc="Samurai OS identity: os-release hook + /etc/lsb-release"
 arch=(any)
 url="https://github.com/GenorTG/samurai-os"
-license=(MIT)
+license=('PolyForm-Noncommercial-1.0.0')
 groups=(samurai-base)
 depends=(filesystem samurai-tools)
 conflicts=(lsb-release)
@@ -26,14 +26,16 @@ replaces=(lsb-release)
 # satisfies open-vm-tools (and friends) which depend on 'lsb-release'
 provides=(lsb-release)
 backup=('etc/lsb-release')
-source=("samurai-os-release.hook" "samurai-apply-os-release")
+source=("samurai-os-release.hook" "samurai-apply-os-release" "LICENSE")
 sha256sums=('b051707215a2facc8b6f0496983b2d90f58f29119397e90a74190b50c590abca'
-           '2ac8ebbf34a0decb6f0b43aa7b7a91d84170680fef59b6a2ba141b15962f3757')
+           '2ac8ebbf34a0decb6f0b43aa7b7a91d84170680fef59b6a2ba141b15962f3757'
+           '1be06492345bb03a60d13d23d744d979cc7cf1ce154da5227651f8dd78f25017')
 # samurai-release.install is the install= script: makepkg picks it up from the
 # PKGBUILD dir automatically and it is exempt from source checksums.
 install=samurai-release.install
 
 package() {
+    install -Dm644 "$srcdir/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
     cd "$pkgdir"
 
     # source of truth for our identity; the hook applies it

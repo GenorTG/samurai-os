@@ -92,6 +92,7 @@ cd /build
 for src in /src/pkgbuilds/*/; do
     pkg="$(basename "$src")"
     cp -a "$src" "$pkg"
+    cp -a /src/LICENSE "$pkg/LICENSE"
     if [ "$pkg" = samurai-tools ]; then
         for name in samurai samurai-update samurai-snap samurai-rescue samurai-apps samurai-notifier \
                     samurai-notifier.service samurai-notifier.timer; do

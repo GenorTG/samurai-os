@@ -6,11 +6,11 @@
 #   for f in ...; do sha256sum "$f"; done   (or updpkgsums in the staged dir)
 pkgname=samurai-tools
 pkgver=0.3.0
-pkgrel=1
+pkgrel=2
 pkgdesc="Samurai OS updater, CLI executors, app catalog tool, update notifier and shell completions"
 arch=(any)
 url="https://github.com/GenorTG/samurai-os"
-license=(MIT)
+license=('PolyForm-Noncommercial-1.0.0' 'GPL-3.0-or-later')
 depends=(
     bash
     coreutils
@@ -47,12 +47,13 @@ source=(
     0001-update-mechanism-demo.sh
     garuda-setup-wizard.toml
     samurai.toml
+    LICENSE
 )
 sha256sums=(
     '60847c2cd58874fb9843f3ff80fd87b54719156a38a2002908404f3ca4585483'
     '675eb8a6dc64bac82def35ecddfa786a7055ac916bdd74d10da118df5490f292'
     '28ad946a28432d3d820761718c52473f51da5ba03c7a3583a4d6494ae52ad76c'
-    'd760a9feb18b891319a019de155088af306f9192040c219b3cd54f0fcd7c6469'
+    'b32f62e974cfe2c4db20edb9c70f9656e91d9a06c08c1e23e779693061bd5da9'
     '11f2f369b8ecd8588988f465c929f6d8ebf95364823dec723565edfadd744c90'
     '369abd6cc730ee7a59c6670a92d80c90573e2b7339525ada42b0e3eb45bd23fc'
     '6d477d89600ea6318ae20de5503954626a6d63b3c8ec939e569b1342e61829f3'
@@ -63,9 +64,11 @@ sha256sums=(
     '60a47ce64a90aab079c0a8d50c126ee795fd9263d0304a3b63128862066c7331'
     'c03375cb3acd7ead49fbe319a44a596b493b1e716388a10346271b33ca47fdf8'
     '36271dc080efec183fdaf93d7618c72835bda14191a1150515e9e524421e12ac'
+    '1be06492345bb03a60d13d23d744d979cc7cf1ce154da5227651f8dd78f25017'
 )
 
 package() {
+    install -Dm644 "$srcdir/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
     cd "$srcdir"
     install -Dm755 samurai "$pkgdir/usr/local/bin/samurai"
     install -Dm755 samurai-update "$pkgdir/usr/local/bin/samurai-update"

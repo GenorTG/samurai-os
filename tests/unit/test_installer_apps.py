@@ -106,6 +106,7 @@ def test_pkgbuild_sources_and_checksums():
               "garuda-setup-wizard.toml": "catalog/garuda-setup-wizard.toml",
               "samurai.toml": "catalog/samurai.toml",
               # shell completions live beside the PKGBUILD (makepkg finds local sources there)
+              "LICENSE": "LICENSE",
               "samurai.bash": "pkgbuilds/samurai-tools/samurai.bash",
               "samurai.fish": "pkgbuilds/samurai-tools/samurai.fish"}
     for src, digest in zip(sources, sums):
@@ -116,7 +117,29 @@ def test_pkgbuild_sources_and_checksums():
     assert "/usr/share/samurai/catalog/samurai.toml" in text
     # every staged source is installed by package()
     for src in sources:
+        if src == "LICENSE":   # installed from $srcdir under /usr/share/licenses/$pkgname (see test_package_licenses)
+            continue
         assert re.search(rf"install -Dm\d+ {re.escape(src)}\b", text), f"{src} not installed by package()"
     assert "pacman-contrib" in _bash_array(text, "depends"), "checkupdates (samurai-notifier) needs pacman-contrib"
     assert "usr/share/bash-completion/completions/samurai" in text
     assert "usr/share/fish/vendor_completions.d/samurai.fish" in text
+
+
+def test_package_licenses():
+    """Every [samurai] package ships the project LICENSE (checksum-pinned) and declares it."""
+    lic = hashlib.sha256((REPO / "LICENSE").read_bytes()).hexdigest()
+    for pkg in ("samurai-tools", "samurai-release", "samurai-keyring", "samurai-mirrorlist"):
+        text = (REPO / "pkgbuilds" / pkg / "PKGBUILD").read_text()
+        assert "PolyForm-Noncommercial-1.0.0" in re.search(r"^license=\((.*)\)$", text, re.M).group(1), pkg
+        assert lic in text, f"{pkg}: LICENSE sha256 is stale (root LICENSE changed?)"
+        assert 'install -Dm644 "$srcdir/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"' in text, pkg
+
+
+def test_license_files_present():
+    for f in ("LICENSE", "LICENSING.md", "REUSE.toml", "LICENSES/PolyForm-Noncommercial-1.0.0.txt",
+              "LICENSES/GPL-3.0-or-later.txt", "LICENSES/OFL-1.1.txt"):
+        assert (REPO / f).is_file(), f
+    text = (REPO / "LICENSE").read_text()
+    assert text.startswith("Required Notice: Copyright 2026 GenorTG"), "Required Notice line must come first"
+    body = (REPO / "LICENSES/PolyForm-Noncommercial-1.0.0.txt").read_text()
+    assert body in text, "LICENSE must carry the unmodified PolyForm text"

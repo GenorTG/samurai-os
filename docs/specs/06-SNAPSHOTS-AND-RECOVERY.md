@@ -18,8 +18,9 @@ btrfs subvolumes (flat layout, same as Garuda/CachyOS):
 | `@cache` | `/var/cache` | no | pacman cache must survive rollback (we need it to roll forward again) |
 | `@log` | `/var/log` | no | logs explain what happened, so a rollback must not erase them |
 | `@tmp` | `/var/tmp` | no | |
-| `@containers` | `/var/lib/docker`, `/var/lib/containers` | no | huge, churns, `nodatacow` optional |
-| `@vm` | `/var/lib/libvirt/images` | no, `nodatacow` | VM disk images |
+| `@docker` | `/var/lib/docker` | no | Docker engine store: images and volumes must survive a rollback; churns |
+| `@containers` | `/var/lib/containers` | no | Podman/Buildah root store, same reasoning; one subvolume per path (two stores never share one) |
+| `@vm` | `/var/lib/libvirt/images` | no, `chattr +C` on the directory | VM disk images (no-CoW is a per-directory attribute; the `nodatacow` mount option is filesystem-wide and not used) |
 | `@snapshots` | `/.snapshots` | — | snapper storage |
 
 ## Snapshot policy
