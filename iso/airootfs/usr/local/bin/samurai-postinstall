@@ -483,6 +483,7 @@ limine)
             printf '\n'
         done
         for k in "${KERNEL_ARR[@]}"; do
+            [ -s "/boot/initramfs-$k-fallback.img" ] || continue  # preset without a fallback image (linux-cachyos)
             printf '/Samurai OS (%s, fallback initramfs)\n' "$k"
             printf '    protocol: linux\n'
             printf '    path: boot():/vmlinuz-%s\n' "$k"
@@ -517,6 +518,7 @@ systemd-boot)
             printf 'initrd  /initramfs-%s.img\n' "$k"
             printf 'options %s\n' "$KOPTS"
         } > "/boot/loader/entries/samurai-$k.conf"
+        [ -s "/boot/initramfs-$k-fallback.img" ] || continue  # preset without a fallback image (linux-cachyos)
         {
             printf 'title   Samurai OS (%s, fallback initramfs)\n' "$k"
             printf 'linux   /vmlinuz-%s\n' "$k"

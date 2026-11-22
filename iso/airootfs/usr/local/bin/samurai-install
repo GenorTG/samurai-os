@@ -681,7 +681,12 @@ fi
 for k in "${KERNEL_ARR[@]}"; do
     [ -s "/mnt/boot/vmlinuz-$k" ] || die "kernel image missing after postinstall: /boot/vmlinuz-$k"
     [ -s "/mnt/boot/initramfs-$k.img" ] || die "initramfs missing after postinstall: /boot/initramfs-$k.img"
-    [ -s "/mnt/boot/initramfs-$k-fallback.img" ] || die "fallback initramfs missing after postinstall: /boot/initramfs-$k-fallback.img"
+    # a fallback image exists only for kernels whose mkinitcpio preset builds one
+    # (linux-cachyos ships none; linux-zen/linux do): if the preset declares it,
+    # it must exist
+    if grep -qE "^PRESETS=.*fallback" "/mnt/etc/mkinitcpio.d/$k.preset" 2>/dev/null; then
+        [ -s "/mnt/boot/initramfs-$k-fallback.img" ] || die "fallback initramfs missing after postinstall: /boot/initramfs-$k-fallback.img"
+    fi
 done
 
 ### first snapshot: install-complete (spec 06). Created LIVE-side: the install
