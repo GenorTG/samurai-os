@@ -15,11 +15,23 @@ log() { printf '%s %s\n' "$(date -Is)" "$*"; }
 # Offline installs: samurai-install binds the medium's local repository into
 # the target and passes its pacman config here. Every install below goes
 # through pac, so online and offline installs resolve the same package sets.
+# samurai-install copies the toolbox into the target before this runs, so the
+# first samurai-tools install meets those unowned files. pacman checks file
+# conflicts BEFORE pre_install, so the package's cleanup hook cannot help:
+# let it take over exactly the paths it ships (never anything else).
+SAMURAI_OWNED_OVERWRITE=(
+    --overwrite '/usr/local/bin/samurai'
+    --overwrite '/usr/local/bin/samurai-*'
+    --overwrite '/usr/share/samurai/catalog/*'
+    --overwrite '/usr/lib/samurai/interventions/*'
+)
 pac() {
+    local extra=()
+    [ "${1:-}" = -S ] && extra=("${SAMURAI_OWNED_OVERWRITE[@]}")
     if [ -n "${SAMURAI_PACMAN_CONF:-}" ]; then
-        pacman --config "$SAMURAI_PACMAN_CONF" "$@"
+        pacman --config "$SAMURAI_PACMAN_CONF" "$@" "${extra[@]}"
     else
-        pacman "$@"
+        pacman "$@" "${extra[@]}"
     fi
 }
 log "samurai-postinstall starting"

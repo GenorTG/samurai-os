@@ -506,7 +506,8 @@ cp /usr/local/bin/samurai-postinstall /mnt/usr/local/bin/
 chmod 755 /mnt/usr/local/bin/samurai-postinstall
 # every samurai CLI tool + the app catalog: the installed system has the
 # toolbox from the first boot, even before samurai-tools arrives from the
-# repo (its pre_install removes these unowned copies, no file conflict)
+# repo (postinstall's pac passes --overwrite for exactly these paths: pacman
+# checks file conflicts before pre_install could remove the unowned copies)
 for f in /usr/local/bin/samurai /usr/local/bin/samurai-*; do
     case "$f" in */samurai-install|*/samurai-postinstall) continue ;; esac
     [ -f "$f" ] && install -m 755 "$f" /mnt/usr/local/bin/
