@@ -306,10 +306,10 @@ mount "$ESP" /mnt/boot
 
 # mkinitcpio hooks go in BEFORE pacstrap so the kernel's own mkinitcpio hook
 # inside the transaction builds with OUR hooks, not the base defaults
-HOOKS="base systemd autodetect modconf kms keyboard sd-vconsole block filesystems fsck"
+HOOKS="base systemd autodetect microcode modconf kms keyboard sd-vconsole block filesystems fsck"
 MODULES=""
 if [ "$DEVICE_ENCRYPT" -eq 1 ]; then
-    HOOKS="base systemd autodetect modconf kms keyboard sd-vconsole sd-encrypt block filesystems fsck"
+    HOOKS="base systemd autodetect microcode modconf kms keyboard sd-vconsole sd-encrypt block filesystems fsck"
     # the LUKS keyfile lives on the vfat ESP: the initramfs must be able to
     # mount it (autodetect prunes vfat otherwise) — learned the hard way
     MODULES="vfat nls_cp437 nls_ascii"
@@ -464,7 +464,7 @@ if [ "$DESKTOP" = kde ] && [ -f "$OFFLINE_DIR/samurai-offline.db" ]; then
     pacman --config "$OFFLINE_CONF" --sysroot /mnt -Sy --noconfirm 2>&1 | TLOG "$LOG"
     pacman --config "$OFFLINE_CONF" --sysroot /mnt -S --noconfirm --needed \
         base "${KERNEL_ARR[@]}" linux-firmware mkinitcpio \
-        "${GPU_PKGS[@]}" "${KERNEL_HEADERS[@]}" sudo fish zsh python pciutils \
+        "${GPU_PKGS[@]}" "${KERNEL_HEADERS[@]}" amd-ucode intel-ucode zram-generator sudo fish zsh python pciutils \
         "${BLDR_PKGS[@]}" snapper snap-pac archlinux-keyring cachyos-keyring 2>&1 | TLOG "$LOG"
     PACSTAT=${PIPESTATUS[0]}
     set -e
@@ -487,7 +487,7 @@ fi
 if [ "$OFFLINE_OK" -ne 1 ]; then
     pacman -Sy --noconfirm --needed archlinux-keyring 2>/dev/null || true
     pacstrap -K /mnt base "${KERNEL_ARR[@]}" linux-firmware mkinitcpio \
-        "${GPU_PKGS[@]}" "${KERNEL_HEADERS[@]}" "${PIN_PKGS[@]}" sudo fish zsh python pciutils \
+        "${GPU_PKGS[@]}" "${KERNEL_HEADERS[@]}" "${PIN_PKGS[@]}" amd-ucode intel-ucode zram-generator sudo fish zsh python pciutils \
         "${BLDR_PKGS[@]}" snapper snap-pac 2>&1 | TLOG "$LOG"
 fi
 [ -d /mnt/etc ] || die "install failed (offline and network paths both)"

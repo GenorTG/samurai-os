@@ -549,6 +549,17 @@ printf '%s\n' '[Trigger]' 'Operation = Install' 'Operation = Upgrade' \
     > /etc/pacman.d/hooks/10-samurai-important-snap.hook
 systemctl enable snapper.timer snapper-cleanup.timer 2>&1 | log || true
 systemctl enable fstrim.timer 2>&1 | log || true
+# time sync (NTP) and compressed swap: half the RAM, capped, zstd (spec 10)
+systemctl enable systemd-timesyncd.service 2>&1 | log || true
+if pacman -Q zram-generator >/dev/null 2>&1; then
+    cat > /etc/systemd/zram-generator.conf <<'EOF'
+[zram0]
+zram-size = min(ram / 2, 8192)
+compression-algorithm = zstd
+swap-priority = 100
+EOF
+    log "swap: zram-generator configured (zram0 = min(ram/2, 8 GiB), zstd)"
+fi
 # network config lives on the ISO, not in the pacstrap'd target (learned: the
 # updater's preflight died on "no network"). Write the basic DHCP config:
 mkdir -p etc/systemd/network

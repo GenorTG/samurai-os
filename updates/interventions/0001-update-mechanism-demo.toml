@@ -2,6 +2,6 @@ id = "0001-update-mechanism-demo"
 title = "Update mechanism demo (M3 test only)"
 news_url = "https://archlinux.org/news/"
 phase = "post"
-applies_if = "install-profile exists (every Samurai install)"
+applies_if = "always"
 script = "0001-update-mechanism-demo.sh"
 idempotent = true
