@@ -25,7 +25,7 @@ def installed_vm(mirror):
         vm.login_root(timeout=280)
         acc = vm.serial_cmd(
             "curl -fsSL http://10.0.2.2:8966/profile-test.toml -o /tmp/profile-test.toml "
-            "&& samurai-install --profile /tmp/profile-test.toml --disk /dev/vda --yes "
+            "&& SAMURAI_TEST_AUTOKEY=1 samurai-install --profile /tmp/profile-test.toml --disk /dev/vda --yes "
             "2>&1 | tail -c 2500; echo INSTALL-\"RC\"=${pipestatus[1]}",
             "INSTALL-RC=", timeout=INSTALL_TIMEOUT,
         )

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import re
 
-from conftest import INSTALL_TIMEOUT, REPO, find_iso, password_hash
+from conftest import INSTALL_TIMEOUT, REPO, find_iso, password_hash, with_test_autokey
 from vm import VM
 
 
@@ -28,7 +28,7 @@ def _kde_profile(mirror) -> str:
     profile = re.sub(r"\[user\].*?(?=\n\[|\Z)", new_user, default, flags=re.S)
     # the kernel set: keep the medium-installable default (linux)
     assert 'desktop = "kde"' in profile
-    (mirror.dir / "profile-kde.toml").write_text(profile)
+    (mirror.dir / "profile-kde.toml").write_text(with_test_autokey(profile))
     return profile
 
 
@@ -45,7 +45,7 @@ def test_kde_install(mirror):
         ga = vm.ensure_qga()
         code, out = ga.exec(
             "curl -fsSL http://10.0.2.2:8966/profile-kde.toml -o /tmp/profile-kde.toml "
-            "&& samurai-install --profile /tmp/profile-kde.toml --disk /dev/vda --yes "
+            "&& SAMURAI_TEST_AUTOKEY=1 samurai-install --profile /tmp/profile-kde.toml --disk /dev/vda --yes "
             ">/dev/null 2>&1; RC=$?; echo KDE-INSTALL-RC=$RC; "
             "[ $RC = 0 ] || tail -c 2500 /var/log/samurai/install.log",
             timeout=INSTALL_TIMEOUT,

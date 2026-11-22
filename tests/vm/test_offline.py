@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import re
 
-from conftest import INSTALL_TIMEOUT, REPO, find_iso, password_hash
+from conftest import INSTALL_TIMEOUT, REPO, find_iso, password_hash, with_test_autokey
 from vm import VM
 
 DEAD_MIRROR = "https://offline.invalid/no-such-mirror"
@@ -32,7 +32,7 @@ def _offline_profile(mirror) -> None:
     profile = re.sub(r'nvidia = "auto"', 'nvidia = "yes"', profile)
     assert 'nvidia = "yes"' in profile, "failed to force the NVIDIA stack"
     assert DEAD_MIRROR in profile, "failed to pin the dead mirror"
-    (mirror.dir / "profile-offline.toml").write_text(profile)
+    (mirror.dir / "profile-offline.toml").write_text(with_test_autokey(profile))
 
 
 def test_offline_install(mirror):
@@ -47,7 +47,7 @@ def test_offline_install(mirror):
         ga = vm.ensure_qga()
         code, out = ga.exec(
             "curl -fsSL http://10.0.2.2:8966/profile-offline.toml -o /tmp/p.toml "
-            "&& samurai-install --profile /tmp/p.toml --disk /dev/vda --yes "
+            "&& SAMURAI_TEST_AUTOKEY=1 samurai-install --profile /tmp/p.toml --disk /dev/vda --yes "
             ">/dev/null 2>&1; rc=$?; echo OFFLINE-INSTALL-RC=$rc; "
             "[ $rc -eq 0 ] || tail -n 80 /var/log/samurai/install.log",
             timeout=INSTALL_TIMEOUT,

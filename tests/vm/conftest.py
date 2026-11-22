@@ -5,6 +5,7 @@ import functools
 import http.server
 import os
 import pathlib
+import re
 import socketserver
 import subprocess
 import threading
@@ -28,6 +29,14 @@ def find_iso() -> pathlib.Path:
     if not built:
         pytest.skip("no built ISO in build/ — run ci/build-iso.sh first")
     return built[-1]
+
+
+def with_test_autokey(profile: str) -> str:
+    """VM-test affordance: headless boots need the keyfile unlock the default
+    profile no longer ships (the validator also demands SAMURAI_TEST_AUTOKEY=1)."""
+    out, n = re.subn(r"(?m)^auto_unlock_keyfile\s*=\s*\w+", "auto_unlock_keyfile = true", profile)
+    assert n == 1, "profile has no auto_unlock_keyfile line to override"
+    return out
 
 
 @functools.cache

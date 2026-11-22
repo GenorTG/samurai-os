@@ -80,8 +80,11 @@ sed -i "s|^iso_application=.*|iso_application=\"Samurai OS Live/Installer ($flav
 ### Offline install cache (Genor 2026-11-20): bake the default release
 ### profile's full package closure + sync dbs into the ISO, so the default
 ### install runs WITHOUT network ("a base version installable without a lot
-### of curls"). Downloaded with SigLevel Never: the ISO itself is the trust
-### anchor (signatures were verified upstream when these repos built).
+### of curls"). Every package is downloaded with signature checking ON
+### (Arch, CachyOS and [samurai] keys populated first, CachyOS and Samurai
+### primary fingerprints pinned), so the cache only contains packages that
+### verified at build time. The installer then reads it with SigLevel Never:
+### the ISO (checksummed/signed with the release) is the install-time anchor.
 ### This MUST run before mkarchiso: the cache is injected into the airootfs.
 if [ "$flavor" = offline ]; then
 echo "==> downloading offline install cache (release default set)"
@@ -96,6 +99,26 @@ pacman -Syu --noconfirm >/dev/null
 # on the CachyOS CDN ("Unrecognized archive format" on cachyos.db, seen
 # 2026-11-20); the pacman internal downloader fetched it clean in the probe.
 sed -i "s|^ParallelDownloads.*|ParallelDownloads = 2|" /etc/pacman.conf
+# --- trust setup: signatures stay ON for every repo ----------------------
+# CachyOS keyring: the package cannot vouch for itself, so it is fetched over
+# HTTPS from the four mirrors and its PRIMARY key fingerprint is pinned.
+CACHYOS_FPR=882DCFE48E2051D48E2562ABF3B607488DB35A47
+for s in nl aur mirror build; do
+    curl -fsSL --retry 4 -o /tmp/ck.db "https://$s.cachyos.org/repo/x86_64/cachyos/cachyos.db" || continue
+    kr=$(bsdtar -tf /tmp/ck.db | grep -o "^cachyos-keyring-[^/]*" | head -1) || continue
+    curl -fsSL --retry 4 -o /tmp/ck.pkg.tar.zst "https://$s.cachyos.org/repo/x86_64/cachyos/$kr-any.pkg.tar.zst" && break
+done
+[ -s /tmp/ck.pkg.tar.zst ] || { echo "error: cannot fetch cachyos-keyring" >&2; exit 1; }
+pacman -U --noconfirm /tmp/ck.pkg.tar.zst >/dev/null
+pacman-key --populate archlinux cachyos >/dev/null
+pacman-key --finger "$CACHYOS_FPR" | tr -d " " | grep -q "$CACHYOS_FPR" ||
+    { echo "error: CachyOS key $CACHYOS_FPR not in the populated keyring" >&2; exit 1; }
+pacman-key --lsign-key "$CACHYOS_FPR" >/dev/null
+# [samurai]: the pinned build key shipped in the repo
+SAMURAI_FPR=DFE8C148C042AA3C199AAEA08436E12731EDD3FA
+pacman-key --add /src/iso/airootfs/usr/share/samurai/build-key.txt >/dev/null
+pacman-key --finger "$SAMURAI_FPR" | tr -d " " | grep -q "$SAMURAI_FPR" || { echo "error: samurai build key mismatch" >&2; exit 1; }
+pacman-key --lsign-key "$SAMURAI_FPR" >/dev/null
 cat >> /etc/pacman.conf <<REPOS
 
 [cachyos]
@@ -105,10 +128,10 @@ Server = https://mirror.cachyos.org/repo/\$arch/\$repo
 Server = https://build.cachyos.org/repo/\$arch/\$repo
 
 [samurai]
+SigLevel = Required DatabaseRequired
 Server = https://github.com/GenorTG/samurai-repo/releases/download/x86_64
 Server = https://repo.smart-samurai.pl/samurai/x86_64
 REPOS
-sed -i "s|^SigLevel.*|SigLevel = Never|" /etc/pacman.conf
 pacman -Sy >/dev/null
 mkdir -p /b/offline-pkgs /tmp/freshdb
 # resolve against an EMPTY db: pacman -Sw skips installed packages, so a
@@ -140,11 +163,15 @@ rm -f /b/offline-pkgs/*.old
 '
 mkdir -p "$profile_dir/airootfs/usr/share/samurai/pkg-cache"
 # -L: samurai-offline.db / .files are symlinks to the .tar.gz archives
-find "$out_dir/offline-pkgs" -maxdepth 1 \( -type f -o -type l \) ! -name '*.sig' \
+# package .sig files stay with their packages (later offline verification)
+find "$out_dir/offline-pkgs" -maxdepth 1 \( -type f -o -type l \) \
     -exec cp -L {} "$profile_dir/airootfs/usr/share/samurai/pkg-cache/" \;
 [ -f "$profile_dir/airootfs/usr/share/samurai/pkg-cache/samurai-offline.db" ] ||
     { echo "error: offline repository database missing" >&2; exit 1; }
 echo "==> offline cache: $(ls "$profile_dir/airootfs/usr/share/samurai/pkg-cache" | wc -l) files"
+# SAMURAI_ISO_DOWNLOAD_ONLY=1: verify that the closure resolves and every
+# signature checks out, then stop (minutes, not the full ISO build)
+if [ "${SAMURAI_ISO_DOWNLOAD_ONLY:-0}" = 1 ]; then echo "==> download-only: done"; exit 0; fi
 else
     echo "==> online flavor: no baked package cache (installer uses the mirrors)"
 fi

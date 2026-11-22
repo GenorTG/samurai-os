@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import re
 
-from conftest import INSTALL_TIMEOUT, REPO, find_iso, password_hash
+from conftest import INSTALL_TIMEOUT, REPO, find_iso, password_hash, with_test_autokey
 from vm import VM
 
 USER = "samurai"
@@ -39,7 +39,7 @@ def _profile(mirror) -> None:
         f'password_hash = "{password_hash()}"\n'
     )
     profile = re.sub(r"\[user\].*?(?=\n\[|\Z)", new_user, default, flags=re.S)
-    (mirror.dir / "profile-daily.toml").write_text(profile)
+    (mirror.dir / "profile-daily.toml").write_text(with_test_autokey(profile))
 
 
 def _step(ga, name: str, cmd: str, expect: list[str], timeout: float = 300) -> str:
@@ -61,7 +61,7 @@ def test_daily_driver(mirror):
         ga = vm.ensure_qga()
         _, out = ga.exec(
             "curl -fsSL http://10.0.2.2:8966/profile-daily.toml -o /tmp/p.toml "
-            "&& samurai-install --profile /tmp/p.toml --disk /dev/vda --yes "
+            "&& SAMURAI_TEST_AUTOKEY=1 samurai-install --profile /tmp/p.toml --disk /dev/vda --yes "
             ">/dev/null 2>&1; rc=$?; echo DAILY-INSTALL-RC=$rc; "
             "[ $rc -eq 0 ] || tail -n 60 /var/log/samurai/install.log",
             timeout=INSTALL_TIMEOUT,

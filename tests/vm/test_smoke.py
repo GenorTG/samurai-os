@@ -45,7 +45,7 @@ def test_install_default(mirror):
         vm.login_root()  # live ISO autologins; no login prompt may appear
         acc = vm.serial_cmd(
             "curl -fsSL http://10.0.2.2:8966/profile-test.toml -o /tmp/profile-test.toml "
-            "&& samurai-install --profile /tmp/profile-test.toml --disk /dev/vda --yes "
+            "&& SAMURAI_TEST_AUTOKEY=1 samurai-install --profile /tmp/profile-test.toml --disk /dev/vda --yes "
             "2>&1 | tail -c 3000; echo INSTALL-\"RC\"=${pipestatus[1]}",
             "INSTALL-RC=", timeout=INSTALL_TIMEOUT,
         )
