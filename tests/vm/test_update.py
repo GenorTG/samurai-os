@@ -41,20 +41,10 @@ def installed_vm(mirror):
 
 def test_update_and_intervention(installed_vm):
     vm, ga = installed_vm
-    _, out = ga.exec(
-        "python3 - <<'PY'\n"
-        "from pathlib import Path\n"
-        "path = Path('/etc/pacman.conf')\n"
-        "text = path.read_text()\n"
-        "if '[samurai-testing]' not in text:\n"
-        "    stable = text.index('[samurai]')\n"
-        "    block = '[samurai-testing]\\nInclude = /etc/pacman.d/samurai-testing-mirrorlist\\nSigLevel = Required DatabaseRequired\\n\\n'\n"
-        "    path.write_text(text[:stable] + block + text[stable:])\n"
-        "PY\n"
-        "awk '/^\\[samurai-testing\\]$/{test=1} /^\\[samurai\\]$/{stable=1} END{if(test && stable) print \"TEST-CHANNEL-READY\"}' /etc/pacman.conf",
-        check=False,
-    )
-    assert "TEST-CHANNEL-READY" in out, out
+    # the stable [samurai] channel is what installed systems update from; the
+    # tools copied from the ISO must be replaced by the packaged samurai-tools
+    _, out = ga.exec("grep -q '^\\[samurai\\]$' /etc/pacman.conf && echo STABLE-CHANNEL-READY", check=False)
+    assert "STABLE-CHANNEL-READY" in out, out
 
     # run 1: the intervention fires
     code, out = ga.exec(

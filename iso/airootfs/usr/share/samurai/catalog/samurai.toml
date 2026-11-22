@@ -148,7 +148,7 @@ default = ["firefox"]
 [[choice]]
 id = "kde-theme"
 mode = "single"
-default = "otto"
+default = "breeze"   # Otto/Scratchy stay opt-in until their KDE Store licences are confirmed (spec 14)
 when = "desktop == kde"
 options = [
   { id = "otto", name = "Otto (dark, orange/yellow)", meta = "samurai-theme-otto" },

@@ -23,8 +23,11 @@ from conftest import INSTALL_TIMEOUT, REPO, find_iso, password_hash
 from vm import VM
 
 USER = "samurai"
+# kwin picks the socket name (wayland-0 or wayland-1 when a greeter already
+# holds 0): discover it instead of hardcoding
+WLSOCK = "$(cd /run/user/1000 && ls wayland-[0-9]* 2>/dev/null | grep -v '\\.lock$' | head -1)"
 UENV = (
-    f"runuser -u {USER} -- env XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 "
+    f"runuser -u {USER} -- env XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY={WLSOCK} "
     "QT_QPA_PLATFORM=wayland DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus"
 )
 
@@ -77,10 +80,10 @@ def test_daily_driver(mirror):
             f"printf '[Autologin]\\nUser={USER}\\nSession=plasma\\n' > /etc/sddm.conf.d/zz-vm-autologin.conf && "
             "systemctl restart sddm && "
             "for i in $(seq 90); do pgrep -u samurai -x plasmashell >/dev/null && "
-            "[ -S /run/user/1000/wayland-0 ] && break; sleep 2; done; "
-            "pgrep -u samurai -x plasmashell && ls /run/user/1000/wayland-0 && "
+            "ls /run/user/1000/wayland-[0-9] >/dev/null 2>&1 && break; sleep 2; done; "
+            "pgrep -u samurai -x plasmashell && ls /run/user/1000/wayland-[0-9] && "
             "loginctl list-sessions --no-legend"
-        ), ["wayland-0"], timeout=240)
+        ), ["wayland-"], timeout=240)
         ga.exec("sleep 20", timeout=40)  # let the panel + wallpaper settle
         vm.screendump("daily-01-desktop")
 

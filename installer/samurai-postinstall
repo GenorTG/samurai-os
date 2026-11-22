@@ -162,6 +162,24 @@ case "$DESKTOP" in
             noto-fonts noto-fonts-emoji flatpak power-profiles-daemon bluez bluez-utils)
         pac -S --noconfirm --needed "${DESKTOP_PKGS[@]}" || { log "FATAL: KDE install failed"; exit 16; }
         DM=sddm
+        # SDDM greeter on Wayland under KWin with the Breeze theme (what the
+        # Plasma "apply Plasma settings" button writes), so the login screen
+        # matches the desktop instead of a bare X11 fallback
+        install -d -m 755 /etc/sddm.conf.d
+        cat > /etc/sddm.conf.d/10-samurai-kde.conf <<'EOF'
+[General]
+DisplayServer=wayland
+GreeterEnvironment=QT_WAYLAND_SHELL_INTEGRATION=layer-shell
+Numlock=on
+
+[Theme]
+Current=breeze
+CursorTheme=breeze_cursors
+Font=Noto Sans,10,-1,5,50,0,0,0,0,0
+
+[Wayland]
+CompositorCommand=kwin_wayland --drm --no-lockscreen --no-global-shortcuts --locale1
+EOF
         # Breeze Dark default for every new user (Genor 2026-11-17)
         install -d /etc/skel/.config
         cat > /etc/skel/.config/kdeglobals <<'EOF'
