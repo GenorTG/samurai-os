@@ -114,8 +114,8 @@ def test_daily_driver(mirror):
 
         # storage layout (spec 06): container stores on their own subvolumes, licence shipped
         _step(ga, "LAYOUT", (
-            "findmnt -no SOURCE /var/lib/docker /var/lib/containers /var/lib/libvirt/images /.snapshots | "
-            "grep -o '@[a-z]*' | sort | tr '\\n' ' '; echo; "
+            "for d in /var/lib/docker /var/lib/containers /var/lib/libvirt/images /.snapshots; do "
+            "findmnt -rno OPTIONS \"$d\" | grep -o 'subvol=/@[a-z]*' | sed 's|subvol=/||'; done | sort | tr '\\n' ' '; echo; "
             "test -s /usr/share/licenses/samurai-tools/LICENSE && echo LICENSE-OK; "
             "pacman -Qi samurai-tools | grep -E '^Licenses'"
         ), ["@containers @docker @snapshots @vm", "LICENSE-OK", "PolyForm-Noncommercial-1.0.0"], timeout=60)
