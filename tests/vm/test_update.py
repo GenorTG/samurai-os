@@ -23,13 +23,15 @@ def installed_vm(mirror):
     try:
         vm.serial_connect()
         vm.login_root(timeout=280)
-        acc = vm.serial_cmd(
+        ga = vm.ensure_qga()
+        _, acc = ga.exec(
             "curl -fsSL http://10.0.2.2:8966/profile-test.toml -o /tmp/profile-test.toml "
             "&& SAMURAI_TEST_AUTOKEY=1 SAMURAI_SERIAL_CONSOLE=1 samurai-install --profile /tmp/profile-test.toml --disk /dev/vda --yes "
-            "2>&1 | tail -c 2500; echo INSTALL-\"RC\"=${pipestatus[1]}",
-            "INSTALL-RC=", timeout=INSTALL_TIMEOUT,
+            ">/dev/null 2>&1; rc=$?; echo INSTALL-RC=$rc; [ $rc -eq 0 ] || tail -n 60 /var/log/samurai/install.log",
+            timeout=INSTALL_TIMEOUT, check=False,
         )
         assert "INSTALL-RC=0" in acc, acc[-2500:]
+        ga.close()
         vm.eject_iso()
         vm.reboot()
         vm.wait_for("login:", timeout=300)

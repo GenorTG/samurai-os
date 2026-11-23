@@ -94,7 +94,7 @@ for src in /src/pkgbuilds/*/; do
     cp -a "$src" "$pkg"
     cp -a /src/LICENSE "$pkg/LICENSE"
     if [ "$pkg" = samurai-tools ]; then
-        for name in samurai samurai-update samurai-snap samurai-rescue samurai-apps samurai-notifier \
+        for name in samurai samurai-update samurai-snap samurai-rescue samurai-apps samurai-notifier validate-interventions.py \
                     samurai-notifier.service samurai-notifier.timer; do
             cp -a "/src/updates/$name" "$pkg/"
         done

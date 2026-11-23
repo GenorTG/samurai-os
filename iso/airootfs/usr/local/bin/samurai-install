@@ -502,7 +502,7 @@ fi
 
 # One package set for both paths (offline repo or mirrors): base, kernels,
 # firmware + microcode, GPU stacks, bootloader, snapshots, shells, zram.
-BASE_PKGS=(base "${KERNEL_ARR[@]}" linux-firmware mkinitcpio
+BASE_PKGS=(base cachyos-keyring "${KERNEL_ARR[@]}" linux-firmware mkinitcpio
     "${GPU_PKGS[@]}" "${KERNEL_HEADERS[@]}"
     amd-ucode intel-ucode zram-generator pacman-contrib sudo fish zsh python pciutils
     "${BLDR_PKGS[@]}" snapper snap-pac)
