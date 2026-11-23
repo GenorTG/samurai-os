@@ -14,7 +14,7 @@
 # Passwords never enter the profile in plaintext (crypt hash only, or the
 # postinstall generated-password path). Secrets (keyfile, profile with hash,
 # log) are created under umask 077; world-readable files are made explicitly.
-set -euo pipefail
+set -Eeuo pipefail
 
 PROFILE=""
 DISK_OVERRIDE=""
@@ -58,6 +58,8 @@ cleanup() {
     exit "$rc"
 }
 trap cleanup EXIT
+# a set -e abort must never be silent: say which line and command failed
+trap 'log "ERROR: line $LINENO: $BASH_COMMAND (exit $?)"' ERR
 
 mkdir -p /var/log/samurai
 ( umask 077; : >> "$LOG" )             # the log stays root-only (it is copied to the target)
@@ -330,11 +332,23 @@ log "partitioning $DISK"
 sgdisk -Z "$DISK"
 sgdisk -n 1:0:+2G -t 1:ef00 -c 1:esp "$DISK"   # ESP (2 GiB: kernels each snapshot entry needs, spec 06)
 sgdisk -n 2:0:0 -t 2:8304 -c 2:samurai-root "$DISK"  # Linux x86-64 root (/usr split ok)
-partprobe "$DISK"; udevadm settle
+# the kernel/udev may still be re-reading the new table: partprobe can fail
+# transiently ("device busy") and set -e used to kill the install silently here
+udevadm settle
+for _try in 1 2 3 4 5 6 7 8 9 10; do
+    partprobe "$DISK" 2>/dev/null && break
+    log "partprobe $DISK not ready (attempt $_try), waiting"
+    sleep 1; udevadm settle
+done
+udevadm settle
 # partition naming: sdX/vdX -> sdX1; nvmeXnY / mmcblkX -> nvmeXnYp1 (kernel rule:
 # a 'p' separator whenever the disk name ends in a digit)
 case "$DISK" in *[0-9]) PSEP=p ;; *) PSEP= ;; esac
 ESP="${DISK}${PSEP}1"; ROOTPART="${DISK}${PSEP}2"
+for _try in 1 2 3 4 5 6 7 8 9 10; do
+    [ -b "$ESP" ] && [ -b "$ROOTPART" ] && break
+    sleep 1
+done
 [ -b "$ESP" ] && [ -b "$ROOTPART" ] || die "partitioning failed (expected $ESP and $ROOTPART)"
 mkfs.fat -F32 -n ESP "$ESP"
 
