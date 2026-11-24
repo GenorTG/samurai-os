@@ -645,6 +645,9 @@ important_commands = ["pacman -Syu", "pacman -Syyu"]
 EOF
 enable_unit snapper-cleanup.timer
 enable_unit fstrim.timer
+# spec 06: monthly btrfs scrub of the root filesystem (`-` is systemd's escaped path for /);
+# `samurai health` (storage.btrfs-timers) reports and repairs it when it is off
+enable_unit 'btrfs-scrub@-.timer'
 # pacman cache hygiene (pacman-contrib also provides checkupdates for the notifier)
 enable_unit paccache.timer
 # compressed swap: half the RAM, capped, zstd (spec 06/10)
