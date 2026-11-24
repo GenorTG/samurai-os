@@ -5,10 +5,10 @@
 # every source against its origin, so regenerate sha256sums after each change:
 #   for f in ...; do sha256sum "$f"; done   (or updpkgsums in the staged dir)
 pkgname=samurai-tools
-pkgver=0.3.0
-pkgrel=3
-pkgdesc="Samurai OS updater, CLI executors, app catalog tool, update notifier and shell completions"
-arch=(any)
+pkgver=0.4.0
+pkgrel=1
+pkgdesc="Samurai OS CLI (Rust dispatcher), updater, executors, app catalog tool, update notifier and shell completions"
+arch=(x86_64)
 url="https://github.com/GenorTG/samurai-os"
 license=('PolyForm-Noncommercial-1.0.0' 'GPL-3.0-or-later')
 depends=(
@@ -17,6 +17,8 @@ depends=(
     curl
     findutils
     gawk
+    gcc-libs
+    glibc
     grep
     pacman
     pacman-contrib   # checkupdates (samurai-notifier), paccache (samurai-update housekeeping)
@@ -25,6 +27,8 @@ depends=(
     systemd
     util-linux
 )
+options=(!debug)      # the release profile already strips; no -debug package
+makedepends=(rust)   # builds toolbox/ (staged beside this file by ci/build-repo.sh)
 optdepends=('sudo: samurai apps install/remove as a normal user'
             'polkit: pkexec fallback when sudo is missing'
             'flatpak: Flatpak-only catalog apps'
@@ -33,7 +37,6 @@ optdepends=('sudo: samurai apps install/remove as a normal user'
             'snapper: rollback point before samurai update (samurai snap)')
 install=samurai-tools.install
 source=(
-    samurai
     samurai-update
     samurai-snap
     samurai-rescue
@@ -51,7 +54,6 @@ source=(
     LICENSE
 )
 sha256sums=(
-    '60847c2cd58874fb9843f3ff80fd87b54719156a38a2002908404f3ca4585483'
     '675eb8a6dc64bac82def35ecddfa786a7055ac916bdd74d10da118df5490f292'
     '28ad946a28432d3d820761718c52473f51da5ba03c7a3583a4d6494ae52ad76c'
     'b32f62e974cfe2c4db20edb9c70f9656e91d9a06c08c1e23e779693061bd5da9'
@@ -69,10 +71,16 @@ sha256sums=(
     '1be06492345bb03a60d13d23d744d979cc7cf1ce154da5227651f8dd78f25017'
 )
 
+build() {
+    # Rust `samurai` CLI (M5). Std-only workspace: no network, no vendored crates.
+    cd "$startdir/toolbox"
+    CARGO_TARGET_DIR="$srcdir/target" cargo build --release --locked --offline -p samurai-cli
+}
+
 package() {
     install -Dm644 "$srcdir/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
     cd "$srcdir"
-    install -Dm755 samurai "$pkgdir/usr/local/bin/samurai"
+    install -Dm755 "$srcdir/target/release/samurai" "$pkgdir/usr/local/bin/samurai"
     install -Dm755 samurai-update "$pkgdir/usr/local/bin/samurai-update"
     install -Dm755 samurai-snap "$pkgdir/usr/local/bin/samurai-snap"
     install -Dm755 samurai-rescue "$pkgdir/usr/local/bin/samurai-rescue"

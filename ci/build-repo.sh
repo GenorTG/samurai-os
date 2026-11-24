@@ -61,7 +61,7 @@ docker run --rm -i --name "$container" \
 set -euo pipefail
 pacman-key --init >/dev/null 2>&1
 pacman -Syu --noconfirm >/dev/null      # stale-image guard (see ci/build-iso.sh)
-pacman -S --noconfirm --needed namcap >/dev/null
+pacman -S --noconfirm --needed namcap rust >/dev/null
 
 # non-root builder, per spec 02 step 3
 useradd -m builder
@@ -94,7 +94,10 @@ for src in /src/pkgbuilds/*/; do
     cp -a "$src" "$pkg"
     cp -a /src/LICENSE "$pkg/LICENSE"
     if [ "$pkg" = samurai-tools ]; then
-        for name in samurai samurai-update samurai-snap samurai-rescue samurai-apps samurai-notifier validate-interventions.py \
+        # the Rust CLI replaces the shell dispatcher (updates/samurai stays for the live ISO)
+        mkdir -p "$pkg/toolbox"
+        tar -C /src/toolbox --exclude=target -cf - . | tar -C "$pkg/toolbox" -xf -
+        for name in samurai-update samurai-snap samurai-rescue samurai-apps samurai-notifier validate-interventions.py \
                     samurai-notifier.service samurai-notifier.timer; do
             cp -a "/src/updates/$name" "$pkg/"
         done
