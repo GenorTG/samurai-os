@@ -40,7 +40,7 @@ guided installer and CLI/toolbox. VM validation runs on genorbox1. Site: <https:
 - archive (test_update_archive, Arch 2026/08/15 snapshot): PASS on re-run (14m16s). Earlier rc=1 did not reproduce (likely transient archive/mirror fetch); test now keeps /tmp/install.log and dumps its tail on failure.
 
 ## Next
-1. M5: replace the shell `samurai` dispatcher with the Rust CLI; keep executors.
+1. M5 slice 1 DONE: `toolbox/` Rust workspace (`samurai-core` lib, `samurai-cli` bin, std-only) mirrors the shell dispatcher; 9 tests + clippy -D warnings green (build in `archlinux` container: `pacman -S rust gcc`, `cargo test`). NOT packaged yet: samurai-tools is arch=any; shipping the binary needs an x86_64 package (or musl static) + build-repo.sh/ISO staging change + VM test. Then port executors one by one (`status`, `snap`, ...).
 2. Qt toolbox GUI as a client of `samurai apps --json` / `samurai update --json`.
 3. Firewall presets (KDE Connect, Steam, Sunshine), Secure Boot (sbctl), TPM2 unlock (spec 09, M8).
 4. Configure `samurai-testing` environment secrets so `publish-testing-repo.yml` can publish
