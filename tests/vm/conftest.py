@@ -94,5 +94,5 @@ def mirror():
         assert 'kernels = ["linux"]' in profile, "conftest lost its kernels override"
         tomllib.loads(profile)  # must parse: belt and braces against duplicate tables
         m.dir.mkdir(parents=True, exist_ok=True)
-        (m.dir / "profile-test.toml").write_text(profile)
+        (m.dir / "profile-test.toml").write_text(with_test_autokey(profile))
         yield m  # Mirror.__enter__ already started the server thread
