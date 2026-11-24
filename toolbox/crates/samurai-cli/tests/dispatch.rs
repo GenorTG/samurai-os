@@ -20,7 +20,17 @@ fn stub(dir: &Path, tool: &str, code: i32) {
 }
 
 fn run(dir: &Path, args: &[&str]) -> Output {
-    Command::new(dir.join("samurai")).args(args).output().unwrap()
+    // Parallel tests fork while a sibling's freshly copied binary is still open for writing:
+    // exec then fails with ETXTBSY (os error 26). Retry; it clears within milliseconds.
+    for _ in 0..50 {
+        match Command::new(dir.join("samurai")).args(args).output() {
+            Err(e) if e.raw_os_error() == Some(26) => {
+                std::thread::sleep(std::time::Duration::from_millis(20))
+            }
+            r => return r.unwrap(),
+        }
+    }
+    panic!("samurai binary stayed busy");
 }
 
 fn out(o: &Output) -> String {
@@ -59,10 +69,54 @@ fn executors_get_args_and_exit_code_passes_through() {
 }
 
 #[test]
-fn status_maps_to_notifier_status() {
+fn status_is_native_and_read_only() {
     let d = sandbox("status");
+    let state = d.join("state");
+    fs::create_dir_all(state.join("samurai")).unwrap();
+    fs::write(state.join("samurai/update-check"), "arch=2\n").unwrap();
+    fs::write(
+        state.join("samurai/update-check.json"),
+        "{\"schema\": 1, \"arch\": 2}\n",
+    )
+    .unwrap();
+    let run_status = |args: &[&str], xdg: &Path| {
+        for _ in 0..50 {
+            match Command::new(d.join("samurai"))
+                .arg("status")
+                .args(args)
+                .env("XDG_STATE_HOME", xdg)
+                .env("HOME", &d)
+                .output()
+            {
+                Err(e) if e.raw_os_error() == Some(26) => {
+                    std::thread::sleep(std::time::Duration::from_millis(20))
+                }
+                r => return r.unwrap(),
+            }
+        }
+        panic!("samurai binary stayed busy");
+    };
+    let o = run_status(&[], &state);
+    assert_eq!(o.status.code(), Some(0));
+    assert!(out(&o).starts_with("arch=2\n"));
+    assert_eq!(
+        out(&run_status(&["--json"], &state)),
+        "{\"schema\": 1, \"arch\": 2}\n"
+    );
+    // no state: message, exit 0, and no directory is created
+    let empty = d.join("empty");
+    assert_eq!(out(&run_status(&[], &empty)), "no update check yet\n");
+    assert!(!empty.exists(), "status must not create state dirs");
+}
+
+#[test]
+fn status_other_flags_go_to_the_notifier() {
+    let d = sandbox("status-fwd");
     stub(&d, "notifier", 0);
-    assert_eq!(out(&run(&d, &["status", "--json"])), "notifier:--status --json\n");
+    assert_eq!(
+        out(&run(&d, &["status", "--check"])),
+        "notifier:--status --check\n"
+    );
 }
 
 #[test]

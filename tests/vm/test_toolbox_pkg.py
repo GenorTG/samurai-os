@@ -50,6 +50,13 @@ def test_rust_cli_on_live_system(mirror):
         assert "apps-rc=0" in out, out
         _, out = qga.exec("samurai snap --help >/dev/null 2>&1; echo snap-rc=$?; samurai update --help >/dev/null 2>&1; echo upd-rc=$?", check=False)
         assert "snap-rc=0" in out and "upd-rc=0" in out, out
+        # `status` is native Rust and read-only (works as root, creates nothing); other flags reach the notifier
+        _, out = qga.exec("samurai status; echo st-rc=$?; samurai status --json; echo js-rc=$?; ls -d ~/.local/state/samurai 2>&1 | head -1", check=False)
+        assert "no update check yet" in out and "st-rc=0" in out, out
+        assert '{"schema": 1, "error": 1}' in out and "js-rc=0" in out, out
+        assert "No such file" in out, f"status must not create state dirs: {out}"
+        _, out = qga.exec("samurai status --check 2>&1; echo chk-rc=$?", check=False)
+        assert "never as root" in out and "chk-rc=2" in out, out
         _, out = qga.exec("pacman -Qkk samurai-tools 2>&1 | tail -1")
         assert " 0 altered files" in out, out
     finally:

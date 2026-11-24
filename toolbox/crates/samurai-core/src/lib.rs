@@ -3,6 +3,8 @@
 //! Slice 1 (M5): dispatch table, executor lookup and version lookup, behaviourally identical to the
 //! shell dispatcher in `updates/samurai`. Executors (`samurai-update`, `-apps`, ...) stay as they are.
 
+pub mod status;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -28,7 +30,12 @@ dispatcher exits 2 for an unknown command.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Action {
     /// exec `samurai-<tool>` with `prefix` followed by the user's arguments.
-    Exec { tool: &'static str, prefix: &'static [&'static str] },
+    Exec {
+        tool: &'static str,
+        prefix: &'static [&'static str],
+    },
+    /// `samurai status`: handled natively when the args are none or `--json`, else the notifier.
+    Status,
     Version,
     Help,
     Unknown(String),
@@ -36,11 +43,23 @@ pub enum Action {
 
 pub fn parse(cmd: &str) -> Action {
     match cmd {
-        "update" => Action::Exec { tool: "update", prefix: &[] },
-        "apps" => Action::Exec { tool: "apps", prefix: &[] },
-        "snap" => Action::Exec { tool: "snap", prefix: &[] },
-        "rescue" => Action::Exec { tool: "rescue", prefix: &[] },
-        "status" => Action::Exec { tool: "notifier", prefix: &["--status"] },
+        "update" => Action::Exec {
+            tool: "update",
+            prefix: &[],
+        },
+        "apps" => Action::Exec {
+            tool: "apps",
+            prefix: &[],
+        },
+        "snap" => Action::Exec {
+            tool: "snap",
+            prefix: &[],
+        },
+        "rescue" => Action::Exec {
+            tool: "rescue",
+            prefix: &[],
+        },
+        "status" => Action::Status,
         "version" | "--version" | "-V" => Action::Version,
         "help" | "--help" | "-h" => Action::Help,
         other => Action::Unknown(other.to_string()),
@@ -60,7 +79,9 @@ pub fn resolve_tool(here: &Path, fallback: &Path, tool: &str) -> PathBuf {
 
 pub fn is_executable(p: &Path) -> bool {
     use std::os::unix::fs::PermissionsExt;
-    fs::metadata(p).map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0).unwrap_or(false)
+    fs::metadata(p)
+        .map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+        .unwrap_or(false)
 }
 
 /// First line of `file`, trimmed. `None` when unreadable or blank.
@@ -96,8 +117,14 @@ mod tests {
 
     #[test]
     fn parse_table() {
-        assert_eq!(parse("update"), Action::Exec { tool: "update", prefix: &[] });
-        assert_eq!(parse("status"), Action::Exec { tool: "notifier", prefix: &["--status"] });
+        assert_eq!(
+            parse("update"),
+            Action::Exec {
+                tool: "update",
+                prefix: &[]
+            }
+        );
+        assert_eq!(parse("status"), Action::Status);
         for v in ["version", "--version", "-V"] {
             assert_eq!(parse(v), Action::Version);
         }
@@ -114,7 +141,11 @@ mod tests {
         assert_eq!(resolve_tool(&here, &fb, "apps"), fb.join("samurai-apps"));
         let t = here.join("samurai-apps");
         fs::write(&t, "#!/bin/sh\n").unwrap();
-        assert_eq!(resolve_tool(&here, &fb, "apps"), fb.join("samurai-apps"), "not executable yet");
+        assert_eq!(
+            resolve_tool(&here, &fb, "apps"),
+            fb.join("samurai-apps"),
+            "not executable yet"
+        );
         fs::set_permissions(&t, fs::Permissions::from_mode(0o755)).unwrap();
         assert_eq!(resolve_tool(&here, &fb, "apps"), t);
     }
@@ -128,7 +159,10 @@ mod tests {
         assert_eq!(read_version_file(&f), None);
         fs::write(&f, "0.3.0-3\nignored\n").unwrap();
         assert_eq!(read_version_file(&f).as_deref(), Some("0.3.0-3"));
-        assert_eq!(parse_pacman_q("samurai-tools 0.3.0-3\n").as_deref(), Some("0.3.0-3"));
+        assert_eq!(
+            parse_pacman_q("samurai-tools 0.3.0-3\n").as_deref(),
+            Some("0.3.0-3")
+        );
         assert_eq!(parse_pacman_q(""), None);
         assert_eq!(version_line(Some("1-2")), "samurai 1-2 (samurai-tools)");
         assert!(version_line(None).contains("unpackaged"));

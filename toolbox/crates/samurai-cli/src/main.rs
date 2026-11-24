@@ -5,14 +5,21 @@ use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
+use samurai_core::status;
 use samurai_core::{
-    parse, parse_pacman_q, read_version_file, resolve_tool, version_line, Action, FALLBACK_TOOL_DIR,
-    TOOLS_VERSION_FILE, USAGE,
+    parse, parse_pacman_q, read_version_file, resolve_tool, version_line, Action,
+    FALLBACK_TOOL_DIR, TOOLS_VERSION_FILE, USAGE,
 };
 
 fn pacman_version() -> Option<String> {
-    let out = Command::new("pacman").args(["-Q", "samurai-tools"]).output().ok()?;
-    out.status.success().then(|| parse_pacman_q(&String::from_utf8_lossy(&out.stdout))).flatten()
+    let out = Command::new("pacman")
+        .args(["-Q", "samurai-tools"])
+        .output()
+        .ok()?;
+    out.status
+        .success()
+        .then(|| parse_pacman_q(&String::from_utf8_lossy(&out.stdout)))
+        .flatten()
 }
 
 fn exe_dir() -> PathBuf {
@@ -21,6 +28,20 @@ fn exe_dir() -> PathBuf {
         .ok()
         .and_then(|p| p.parent().map(Path::to_path_buf))
         .unwrap_or_else(|| PathBuf::from("."))
+}
+
+fn run_tool(tool: &str, prefix: &[&str], rest: &[String]) -> ExitCode {
+    let path = resolve_tool(&exe_dir(), Path::new(FALLBACK_TOOL_DIR), tool);
+    if !samurai_core::is_executable(&path) {
+        eprintln!(
+            "samurai: command \"{tool}\" is not installed ({} missing)",
+            path.display()
+        );
+        return ExitCode::from(2);
+    }
+    let err = Command::new(&path).args(prefix).args(rest).exec();
+    eprintln!("samurai: cannot run {}: {err}", path.display());
+    ExitCode::from(2)
 }
 
 fn main() -> ExitCode {
@@ -33,6 +54,20 @@ fn main() -> ExitCode {
             print!("{USAGE}");
             ExitCode::SUCCESS
         }
+        Action::Status if status::is_native(&rest) => {
+            let dir = status::state_dir(
+                std::env::var("XDG_STATE_HOME").ok().as_deref(),
+                std::env::var("HOME").ok().as_deref(),
+            );
+            let json = rest.first().is_some_and(|a| a == "--json");
+            print!(
+                "{}",
+                status::render(dir.as_deref(), Path::new(status::REPORT_PATH), json)
+            );
+            ExitCode::SUCCESS
+        }
+        // other flags (--check, --help, unknown): the notifier owns their semantics
+        Action::Status => run_tool("notifier", &["--status"], &rest),
         Action::Version => {
             let v = read_version_file(Path::new(TOOLS_VERSION_FILE)).or_else(pacman_version);
             println!("{}", version_line(v.as_deref()));
@@ -43,15 +78,6 @@ fn main() -> ExitCode {
             eprint!("{USAGE}");
             ExitCode::from(2)
         }
-        Action::Exec { tool, prefix } => {
-            let path = resolve_tool(&exe_dir(), Path::new(FALLBACK_TOOL_DIR), tool);
-            if !samurai_core::is_executable(&path) {
-                eprintln!("samurai: command \"{tool}\" is not installed ({} missing)", path.display());
-                return ExitCode::from(2);
-            }
-            let err = Command::new(&path).args(prefix).args(&rest).exec();
-            eprintln!("samurai: cannot run {}: {err}", path.display());
-            ExitCode::from(2)
-        }
+        Action::Exec { tool, prefix } => run_tool(tool, prefix, &rest),
     }
 }
