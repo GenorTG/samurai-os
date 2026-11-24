@@ -34,10 +34,13 @@ def test_update_from_archive(archive_profile):
         acc = vm.serial_cmd(
             "curl -fsSL http://10.0.2.2:8966/profile-archive.toml -o /tmp/pa.toml "
             "&& SAMURAI_TEST_AUTOKEY=1 SAMURAI_SERIAL_CONSOLE=1 samurai-install --profile /tmp/pa.toml --disk /dev/vda --yes "
-            ">/dev/null 2>&1; echo INSTALL-\"RC\"=$?",
+            ">/tmp/install.log 2>&1; echo INSTALL-\"RC\"=$?; "
+            "[ -s /tmp/install.log ] && tail -n 40 /tmp/install.log",
             "INSTALL-RC=", timeout=INSTALL_TIMEOUT,
         )
-        assert "INSTALL-RC=0" in acc, acc[-1500:]
+        if "INSTALL-RC=0" not in acc:
+            acc += "\n" + vm.serial_cmd("tail -n 60 /tmp/install.log; echo TAIL-\"END\"", "TAIL-END", timeout=60)
+        assert "INSTALL-RC=0" in acc, acc[-3000:]
 
         vm.eject_iso()
         vm.reboot()
