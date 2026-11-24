@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import re
 import shutil
 
 import pytest
@@ -80,7 +81,7 @@ def test_health_baseline_break_detect_repair(installed_vm):
     st = _status(rep)
     for must in ("services.failed", "security.firewall", "pacman.conf", "packages.core",
                  "boot.initramfs", "boot.kernels-present", "config.shell", "storage.btrfs-errors",
-                 "snapshots.services"):
+                 "snapshots.services", "storage.btrfs-timers"):
         assert st[must] == "ok", f"{must}: {st[must]} ({rep})"
     assert rc in (0, 1)
 
@@ -199,3 +200,112 @@ def test_health_fix_rebuilds_missing_initramfs_and_enables_btrfs_timers(installe
     assert "fixed    storage.btrfs-timers" in out and out.strip().endswith("rc=0"), out
     _, out = ga.exec("systemctl is-enabled fstrim.timer btrfs-scrub@-.timer", check=False)
     assert out.split() == ["enabled", "enabled"], out
+
+
+def test_diag_commands_and_redacted_private_bundle(installed_vm):
+    _, ga = installed_vm
+    # plain commands answer and carry real content
+    _, out = ga.exec("samurai diag info; echo rc=$?", timeout=120, check=False)
+    assert "== os-release ==" in out and "Samurai OS" in out and out.strip().endswith("rc=0"), out[-600:]
+    assert "firmware: UEFI" in out, out[-900:]
+    _, out = ga.exec("samurai diag services; echo rc=$?", timeout=120, check=False)
+    assert "== failed units ==" in out and out.strip().endswith("rc=0"), out[-600:]
+    _, out = ga.exec("samurai diag disks; echo rc=$?", timeout=120, check=False)
+    assert "== btrfs usage (/) ==" in out and out.strip().endswith("rc=0"), out[-600:]
+    _, out = ga.exec("samurai diag logs --pacman --lines 20; echo rc=$?", timeout=60, check=False)
+    assert "== pacman log (tail) ==" in out and out.strip().endswith("rc=0"), out[-600:]
+    _, out = ga.exec("samurai diag logs --lines 0 >/dev/null 2>&1; echo rc=$?", check=False)
+    assert out.strip().endswith("rc=2"), out
+
+    # plant private data where the bundle will find it: a user, a journal error with an address,
+    # a MAC, an e-mail address and a password
+    ga.exec("id genortest >/dev/null 2>&1 || useradd -m genortest", check=False)
+    ga.exec(
+        "logger -p user.err 'bundle-test user genortest from 10.9.8.7 mac AA:BB:CC:DD:EE:FF "
+        "mail alice@example.org password=hunter2 end'; sleep 2", check=False)
+    # the minimal guest has no `ip`: read addresses from /proc and /sys, and keep only real-looking values
+    _, facts = ga.exec(
+        "cat /etc/hostname; echo ---; cat /sys/class/net/*/address; echo ---; "
+        "awk '/32 host/ { print f } { f = $2 }' /proc/net/fib_trie | sort -u", check=False)
+    host_raw, macs_raw, ips_raw = (p.split() for p in facts.split("---"))
+    mac_re = re.compile(r"^[0-9a-f]{2}(:[0-9a-f]{2}){5}$", re.I)
+    ip_re = re.compile(r"^\d{1,3}(\.\d{1,3}){3}$")
+    host = host_raw
+    macs = [m for m in macs_raw if mac_re.match(m) and m != "00:00:00:00:00:00"]
+    ips = [i for i in ips_raw if ip_re.match(i) and not i.startswith("127.")]
+    assert host and macs and ips, f"could not learn the guest's identity: {facts!r}"
+
+    _, out = ga.exec("rm -f /root/bundle.txt; samurai diag bundle --out /root/bundle.txt; echo rc=$?", timeout=300, check=False)
+    assert "(redacted)" in out and out.strip().endswith("rc=0"), out
+    _, mode = ga.exec("stat -c %a /root/bundle.txt", check=False)
+    assert mode.strip() == "600", mode
+    _, text = ga.exec("cat /root/bundle.txt", timeout=120, check=False)
+    for must in ("== kernel ==", "== boot ==", "== samurai health (json) ==", "== pacman.conf ==", "[samurai]", "Samurai OS"):
+        assert must in text, f"bundle lacks {must!r}"
+    assert "bundle-test user <user" in text, "the planted journal line should survive, redacted"
+    low = text.lower()
+    leaks = [x for x in ["genortest", "10.9.8.7", "aa:bb:cc:dd:ee:ff", "alice@example.org", "hunter2", *host, *ips,
+                         *[m.lower() for m in macs]] if x.lower() in low]
+    assert not leaks, f"private data leaked into the bundle: {leaks}"
+
+    # overwriting is refused; unredacted needs a terminal (the harness has none)
+    _, out = ga.exec("samurai diag bundle --out /root/bundle.txt >/dev/null 2>&1; echo rc=$?", check=False)
+    assert out.strip().endswith("rc=1"), out
+    _, out = ga.exec("samurai diag bundle --no-redact --out /root/raw.txt 2>&1; echo rc=$?; test -e /root/raw.txt && echo EXISTS", check=False)
+    assert "needs a terminal" in out and "rc=2" in out and "EXISTS" not in out, out
+    ga.exec("rm -f /root/bundle.txt; userdel -r genortest", check=False)
+
+
+def _clean_preview(ga, *args: str) -> dict:
+    _, out = ga.exec(f"samurai clean --preview --json {' '.join(args)}", timeout=120, check=False)
+    return {t["id"]: t for t in json.loads(out)["targets"]}
+
+
+def test_clean_previews_refuses_non_root_and_frees_space(installed_vm):
+    _, ga = installed_vm
+    # preview: read-only, every default target listed, orphans/cache not part of `all`
+    prev = _clean_preview(ga)
+    assert list(prev) == ["pkgcache", "journal", "coredumps", "thumbnails"], list(prev)
+    _, out = ga.exec("samurai clean --preview; echo rc=$?", timeout=120, check=False)
+    assert "total" in out and out.strip().endswith("rc=0"), out
+
+    # a normal user may preview, but system targets are refused (and report exit 1)
+    _, out = ga.exec("su samurai -c 'samurai clean --preview' >/dev/null 2>&1; echo rc=$?", timeout=120, check=False)
+    assert out.strip().endswith("rc=0"), out
+    _, out = ga.exec("su samurai -c 'samurai clean pkgcache' 2>&1; echo rc=$?", check=False)
+    assert "needs root" in out and out.strip().endswith("rc=1"), out
+
+    # coredumps: plant 5 MiB, see it in the preview, clean it, see it gone
+    ga.exec("mkdir -p /var/lib/systemd/coredump && head -c 5242880 /dev/urandom > /var/lib/systemd/coredump/core.vmtest.zst", check=False)
+    assert _clean_preview(ga, "coredumps")["coredumps"]["bytes"] >= 5 * 1024 * 1024
+    _, out = ga.exec("samurai clean coredumps; echo rc=$?; ls /var/lib/systemd/coredump | wc -l", timeout=120, check=False)
+    assert "cleaned  coredumps" in out and "rc=0" in out and out.strip().endswith("0"), out
+
+    # thumbnails of the invoking user, run as that user
+    ga.exec("su samurai -c 'mkdir -p ~/.cache/thumbnails/large && head -c 200000 /dev/urandom > ~/.cache/thumbnails/large/t.png'", check=False)
+    _, out = ga.exec("su samurai -c 'samurai clean thumbnails; echo rc=$?; ls -A ~/.cache/thumbnails | wc -l'", timeout=120, check=False)
+    assert "cleaned  thumbnails" in out and "rc=0" in out and out.strip().endswith("0"), out
+
+    # journal: a fresh VM is under the cap, so this is a clean no-op that must still succeed
+    _, out = ga.exec("samurai clean journal; echo rc=$?", timeout=120, check=False)
+    assert "cleaned  journal" in out and out.strip().endswith("rc=0"), out
+
+    # package cache: trim everything, then nothing for installed packages remains
+    _, before = ga.exec("ls /var/cache/pacman/pkg/*.pkg.tar.zst 2>/dev/null | wc -l", check=False)
+    _, out = ga.exec("samurai clean pkgcache --keep 0; echo rc=$?", timeout=300, check=False)
+    assert "cleaned  pkgcache" in out and out.strip().endswith("rc=0"), out
+    _, after = ga.exec("ls /var/cache/pacman/pkg/*.pkg.tar.zst 2>/dev/null | wc -l", check=False)
+    assert int(after.strip()) == 0, f"cache not emptied: before={before.strip()} after={after.strip()}"
+
+    # orphans: never automatic. Make a real one, check it is listed, declined without --yes, removed with it
+    _, out = ga.exec("pacman -S --asdeps --noconfirm tree >/tmp/tree.log 2>&1; echo rc=$?; pacman -Qdtq | grep -x tree", timeout=300, check=False)
+    if "rc=0" not in out:
+        pytest.skip(f"could not install a test orphan (repo sync db unavailable?): {out[-300:]}")
+    assert "tree" in _clean_preview(ga, "orphans")["orphans"]["items"]
+    _, out = ga.exec("samurai clean orphans; echo rc=$?; pacman -Q tree", check=False)
+    assert "declined orphans" in out and "rc=1" in out and "tree " in out, f"orphans must need confirmation: {out}"
+    _, out = ga.exec("samurai clean orphans --yes; echo rc=$?; pacman -Q tree 2>&1", timeout=300, check=False)
+    assert "cleaned  orphans" in out and "rc=0" in out and "was not found" in out, out
+    # `all` never touches orphans
+    _, out = ga.exec("pacman -S --asdeps --noconfirm tree >/dev/null 2>&1; samurai clean all >/dev/null 2>&1; pacman -Q tree; pacman -Rns --noconfirm tree >/dev/null 2>&1", timeout=300, check=False)
+    assert "tree " in out, f"`clean all` removed an orphan: {out}"

@@ -169,3 +169,95 @@ fn health_json_is_schema_1_and_exit_code_matches_issues() {
     let issues = text.contains("\"issues\":0");
     assert_eq!(o.status.code(), Some(if issues { 0 } else { 1 }));
 }
+
+#[test]
+fn diag_usage_help_and_bundle_redacts_and_is_private() {
+    let d = sandbox("diag");
+    for bad in [
+        &["diag"][..],
+        &["diag", "nope"],
+        &["diag", "info", "--x"],
+        &["diag", "logs", "--lines", "0"],
+    ] {
+        assert_eq!(run(&d, bad).status.code(), Some(2), "{bad:?}");
+    }
+    let o = run(&d, &["diag", "--help"]);
+    assert_eq!(o.status.code(), Some(0));
+    assert!(out(&o).starts_with("usage: samurai diag"));
+
+    let file = d.join("bundle.txt");
+    let o = run(&d, &["diag", "bundle", "--out", file.to_str().unwrap()]);
+    assert_eq!(
+        o.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&o.stderr)
+    );
+    assert!(out(&o).contains("(redacted)"));
+    let mode = fs::metadata(&file).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o600, "bundle must be private");
+    let text = fs::read_to_string(&file).unwrap();
+    assert!(text.contains("== kernel ==") && text.contains("== samurai health (json) =="));
+    // refuses to overwrite an existing bundle
+    assert_eq!(
+        run(&d, &["diag", "bundle", "--out", file.to_str().unwrap()])
+            .status
+            .code(),
+        Some(1)
+    );
+    // --no-redact without a terminal is refused
+    let o = run(
+        &d,
+        &[
+            "diag",
+            "bundle",
+            "--no-redact",
+            "--out",
+            d.join("raw.txt").to_str().unwrap(),
+        ],
+    );
+    assert_eq!(o.status.code(), Some(2));
+    assert!(!d.join("raw.txt").exists());
+}
+
+#[test]
+fn clean_usage_preview_and_refusals() {
+    let d = sandbox("clean");
+    for bad in [
+        &["clean", "nope"][..],
+        &["clean", "--bogus"],
+        &["clean", "--keep", "x"],
+        &["clean", "--json"],
+    ] {
+        assert_eq!(run(&d, bad).status.code(), Some(2), "{bad:?}");
+    }
+    let o = run(&d, &["clean", "--help"]);
+    assert_eq!(o.status.code(), Some(0));
+    assert!(out(&o).starts_with("usage: samurai clean"));
+    // preview is read-only and always exits 0
+    let o = run(&d, &["clean", "--preview"]);
+    assert_eq!(o.status.code(), Some(0));
+    let text = out(&o);
+    assert!(
+        text.contains("pkgcache") && text.contains("thumbnails") && text.contains("total"),
+        "{text}"
+    );
+    assert!(
+        !text.contains("orphans"),
+        "orphans are not part of the default selection"
+    );
+    let o = run(&d, &["clean", "orphans", "cache", "--preview", "--json"]);
+    assert!(
+        out(&o).starts_with("{\"schema\":1,\"targets\":[{\"id\":\"orphans\""),
+        "{}",
+        out(&o)
+    );
+    // without a terminal a confirmation target is declined, nothing is touched
+    let o = run(&d, &["clean", "orphans"]);
+    assert!(
+        out(&o).contains("declined orphans") || out(&o).contains("skipped  orphans"),
+        "{}",
+        out(&o)
+    );
+    assert_eq!(o.status.code(), Some(1));
+}

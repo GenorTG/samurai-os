@@ -3,6 +3,8 @@
 //! Slice 1 (M5): dispatch table, executor lookup and version lookup, behaviourally identical to the
 //! shell dispatcher in `updates/samurai`. Executors (`samurai-update`, `-apps`, ...) stay as they are.
 
+pub mod clean;
+pub mod diag;
 pub mod health;
 pub mod status;
 
@@ -21,6 +23,8 @@ commands
   rescue      recovery tool (spec 06): mount/chroot/bootloader/initramfs/kernel/rollback
   status      last update check and last update report (user session)
   health      read-only health checks (spec 05): samurai health --help
+  diag        diagnostics and the redacted support bundle: samurai diag --help
+  clean       free disk space (preview first): samurai clean --help
   version     print the samurai-tools version
   help        this text
 
@@ -40,6 +44,10 @@ pub enum Action {
     Status,
     /// `samurai health`: native, read-only.
     Health,
+    /// `samurai diag`: native, read-only diagnostics + redacted bundle.
+    Diag,
+    /// `samurai clean`: preview and free disk space.
+    Clean,
     Version,
     Help,
     Unknown(String),
@@ -65,6 +73,8 @@ pub fn parse(cmd: &str) -> Action {
         },
         "status" => Action::Status,
         "health" => Action::Health,
+        "diag" => Action::Diag,
+        "clean" => Action::Clean,
         "version" | "--version" | "-V" => Action::Version,
         "help" | "--help" | "-h" => Action::Help,
         other => Action::Unknown(other.to_string()),
@@ -131,6 +141,8 @@ mod tests {
         );
         assert_eq!(parse("status"), Action::Status);
         assert_eq!(parse("health"), Action::Health);
+        assert_eq!(parse("diag"), Action::Diag);
+        assert_eq!(parse("clean"), Action::Clean);
         for v in ["version", "--version", "-V"] {
             assert_eq!(parse(v), Action::Version);
         }

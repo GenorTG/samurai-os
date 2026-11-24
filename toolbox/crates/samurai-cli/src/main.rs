@@ -5,6 +5,8 @@ use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
+use samurai_core::clean;
+use samurai_core::diag::{self, Cmd};
 use samurai_core::health::{self, checks::ALL, system::RealSystem};
 use samurai_core::status;
 use samurai_core::{
@@ -97,6 +99,208 @@ fn run_health_fix(opts: &health::Options) -> ExitCode {
     ExitCode::from(u8::from(unresolved))
 }
 
+fn now_epoch() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
+}
+
+/// Two typed confirmations on a terminal, or refuse: an unredacted bundle holds private data.
+fn confirm_unredacted() -> bool {
+    use std::io::{BufRead, IsTerminal, Write};
+    if !std::io::stdin().is_terminal() {
+        eprintln!("samurai diag: --no-redact needs a terminal (it asks for confirmation twice)");
+        return false;
+    }
+    let ask = |prompt: &str, expect: &str| {
+        eprint!("{prompt}");
+        let _ = std::io::stderr().flush();
+        let mut line = String::new();
+        std::io::stdin().lock().read_line(&mut line).is_ok() && line.trim() == expect
+    };
+    ask("An unredacted bundle contains user names, addresses and serial numbers.\nType 'yes' to continue: ", "yes")
+        && ask("Type 'unredacted' to confirm: ", "unredacted")
+}
+
+fn write_private(path: &Path, text: &str, owner: Option<(u32, u32)>) -> std::io::Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut f = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(path)?;
+    f.write_all(text.as_bytes())?;
+    if let Some((uid, gid)) = owner {
+        std::os::unix::fs::chown(path, Some(uid), Some(gid))?;
+    }
+    Ok(())
+}
+
+/// Home directory of the real user: the `sudo` caller's (from /etc/passwd), else `$HOME`.
+fn real_home(sys: &RealSystem) -> Option<String> {
+    use health::system::System;
+    let is_root = sys
+        .run("id", &["-u"])
+        .is_some_and(|o| o.stdout.trim() == "0");
+    let sudo_user = std::env::var("SUDO_USER")
+        .ok()
+        .filter(|u| !u.is_empty() && u != "root");
+    match sudo_user.filter(|_| is_root) {
+        Some(u) => diag::home_of(sys, &u),
+        None => std::env::var("HOME").ok(),
+    }
+}
+
+fn run_clean(args: &[String]) -> ExitCode {
+    use health::system::System;
+    let opts = match clean::parse_args(args) {
+        Ok(o) => o,
+        Err(e) => {
+            eprintln!("samurai clean: {e}\n");
+            eprint!("{}", clean::USAGE);
+            return ExitCode::from(2);
+        }
+    };
+    if opts.help {
+        print!("{}", clean::USAGE);
+        return ExitCode::SUCCESS;
+    }
+    let sys = RealSystem;
+    let ctx = clean::Ctx {
+        home: real_home(&sys),
+        keep: opts.keep,
+    };
+    let targets: Vec<&clean::Target> = opts
+        .targets
+        .iter()
+        .filter_map(|id| clean::find(id))
+        .collect();
+    if opts.preview {
+        let rows: Vec<_> = targets
+            .iter()
+            .map(|t| (*t, (t.preview)(&sys, &ctx)))
+            .collect();
+        if opts.json {
+            print!("{}", clean::render_json(&rows));
+        } else {
+            print!("{}", clean::render_preview(&rows));
+        }
+        return ExitCode::SUCCESS;
+    }
+    let is_root = sys
+        .run("id", &["-u"])
+        .is_some_and(|o| o.stdout.trim() == "0");
+    let mut failed = false;
+    for t in targets {
+        if t.needs_root && !is_root {
+            println!(
+                "skipped  {}: needs root (try: sudo samurai clean {})",
+                t.id, t.id
+            );
+            failed = true;
+            continue;
+        }
+        let before = (t.preview)(&sys, &ctx);
+        if t.risk == clean::Risk::NeedsConfirm {
+            let what = format!("{} ({} item(s))", t.description, before.items.len());
+            if !confirm_on_tty(opts.yes, t.id, &what) {
+                println!("declined {}", t.id);
+                failed = true;
+                continue;
+            }
+        }
+        match (t.apply)(&sys, &ctx) {
+            Ok(msg) => {
+                let freed = before
+                    .bytes
+                    .map_or(String::new(), |b| format!(" (about {})", clean::human(b)));
+                println!("cleaned  {}: {msg}{freed}", t.id);
+            }
+            Err(e) => {
+                println!("failed   {}: {e}", t.id);
+                failed = true;
+            }
+        }
+    }
+    ExitCode::from(u8::from(failed))
+}
+
+fn run_diag(args: &[String]) -> ExitCode {
+    let cmd = match diag::parse_args(args) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("samurai diag: {e}\n");
+            eprint!("{}", diag::USAGE);
+            return ExitCode::from(2);
+        }
+    };
+    let sys = RealSystem;
+    let sections = match cmd {
+        Cmd::Help => {
+            print!("{}", diag::USAGE);
+            return ExitCode::SUCCESS;
+        }
+        Cmd::Info => diag::info(&sys),
+        Cmd::Services => diag::services(&sys),
+        Cmd::Logs(o) => diag::logs(&sys, &o),
+        Cmd::Disks => diag::disks(&sys),
+        Cmd::Gpu => diag::gpu(&sys),
+        Cmd::Bundle { redact, out } => return run_diag_bundle(&sys, redact, out),
+    };
+    print!("{}", diag::render(&sections));
+    ExitCode::SUCCESS
+}
+
+fn run_diag_bundle(sys: &RealSystem, redact: bool, out: Option<String>) -> ExitCode {
+    use health::system::System;
+    if !redact && !confirm_unredacted() {
+        return ExitCode::from(2);
+    }
+    let epoch = now_epoch();
+    // under sudo the bundle belongs in the invoking user's home, owned by them
+    let sudo_user = std::env::var("SUDO_USER")
+        .ok()
+        .filter(|u| !u.is_empty() && u != "root");
+    let is_root = sys
+        .run("id", &["-u"])
+        .is_some_and(|o| o.stdout.trim() == "0");
+    let user = sudo_user.filter(|_| is_root);
+    let home = match &user {
+        Some(u) => diag::home_of(sys, u),
+        None => std::env::var("HOME").ok(),
+    };
+    let path = match (out, home) {
+        (Some(p), _) => std::path::PathBuf::from(p),
+        (None, Some(h)) => Path::new(&h).join(format!("samurai-diag-{epoch}.txt")),
+        (None, None) => {
+            eprintln!("samurai diag: cannot find a home directory; pass --out FILE");
+            return ExitCode::from(1);
+        }
+    };
+    let mut text = diag::render(&diag::bundle(sys, epoch));
+    if redact {
+        let mut extra: Vec<String> = user.iter().cloned().collect();
+        extra.extend(std::env::var("USER").ok());
+        text = diag::redactor(sys, &extra).redact(&text);
+    }
+    let owner = user.as_deref().and_then(|u| diag::ids_of(sys, u));
+    if let Err(e) = write_private(&path, &text, owner) {
+        eprintln!("samurai diag: cannot write {}: {e}", path.display());
+        return ExitCode::from(1);
+    }
+    println!(
+        "{} ({})",
+        path.display(),
+        if redact {
+            "redacted"
+        } else {
+            "NOT redacted: contains private data"
+        }
+    );
+    ExitCode::SUCCESS
+}
+
 fn run_health(args: &[String]) -> ExitCode {
     let opts = match health::parse_args(args, ALL) {
         Ok(o) => o,
@@ -169,6 +373,8 @@ fn main() -> ExitCode {
         // other flags (--check, --help, unknown): the notifier owns their semantics
         Action::Status => run_tool("notifier", &["--status"], &rest),
         Action::Health => run_health(&rest),
+        Action::Diag => run_diag(&rest),
+        Action::Clean => run_clean(&rest),
         Action::Version => {
             let v = read_version_file(Path::new(TOOLS_VERSION_FILE)).or_else(pacman_version);
             println!("{}", version_line(v.as_deref()));
