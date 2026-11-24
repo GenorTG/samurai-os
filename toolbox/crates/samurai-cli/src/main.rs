@@ -5,6 +5,7 @@ use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
+use samurai_core::health::{self, checks::ALL, system::RealSystem};
 use samurai_core::status;
 use samurai_core::{
     parse, parse_pacman_q, read_version_file, resolve_tool, version_line, Action,
@@ -44,6 +45,37 @@ fn run_tool(tool: &str, prefix: &[&str], rest: &[String]) -> ExitCode {
     ExitCode::from(2)
 }
 
+fn run_health(args: &[String]) -> ExitCode {
+    let opts = match health::parse_args(args, ALL) {
+        Ok(o) => o,
+        Err(e) => {
+            eprintln!("samurai health: {e}\n");
+            eprint!("{}", health::USAGE);
+            return ExitCode::from(2);
+        }
+    };
+    if opts.help {
+        print!("{}", health::USAGE);
+        return ExitCode::SUCCESS;
+    }
+    if opts.list {
+        for c in ALL {
+            println!("{}", c.id);
+        }
+        return ExitCode::SUCCESS;
+    }
+    let findings = health::run(&RealSystem, ALL, &opts.filter);
+    if opts.json {
+        let epoch = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs());
+        print!("{}", health::render_json(&findings, epoch));
+    } else {
+        print!("{}", health::render_text(&findings));
+    }
+    ExitCode::from(health::exit_code(&findings) as u8)
+}
+
 fn main() -> ExitCode {
     let mut args = std::env::args().skip(1);
     let cmd = args.next().unwrap_or_else(|| "help".to_string());
@@ -68,6 +100,7 @@ fn main() -> ExitCode {
         }
         // other flags (--check, --help, unknown): the notifier owns their semantics
         Action::Status => run_tool("notifier", &["--status"], &rest),
+        Action::Health => run_health(&rest),
         Action::Version => {
             let v = read_version_file(Path::new(TOOLS_VERSION_FILE)).or_else(pacman_version);
             println!("{}", version_line(v.as_deref()));

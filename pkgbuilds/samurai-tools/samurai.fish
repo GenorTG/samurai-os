@@ -1,7 +1,7 @@
 # fish completion for samurai (shipped by samurai-tools; fish is the default shell)
 
 function __samurai_no_cmd
-    not __fish_seen_subcommand_from update apps snap rescue status version help
+    not __fish_seen_subcommand_from update apps snap rescue status health version help
 end
 
 function __samurai_apps_ids
@@ -16,6 +16,7 @@ complete -c samurai -n __samurai_no_cmd -a apps    -d 'optional apps from the ca
 complete -c samurai -n __samurai_no_cmd -a snap    -d 'snapshot manager'
 complete -c samurai -n __samurai_no_cmd -a rescue  -d 'recovery tool (live ISO or installed system)'
 complete -c samurai -n __samurai_no_cmd -a status  -d 'last update check and update report'
+complete -c samurai -n __samurai_no_cmd -a health  -d 'read-only health checks'
 complete -c samurai -n __samurai_no_cmd -a version -d 'print the samurai-tools version'
 complete -c samurai -n __samurai_no_cmd -a help    -d 'usage'
 
@@ -85,3 +86,9 @@ complete -c samurai -n $rescue -l help -d 'usage'
 
 # status
 complete -c samurai -n '__fish_seen_subcommand_from status' -l json -d 'machine-readable output'
+
+# health
+complete -c samurai -n '__fish_seen_subcommand_from health' -l category -x -a 'packages boot drivers storage snapshots services security hardware config' -d 'only this category'
+complete -c samurai -n '__fish_seen_subcommand_from health' -l id -x -a '(samurai health --list 2>/dev/null)' -d 'only this check'
+complete -c samurai -n '__fish_seen_subcommand_from health' -l json -d 'machine-readable output'
+complete -c samurai -n '__fish_seen_subcommand_from health' -l list -d 'print the check ids'

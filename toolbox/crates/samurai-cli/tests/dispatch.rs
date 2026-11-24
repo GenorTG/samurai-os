@@ -136,3 +136,36 @@ fn version_prints_a_samurai_line() {
         assert!(out(&o).starts_with("samurai "));
     }
 }
+
+#[test]
+fn health_list_help_and_usage_errors() {
+    let d = sandbox("health-cli");
+    let o = run(&d, &["health", "--list"]);
+    assert_eq!(o.status.code(), Some(0));
+    assert!(out(&o).lines().any(|l| l == "services.failed"));
+    let o = run(&d, &["health", "--help"]);
+    assert_eq!(o.status.code(), Some(0));
+    assert!(out(&o).starts_with("usage: samurai health"));
+    for bad in [
+        &["health", "--bogus"][..],
+        &["health", "--id", "nope"],
+        &["health", "--category", "nope"],
+    ] {
+        assert_eq!(run(&d, bad).status.code(), Some(2), "{bad:?}");
+    }
+}
+
+#[test]
+fn health_json_is_schema_1_and_exit_code_matches_issues() {
+    let d = sandbox("health-json");
+    // pacman.conf is absent or differs here, so only assert the invariants, not the findings
+    let o = run(&d, &["health", "--json", "--category", "storage"]);
+    let text = out(&o);
+    assert!(
+        text.starts_with("{\"schema\":1,\"checked_epoch\":"),
+        "{text}"
+    );
+    assert!(text.contains("\"id\":\"storage.disk-free\""));
+    let issues = text.contains("\"issues\":0");
+    assert_eq!(o.status.code(), Some(if issues { 0 } else { 1 }));
+}

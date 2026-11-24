@@ -3,6 +3,7 @@
 //! Slice 1 (M5): dispatch table, executor lookup and version lookup, behaviourally identical to the
 //! shell dispatcher in `updates/samurai`. Executors (`samurai-update`, `-apps`, ...) stay as they are.
 
+pub mod health;
 pub mod status;
 
 use std::fs;
@@ -19,6 +20,7 @@ commands
   snap        snapshot manager (spec 06): list/create/delete/diff/restore-file/repair/rollback
   rescue      recovery tool (spec 06): mount/chroot/bootloader/initramfs/kernel/rollback
   status      last update check and last update report (user session)
+  health      read-only health checks (spec 05): samurai health --help
   version     print the samurai-tools version
   help        this text
 
@@ -36,6 +38,8 @@ pub enum Action {
     },
     /// `samurai status`: handled natively when the args are none or `--json`, else the notifier.
     Status,
+    /// `samurai health`: native, read-only.
+    Health,
     Version,
     Help,
     Unknown(String),
@@ -60,6 +64,7 @@ pub fn parse(cmd: &str) -> Action {
             prefix: &[],
         },
         "status" => Action::Status,
+        "health" => Action::Health,
         "version" | "--version" | "-V" => Action::Version,
         "help" | "--help" | "-h" => Action::Help,
         other => Action::Unknown(other.to_string()),
@@ -125,6 +130,7 @@ mod tests {
             }
         );
         assert_eq!(parse("status"), Action::Status);
+        assert_eq!(parse("health"), Action::Health);
         for v in ["version", "--version", "-V"] {
             assert_eq!(parse(v), Action::Version);
         }
