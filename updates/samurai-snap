@@ -143,6 +143,10 @@ case "$cmd" in
         echo "Rollback complete. Reboot now: systemctl reboot"
         ;;
 
+    -h|--help|help)
+        echo "usage: samurai snap {list|create|delete|diff|restore-file|repair|rollback} [args]"
+        ;;
+
     *)
         die "usage: samurai snap {list|create|delete|diff|restore-file|repair|rollback} [args]" 2
         ;;

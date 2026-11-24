@@ -6,7 +6,7 @@
 #   for f in ...; do sha256sum "$f"; done   (or updpkgsums in the staged dir)
 pkgname=samurai-tools
 pkgver=0.4.0
-pkgrel=1
+pkgrel=2
 pkgdesc="Samurai OS CLI (Rust dispatcher), updater, executors, app catalog tool, update notifier and shell completions"
 arch=(x86_64)
 url="https://github.com/GenorTG/samurai-os"
@@ -55,7 +55,7 @@ source=(
 )
 sha256sums=(
     '675eb8a6dc64bac82def35ecddfa786a7055ac916bdd74d10da118df5490f292'
-    '28ad946a28432d3d820761718c52473f51da5ba03c7a3583a4d6494ae52ad76c'
+    '9f12322aaf35bca03458720effe18dd2ef2d88e7f32c4c98213509d4c108fa8f'
     'b32f62e974cfe2c4db20edb9c70f9656e91d9a06c08c1e23e779693061bd5da9'
     '11f2f369b8ecd8588988f465c929f6d8ebf95364823dec723565edfadd744c90'
     '369abd6cc730ee7a59c6670a92d80c90573e2b7339525ada42b0e3eb45bd23fc'
