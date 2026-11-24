@@ -35,7 +35,9 @@ guided installer and CLI/toolbox. VM validation runs on genorbox1. Site: <https:
   install, reboot with zero failed units. `test_offline.py` forces NVIDIA and asserts DKMS for both kernels.
 
 ## Verification status
-- See the release section below (filled in after the VM runs).
+- r13 ISOs (installer 7573e08): offline, daily, kde, attended, update, rollback PASS.
+- smoke: only failure was a stale assertion (expected repo URL in pacman.conf; it now lives in samurai-mirrorlist) - test fixed, needs re-run.
+- archive (test_update_archive, Arch 2026/08/15 snapshot): install rc=1, cause unknown (installer output goes to /dev/null) - TODO: capture install log (tee to /tmp/install.log, dump on failure) and re-run.
 
 ## Next
 1. M5: replace the shell `samurai` dispatcher with the Rust CLI; keep executors.

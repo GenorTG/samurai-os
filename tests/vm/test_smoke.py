@@ -64,7 +64,9 @@ def test_install_default(mirror):
         _, out = qga.exec(
             "awk '/^\\[samurai\\]$/{found=1; next} found && /^\\[/{exit} found{print}' /etc/pacman.conf"
         )
-        assert "github.com/GenorTG/samurai-repo/releases/download/x86_64" in out, out
+        assert "Include = /etc/pacman.d/samurai-mirrorlist" in out, out
+        _, ml = qga.exec("cat /etc/pacman.d/samurai-mirrorlist")
+        assert "github.com/GenorTG/samurai-repo/releases/download/x86_64" in ml, ml
         assert "SigLevel = Required DatabaseRequired" in out, out
         _, out = qga.exec("test -s /etc/pacman.d/samurai-testing-mirrorlist && echo present")
         assert out.strip() == "present", "testing release route must be installed for live testing"
