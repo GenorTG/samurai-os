@@ -14,6 +14,8 @@ pub struct CmdOut {
 pub trait System {
     fn read(&self, path: &str) -> Option<String>;
     fn exists(&self, path: &str) -> bool;
+    /// Entry names of a directory, sorted; empty when unreadable.
+    fn list_dir(&self, path: &str) -> Vec<String>;
     /// `None` when the program cannot be started (missing). A non-zero exit is still `Some`.
     fn run(&self, prog: &str, args: &[&str]) -> Option<CmdOut>;
 }
@@ -27,6 +29,17 @@ impl System for RealSystem {
 
     fn exists(&self, path: &str) -> bool {
         Path::new(path).exists()
+    }
+
+    fn list_dir(&self, path: &str) -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(path)
+            .map(|d| {
+                d.filter_map(|e| e.ok()?.file_name().into_string().ok())
+                    .collect()
+            })
+            .unwrap_or_default();
+        names.sort();
+        names
     }
 
     fn run(&self, prog: &str, args: &[&str]) -> Option<CmdOut> {
@@ -56,6 +69,7 @@ pub mod fake {
     pub struct Fake {
         files: HashMap<String, String>,
         paths: HashSet<String>,
+        dirs: HashMap<String, Vec<String>>,
         cmds: HashMap<String, Vec<CmdOut>>,
         seen: RefCell<HashMap<String, usize>>,
         log: RefCell<Vec<String>>,
@@ -64,6 +78,15 @@ pub mod fake {
     impl Fake {
         pub fn file(mut self, path: &str, body: &str) -> Self {
             self.files.insert(path.to_string(), body.to_string());
+            self.paths.insert(path.to_string());
+            self
+        }
+
+        pub fn dir(mut self, path: &str, names: &[&str]) -> Self {
+            self.dirs.insert(
+                path.to_string(),
+                names.iter().map(|n| (*n).to_string()).collect(),
+            );
             self.paths.insert(path.to_string());
             self
         }
@@ -94,6 +117,10 @@ pub mod fake {
 
         fn exists(&self, path: &str) -> bool {
             self.paths.contains(path)
+        }
+
+        fn list_dir(&self, path: &str) -> Vec<String> {
+            self.dirs.get(path).cloned().unwrap_or_default()
         }
 
         fn run(&self, prog: &str, args: &[&str]) -> Option<CmdOut> {

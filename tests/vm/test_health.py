@@ -78,7 +78,9 @@ def test_health_baseline_break_detect_repair(installed_vm):
     bad = [r for r in rep["results"] if r["status"] == "issue" and r["severity"] in ("error", "critical")]
     assert not bad, f"fresh install reports errors: {bad}"
     st = _status(rep)
-    for must in ("services.failed", "security.firewall", "pacman.conf", "packages.core"):
+    for must in ("services.failed", "security.firewall", "pacman.conf", "packages.core",
+                 "boot.initramfs", "boot.kernels-present", "config.shell", "storage.btrfs-errors",
+                 "snapshots.services"):
         assert st[must] == "ok", f"{must}: {st[must]} ({rep})"
     assert rc in (0, 1)
 
@@ -129,6 +131,10 @@ def test_health_baseline_break_detect_repair(installed_vm):
     # the sandbox must not blind the checks: these answer ok/issue, never skipped
     for must in ("packages.core", "services.failed", "pacman.conf"):
         assert st[must] in ("ok", "issue"), f"{must} skipped under the unit sandbox: {stored}"
+    # the notifier (user session, no root) picks the issue up from health.json
+    _, out = ga.exec("su samurai -c 'samurai-notifier --check --json' 2>/dev/null", timeout=300, check=False)
+    notif = json.loads(out[out.index("{"):out.rindex("}") + 1])
+    assert notif["health"] >= 1, f"notifier ignored health.json: {notif}"
     ga.exec("systemctl start firewalld", check=False)
 
     # human output + usage error exit code
@@ -164,3 +170,32 @@ def test_health_fix_is_snapshot_first_and_verified(installed_vm):
     assert "nothing to fix automatically" in out and out.strip().endswith("rc=0"), out
     _, again = ga.exec("snapper -c root list --columns number | wc -l", check=False)
     assert again.strip() == after.strip(), "no snapshot when there is nothing to fix"
+
+
+def test_health_fix_rebuilds_missing_initramfs_and_enables_btrfs_timers(installed_vm):
+    _, ga = installed_vm
+    # a missing initramfs is critical: the kernel would not boot
+    _, out = ga.exec("test -s /boot/initramfs-linux.img && mv /boot/initramfs-linux.img /root/initramfs-linux.img.bak && echo MOVED", check=False)
+    assert "MOVED" in out, out
+    _, rep = _health(ga, "--id", "boot.initramfs")
+    r = rep["results"][0]
+    assert r["status"] == "issue" and r["severity"] == "critical", r
+    assert "initramfs-linux.img" in r["evidence"][0], r
+    _, out = ga.exec("samurai health --fix --id boot.initramfs; echo rc=$?", timeout=600, check=False)
+    assert "fixed    boot.initramfs" in out and out.strip().endswith("rc=0"), out
+    _, out = ga.exec("test -s /boot/initramfs-linux.img && echo REBUILT", check=False)
+    assert "REBUILT" in out, out
+    _, rep = _health(ga, "--id", "boot.initramfs")
+    assert rep["results"][0]["status"] == "ok", rep
+    ga.exec("rm -f /root/initramfs-linux.img.bak", check=False)
+
+    # spec 06: scrub + fstrim timers on. Break one on purpose, fix, verify.
+    ga.exec("systemctl disable --now btrfs-scrub@-.timer", check=False)
+    _, rep = _health(ga, "--id", "storage.btrfs-timers")
+    r = rep["results"][0]
+    assert r["status"] == "issue", r
+    assert any("btrfs-scrub@-.timer" in e for e in r["evidence"]), r
+    _, out = ga.exec("samurai health --fix --id storage.btrfs-timers; echo rc=$?", timeout=300, check=False)
+    assert "fixed    storage.btrfs-timers" in out and out.strip().endswith("rc=0"), out
+    _, out = ga.exec("systemctl is-enabled fstrim.timer btrfs-scrub@-.timer", check=False)
+    assert out.split() == ["enabled", "enabled"], out

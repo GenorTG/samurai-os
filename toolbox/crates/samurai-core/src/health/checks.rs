@@ -79,27 +79,24 @@ fn security_firewall(sys: &dyn System) -> Outcome {
 }
 
 fn snapshots_services(sys: &dyn System) -> Outcome {
+    // spec 06: timeline snapshots are off for root (pre/post pairs cover changes); only cleanup runs
     if !sys.exists("/usr/bin/snapper") {
         return Outcome::Skipped("snapper is not installed".into());
     }
-    let timers = ["snapper-timeline.timer", "snapper-cleanup.timer"];
-    let Some(o) = sys.run("systemctl", &["is-enabled", timers[0], timers[1]]) else {
+    let Some(o) = sys.run("systemctl", &["is-enabled", "snapper-cleanup.timer"]) else {
         return Outcome::Skipped("systemctl not available".into());
     };
-    let states = lines(&o.stdout);
-    let off: Vec<String> = timers
-        .iter()
-        .enumerate()
-        .filter(|(i, _)| states.get(*i).map(String::as_str) != Some("enabled"))
-        .map(|(i, t)| format!("{t}: {}", states.get(i).map_or("unknown", String::as_str)))
-        .collect();
-    if off.is_empty() {
+    let state = o.stdout.trim();
+    if state == "enabled" {
         return Outcome::Ok;
     }
     issue(
-        "snapper timers are not enabled",
-        "Enable them: systemctl enable --now snapper-timeline.timer snapper-cleanup.timer",
-        off,
+        "snapper-cleanup.timer is not enabled",
+        "Old snapshots pile up without it. Enable: systemctl enable --now snapper-cleanup.timer",
+        vec![format!(
+            "snapper-cleanup.timer: {}",
+            if state.is_empty() { "unknown" } else { state }
+        )],
     )
 }
 
@@ -279,11 +276,239 @@ fn fix_time_sync(sys: &dyn System) -> Result<Vec<String>, String> {
     )
 }
 
-fn fix_snapper_timers(sys: &dyn System) -> Result<Vec<String>, String> {
+fn fix_snapper_cleanup(sys: &dyn System) -> Result<Vec<String>, String> {
     enable_now(
         sys,
-        &["snapper-timeline.timer", "snapper-cleanup.timer"],
-        "enabled snapper timeline and cleanup timers",
+        &["snapper-cleanup.timer"],
+        "enabled snapper-cleanup.timer",
+    )
+}
+
+/// Kernel package bases installed under /usr/lib/modules (`pkgbase` files, as mkinitcpio uses).
+fn kernel_bases(sys: &dyn System) -> Vec<String> {
+    sys.list_dir("/usr/lib/modules")
+        .iter()
+        .filter_map(|d| sys.read(&format!("/usr/lib/modules/{d}/pkgbase")))
+        .map(|b| b.trim().to_string())
+        .filter(|b| !b.is_empty())
+        .collect()
+}
+
+fn boot_kernels_present(sys: &dyn System) -> Outcome {
+    let bases = kernel_bases(sys);
+    if bases.is_empty() {
+        return Outcome::Skipped("no installed kernel found".into());
+    }
+    let missing: Vec<String> = bases
+        .iter()
+        .filter(|b| !sys.exists(&format!("/boot/vmlinuz-{b}")))
+        .map(|b| format!("/boot/vmlinuz-{b} is missing"))
+        .collect();
+    if missing.is_empty() {
+        return Outcome::Ok;
+    }
+    issue(
+        "an installed kernel has no image in /boot",
+        "The system may not boot with it. Reinstall the kernel package: pacman -S <kernel package>",
+        missing,
+    )
+}
+
+fn missing_initramfs(sys: &dyn System) -> Vec<String> {
+    kernel_bases(sys)
+        .into_iter()
+        .filter(|b| {
+            sys.exists(&format!("/boot/vmlinuz-{b}"))
+                && !sys.exists(&format!("/boot/initramfs-{b}.img"))
+        })
+        .collect()
+}
+
+fn boot_initramfs(sys: &dyn System) -> Outcome {
+    if kernel_bases(sys).is_empty() {
+        return Outcome::Skipped("no installed kernel found".into());
+    }
+    let missing = missing_initramfs(sys);
+    if missing.is_empty() {
+        return Outcome::Ok;
+    }
+    issue(
+        "an installed kernel has no initramfs",
+        "The system will not boot that kernel. Rebuild: mkinitcpio -p <kernel>",
+        missing
+            .iter()
+            .map(|b| format!("/boot/initramfs-{b}.img is missing"))
+            .collect(),
+    )
+}
+
+fn fix_initramfs(sys: &dyn System) -> Result<Vec<String>, String> {
+    let mut done = Vec::new();
+    for b in missing_initramfs(sys) {
+        match sys.run("mkinitcpio", &["-p", &b]) {
+            Some(o) if o.code == 0 => done.push(format!("rebuilt initramfs for {b}")),
+            Some(o) => return Err(format!("mkinitcpio -p {b} exited {}", o.code)),
+            None => return Err("mkinitcpio not available".into()),
+        }
+    }
+    Ok(done)
+}
+
+fn pacman_keyring(sys: &dyn System) -> Outcome {
+    let Some(o) = sys.run("pacman-key", &["--list-keys"]) else {
+        return Outcome::Skipped("pacman-key not available".into());
+    };
+    if o.code != 0 {
+        return Outcome::Skipped("pacman-key could not read the keyring".into());
+    }
+    let expired: Vec<String> = lines(&o.stdout)
+        .into_iter()
+        .filter(|l| l.contains("[expired]"))
+        .collect();
+    if expired.is_empty() {
+        return Outcome::Ok;
+    }
+    issue(
+        format!("{} expired key(s) in the pacman keyring", expired.len()),
+        "Refresh: pacman -S archlinux-keyring samurai-keyring (or: pacman-key --refresh-keys)",
+        expired.into_iter().take(10).collect(),
+    )
+}
+
+fn security_listening(sys: &dyn System) -> Outcome {
+    let Some(o) = sys.run("ss", &["-tlnH"]) else {
+        return Outcome::Skipped("ss not available".into());
+    };
+    let open: Vec<String> = lines(&o.stdout)
+        .iter()
+        .filter_map(|l| l.split_whitespace().nth(3).map(str::to_string))
+        .filter(|a| !(a.starts_with("127.") || a.starts_with("[::1]") || a.starts_with("::1")))
+        .collect();
+    if open.is_empty() {
+        return Outcome::Ok;
+    }
+    issue(
+        format!("{} TCP listener(s) reachable beyond loopback", open.len()),
+        "Expected only for services you run on purpose (e.g. ssh). Find the owner: ss -tlnp",
+        open,
+    )
+}
+
+fn drivers_microcode(sys: &dyn System) -> Outcome {
+    let Some(cpu) = sys.read("/proc/cpuinfo") else {
+        return Outcome::Skipped("/proc/cpuinfo unreadable".into());
+    };
+    let pkg = if cpu.contains("GenuineIntel") {
+        "intel-ucode"
+    } else if cpu.contains("AuthenticAMD") {
+        "amd-ucode"
+    } else {
+        return Outcome::Skipped("CPU vendor has no microcode package here".into());
+    };
+    let have = match installed(sys) {
+        Ok(h) => h,
+        Err(skip) => return skip,
+    };
+    if have.iter().any(|h| h == pkg) {
+        return Outcome::Ok;
+    }
+    issue(
+        format!("{pkg} is not installed"),
+        format!("CPU microcode fixes need it. Install: pacman -S {pkg}"),
+        vec![pkg.to_string()],
+    )
+}
+
+fn config_shell(sys: &dyn System) -> Outcome {
+    let (Some(passwd), Some(shells)) = (sys.read("/etc/passwd"), sys.read("/etc/shells")) else {
+        return Outcome::Skipped("/etc/passwd or /etc/shells unreadable".into());
+    };
+    let allowed = lines(&shells);
+    let bad: Vec<String> = passwd
+        .lines()
+        .filter_map(|l| {
+            let f: Vec<&str> = l.split(':').collect();
+            let (name, uid, shell) = (f.first()?, f.get(2)?.parse::<u32>().ok()?, f.get(6)?);
+            let human = uid == 0 || uid >= 1000;
+            let nologin =
+                shell.ends_with("/nologin") || shell.ends_with("/false") || shell.is_empty();
+            let ok = nologin || (allowed.iter().any(|a| a == shell) && sys.exists(shell));
+            (human && !ok).then(|| format!("{name}: {shell}"))
+        })
+        .collect();
+    if bad.is_empty() {
+        return Outcome::Ok;
+    }
+    issue(
+        "a login shell is missing or not listed in /etc/shells",
+        "Reset it: chsh -s /bin/bash <user>",
+        bad,
+    )
+}
+
+fn root_is_btrfs(sys: &dyn System) -> Option<bool> {
+    sys.run("findmnt", &["-no", "FSTYPE", "/"])
+        .map(|o| o.stdout.trim() == "btrfs")
+}
+
+fn storage_btrfs_errors(sys: &dyn System) -> Outcome {
+    match root_is_btrfs(sys) {
+        None => return Outcome::Skipped("findmnt not available".into()),
+        Some(false) => return Outcome::Skipped("root is not btrfs".into()),
+        Some(true) => {}
+    }
+    let Some(o) = sys.run("btrfs", &["device", "stats", "/"]) else {
+        return Outcome::Skipped("btrfs-progs not installed".into());
+    };
+    if o.code != 0 {
+        return Outcome::Skipped("btrfs device stats needs root".into());
+    }
+    let bad: Vec<String> = lines(&o.stdout)
+        .into_iter()
+        .filter(|l| l.split_whitespace().last().is_some_and(|n| n != "0"))
+        .collect();
+    if bad.is_empty() {
+        return Outcome::Ok;
+    }
+    issue(
+        "btrfs reports device errors",
+        "The disk may be failing: back up now, then check SMART (smartctl -a)",
+        bad,
+    )
+}
+
+fn storage_btrfs_timers(sys: &dyn System) -> Outcome {
+    match root_is_btrfs(sys) {
+        None => return Outcome::Skipped("findmnt not available".into()),
+        Some(false) => return Outcome::Skipped("root is not btrfs".into()),
+        Some(true) => {}
+    }
+    let timers = ["fstrim.timer", "btrfs-scrub@-.timer"];
+    let Some(o) = sys.run("systemctl", &["is-enabled", timers[0], timers[1]]) else {
+        return Outcome::Skipped("systemctl not available".into());
+    };
+    let states = lines(&o.stdout);
+    let off: Vec<String> = timers
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| states.get(*i).map(String::as_str) != Some("enabled"))
+        .map(|(i, t)| format!("{t}: {}", states.get(i).map_or("unknown", String::as_str)))
+        .collect();
+    if off.is_empty() {
+        return Outcome::Ok;
+    }
+    issue(
+        "btrfs maintenance timers are not enabled",
+        "Enable: systemctl enable --now fstrim.timer btrfs-scrub@-.timer",
+        off,
+    )
+}
+
+fn fix_btrfs_timers(sys: &dyn System) -> Result<Vec<String>, String> {
+    enable_now(
+        sys,
+        &["fstrim.timer", "btrfs-scrub@-.timer"],
+        "enabled fstrim and btrfs scrub timers",
     )
 }
 
@@ -341,7 +566,7 @@ pub const ALL: &[Check] = &[
         Warning,
         Safe,
         snapshots_services,
-        fix = fix_snapper_timers
+        fix = fix_snapper_cleanup
     ),
     check!(
         "services.failed",
@@ -367,6 +592,58 @@ pub const ALL: &[Check] = &[
         fix = fix_firewall
     ),
     check!("hardware.ram", Hardware, Info, Safe, hardware_ram),
+    check!(
+        "boot.kernels-present",
+        Boot,
+        Critical,
+        ManualOnly,
+        boot_kernels_present
+    ),
+    check!(
+        "boot.initramfs",
+        Boot,
+        Critical,
+        Safe,
+        boot_initramfs,
+        fix = fix_initramfs
+    ),
+    check!(
+        "pacman.keyring",
+        Packages,
+        Warning,
+        ManualOnly,
+        pacman_keyring
+    ),
+    check!(
+        "security.listening",
+        Security,
+        Info,
+        ManualOnly,
+        security_listening
+    ),
+    check!(
+        "drivers.microcode",
+        Drivers,
+        Warning,
+        ManualOnly,
+        drivers_microcode
+    ),
+    check!("config.shell", Config, Warning, ManualOnly, config_shell),
+    check!(
+        "storage.btrfs-errors",
+        Storage,
+        Error,
+        ManualOnly,
+        storage_btrfs_errors
+    ),
+    check!(
+        "storage.btrfs-timers",
+        Storage,
+        Warning,
+        Safe,
+        storage_btrfs_timers,
+        fix = fix_btrfs_timers
+    ),
 ];
 
 #[cfg(test)]
@@ -432,24 +709,24 @@ mod tests {
     }
 
     #[test]
-    fn snapper_timers() {
-        let c = "systemctl is-enabled snapper-timeline.timer snapper-cleanup.timer";
+    fn snapper_cleanup_timer() {
+        let c = "systemctl is-enabled snapper-cleanup.timer";
         assert!(matches!(
             snapshots_services(&Fake::default()),
             Outcome::Skipped(_)
         ));
         let base = || Fake::default().path("/usr/bin/snapper");
         assert_eq!(
-            snapshots_services(&base().cmd(c, 0, "enabled\nenabled\n")),
+            snapshots_services(&base().cmd(c, 0, "enabled\n")),
             Outcome::Ok
         );
-        let i = is_issue(&snapshots_services(&base().cmd(
-            c,
-            1,
-            "enabled\ndisabled\n",
-        )))
-        .clone();
+        let i = is_issue(&snapshots_services(&base().cmd(c, 1, "disabled\n"))).clone();
         assert_eq!(i.evidence, vec!["snapper-cleanup.timer: disabled"]);
+        // the timeline timer is deliberately off (spec 06): never required
+        assert!(
+            !format!("{:?}", snapshots_services(&base().cmd(c, 0, "enabled\n")))
+                .contains("timeline")
+        );
     }
 
     #[test]
@@ -566,11 +843,225 @@ mod tests {
         let bad = Fake::default().cmd("systemctl enable --now firewalld", 1, "");
         assert!(fix_firewall(&bad).unwrap_err().contains("exited 1"));
         assert!(fix_firewall(&Fake::default()).is_err());
-        let t = Fake::default().cmd(
-            "systemctl enable --now snapper-timeline.timer snapper-cleanup.timer",
+        let t = Fake::default().cmd("systemctl enable --now snapper-cleanup.timer", 0, "");
+        assert!(fix_snapper_cleanup(&t).is_ok());
+    }
+
+    fn kernels(extra: Fake) -> Fake {
+        extra
+            .dir("/usr/lib/modules", &["6.12.1-arch1-1", "6.12.2-zen1-1"])
+            .file("/usr/lib/modules/6.12.1-arch1-1/pkgbase", "linux\n")
+            .file("/usr/lib/modules/6.12.2-zen1-1/pkgbase", "linux-zen\n")
+    }
+
+    #[test]
+    fn kernel_images_and_initramfs() {
+        let all = kernels(Fake::default())
+            .path("/boot/vmlinuz-linux")
+            .path("/boot/vmlinuz-linux-zen")
+            .path("/boot/initramfs-linux.img")
+            .path("/boot/initramfs-linux-zen.img");
+        assert_eq!(boot_kernels_present(&all), Outcome::Ok);
+        assert_eq!(boot_initramfs(&all), Outcome::Ok);
+        assert!(matches!(
+            boot_kernels_present(&Fake::default()),
+            Outcome::Skipped(_)
+        ));
+
+        let no_initrd = kernels(Fake::default())
+            .path("/boot/vmlinuz-linux")
+            .path("/boot/vmlinuz-linux-zen")
+            .path("/boot/initramfs-linux.img");
+        assert_eq!(
+            is_issue(&boot_initramfs(&no_initrd)).evidence,
+            vec!["/boot/initramfs-linux-zen.img is missing"]
+        );
+        assert_eq!(boot_kernels_present(&no_initrd), Outcome::Ok);
+
+        let no_kernel = kernels(Fake::default()).path("/boot/vmlinuz-linux");
+        assert_eq!(
+            is_issue(&boot_kernels_present(&no_kernel)).evidence,
+            vec!["/boot/vmlinuz-linux-zen is missing"]
+        );
+        // a kernel without an image is the kernels-present check's job, not an initramfs one
+        assert_eq!(boot_initramfs(&no_kernel), is_initrd_issue_for(&["linux"]));
+    }
+
+    fn is_initrd_issue_for(bases: &[&str]) -> Outcome {
+        issue(
+            "an installed kernel has no initramfs",
+            "The system will not boot that kernel. Rebuild: mkinitcpio -p <kernel>",
+            bases
+                .iter()
+                .map(|b| format!("/boot/initramfs-{b}.img is missing"))
+                .collect(),
+        )
+    }
+
+    #[test]
+    fn initramfs_fix_rebuilds_missing_only() {
+        let sys = kernels(Fake::default())
+            .path("/boot/vmlinuz-linux")
+            .path("/boot/vmlinuz-linux-zen")
+            .path("/boot/initramfs-linux.img")
+            .cmd("mkinitcpio -p linux-zen", 0, "");
+        assert_eq!(
+            fix_initramfs(&sys).unwrap(),
+            vec!["rebuilt initramfs for linux-zen"]
+        );
+        assert_eq!(sys.calls(), vec!["mkinitcpio -p linux-zen"]);
+        let failing = kernels(Fake::default())
+            .path("/boot/vmlinuz-linux")
+            .path("/boot/vmlinuz-linux-zen")
+            .cmd("mkinitcpio -p linux", 1, "");
+        assert!(fix_initramfs(&failing).unwrap_err().contains("exited 1"));
+    }
+
+    #[test]
+    fn keyring_expired_keys() {
+        let ok = Fake::default().cmd(
+            "pacman-key --list-keys",
+            0,
+            "pub   rsa4096 2020 [SC]\nuid [ full ] Foo\n",
+        );
+        assert_eq!(pacman_keyring(&ok), Outcome::Ok);
+        let bad = Fake::default().cmd(
+            "pacman-key --list-keys",
+            0,
+            "uid [expired] Old Key <o@x>\nuid [ full ] Foo\n",
+        );
+        assert_eq!(is_issue(&pacman_keyring(&bad)).evidence.len(), 1);
+        assert!(matches!(
+            pacman_keyring(&Fake::default()),
+            Outcome::Skipped(_)
+        ));
+        assert!(matches!(
+            pacman_keyring(&Fake::default().cmd("pacman-key --list-keys", 2, "")),
+            Outcome::Skipped(_)
+        ));
+    }
+
+    #[test]
+    fn listening_ports_ignore_loopback() {
+        let ok = Fake::default().cmd(
+            "ss -tlnH",
+            0,
+            "LISTEN 0 4096 127.0.0.1:631 0.0.0.0:*\nLISTEN 0 4096 [::1]:631 [::]:*\nLISTEN 0 128 127.0.0.53%lo:53 0.0.0.0:*\n",
+        );
+        assert_eq!(security_listening(&ok), Outcome::Ok);
+        let bad = Fake::default().cmd("ss -tlnH", 0, "LISTEN 0 128 0.0.0.0:22 0.0.0.0:*\nLISTEN 0 128 [::]:22 [::]:*\nLISTEN 0 1 127.0.0.1:1 0.0.0.0:*\n");
+        assert_eq!(
+            is_issue(&security_listening(&bad)).evidence,
+            vec!["0.0.0.0:22", "[::]:22"]
+        );
+        assert!(matches!(
+            security_listening(&Fake::default()),
+            Outcome::Skipped(_)
+        ));
+    }
+
+    #[test]
+    fn microcode_matches_cpu_vendor() {
+        let intel = || Fake::default().file("/proc/cpuinfo", "vendor_id : GenuineIntel\n");
+        assert_eq!(
+            drivers_microcode(&intel().cmd("pacman -Qq", 0, "base\nintel-ucode\n")),
+            Outcome::Ok
+        );
+        assert_eq!(
+            is_issue(&drivers_microcode(&intel().cmd(
+                "pacman -Qq",
+                0,
+                "base\namd-ucode\n"
+            )))
+            .evidence,
+            vec!["intel-ucode"]
+        );
+        let amd = Fake::default()
+            .file("/proc/cpuinfo", "vendor_id : AuthenticAMD\n")
+            .cmd("pacman -Qq", 0, "amd-ucode\n");
+        assert_eq!(drivers_microcode(&amd), Outcome::Ok);
+        assert!(matches!(
+            drivers_microcode(&Fake::default().file("/proc/cpuinfo", "vendor_id : Other\n")),
+            Outcome::Skipped(_)
+        ));
+    }
+
+    #[test]
+    fn login_shells_must_be_listed_and_exist() {
+        let shells = "# comment\n/bin/bash\n/usr/bin/fish\n";
+        let ok = Fake::default()
+            .file("/etc/shells", shells)
+            .path("/bin/bash")
+            .path("/usr/bin/fish")
+            .file("/etc/passwd", "root:x:0:0::/root:/bin/bash\nbob:x:1000:1000::/home/bob:/usr/bin/fish\ndaemon:x:2:2::/:/usr/bin/nologin\nsvc:x:5:5::/:/bin/zsh\n");
+        assert_eq!(
+            config_shell(&ok),
+            Outcome::Ok,
+            "system users (uid 1..999) are not checked"
+        );
+        let bad = Fake::default()
+            .file("/etc/shells", shells)
+            .path("/bin/bash")
+            .file("/etc/passwd", "root:x:0:0::/root:/bin/bash\nbob:x:1000:1000::/home/bob:/usr/bin/fish\nann:x:1001:1001::/home/ann:/bin/zsh\n");
+        assert_eq!(
+            is_issue(&config_shell(&bad)).evidence,
+            vec!["bob: /usr/bin/fish", "ann: /bin/zsh"]
+        );
+    }
+
+    #[test]
+    fn btrfs_checks_need_btrfs_root() {
+        let fs = |t: &str| Fake::default().cmd("findmnt -no FSTYPE /", 0, t);
+        assert!(matches!(
+            storage_btrfs_errors(&fs("ext4\n")),
+            Outcome::Skipped(_)
+        ));
+        assert!(matches!(
+            storage_btrfs_timers(&fs("ext4\n")),
+            Outcome::Skipped(_)
+        ));
+        assert!(matches!(
+            storage_btrfs_errors(&Fake::default()),
+            Outcome::Skipped(_)
+        ));
+
+        let clean = "[/dev/dm-0].write_io_errs    0\n[/dev/dm-0].read_io_errs     0\n";
+        assert_eq!(
+            storage_btrfs_errors(&fs("btrfs\n").cmd("btrfs device stats /", 0, clean)),
+            Outcome::Ok
+        );
+        let dirty = "[/dev/dm-0].write_io_errs    0\n[/dev/dm-0].corruption_errs  3\n";
+        assert_eq!(
+            is_issue(&storage_btrfs_errors(&fs("btrfs\n").cmd(
+                "btrfs device stats /",
+                0,
+                dirty
+            )))
+            .evidence,
+            vec!["[/dev/dm-0].corruption_errs  3"]
+        );
+        assert!(matches!(
+            storage_btrfs_errors(&fs("btrfs\n").cmd("btrfs device stats /", 1, "")),
+            Outcome::Skipped(_)
+        ));
+
+        let c = "systemctl is-enabled fstrim.timer btrfs-scrub@-.timer";
+        assert_eq!(
+            storage_btrfs_timers(&fs("btrfs\n").cmd(c, 0, "enabled\nenabled\n")),
+            Outcome::Ok
+        );
+        let i = is_issue(&storage_btrfs_timers(&fs("btrfs\n").cmd(
+            c,
+            1,
+            "enabled\ndisabled\n",
+        )))
+        .clone();
+        assert_eq!(i.evidence, vec!["btrfs-scrub@-.timer: disabled"]);
+        let f = Fake::default().cmd(
+            "systemctl enable --now fstrim.timer btrfs-scrub@-.timer",
             0,
             "",
         );
-        assert!(fix_snapper_timers(&t).is_ok());
+        assert!(fix_btrfs_timers(&f).is_ok());
     }
 }
