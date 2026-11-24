@@ -35,8 +35,8 @@ guided installer and CLI/toolbox. VM validation runs on genorbox1. Site: <https:
   install, reboot with zero failed units. `test_offline.py` forces NVIDIA and asserts DKMS for both kernels.
 
 ## Verification status
-- r13 ISOs (installer 7573e08): offline, daily, kde, attended, update, rollback PASS.
-- smoke: only failure was a stale assertion (expected repo URL in pacman.conf; it now lives in samurai-mirrorlist) - test fixed, needs re-run.
+- r13 ISOs (installer 7573e08): offline, daily, kde, attended, update, rollback, smoke, archive PASS.
+- smoke: PASS (2 passed, 8m12s) after the mirrorlist assertion fix. All r13 scenarios are now green.
 - archive (test_update_archive, Arch 2026/08/15 snapshot): PASS on re-run (14m16s). Earlier rc=1 did not reproduce (likely transient archive/mirror fetch); test now keeps /tmp/install.log and dumps its tail on failure.
 
 ## Next
