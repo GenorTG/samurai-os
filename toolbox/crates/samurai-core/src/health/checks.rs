@@ -252,6 +252,41 @@ fn hardware_ram(sys: &dyn System) -> Outcome {
     }
 }
 
+/// `systemctl enable --now <units>`; `what` names the change in the report.
+fn enable_now(sys: &dyn System, units: &[&str], what: &str) -> Result<Vec<String>, String> {
+    let mut args = vec!["enable", "--now"];
+    args.extend_from_slice(units);
+    match sys.run("systemctl", &args) {
+        Some(o) if o.code == 0 => Ok(vec![what.to_string()]),
+        Some(o) => Err(format!(
+            "systemctl enable --now {} exited {}",
+            units.join(" "),
+            o.code
+        )),
+        None => Err("systemctl not available".into()),
+    }
+}
+
+fn fix_firewall(sys: &dyn System) -> Result<Vec<String>, String> {
+    enable_now(sys, &["firewalld"], "enabled and started firewalld")
+}
+
+fn fix_time_sync(sys: &dyn System) -> Result<Vec<String>, String> {
+    enable_now(
+        sys,
+        &["systemd-timesyncd"],
+        "enabled and started systemd-timesyncd",
+    )
+}
+
+fn fix_snapper_timers(sys: &dyn System) -> Result<Vec<String>, String> {
+    enable_now(
+        sys,
+        &["snapper-timeline.timer", "snapper-cleanup.timer"],
+        "enabled snapper timeline and cleanup timers",
+    )
+}
+
 macro_rules! check {
     ($id:literal, $cat:ident, $sev:ident, $risk:ident, $f:ident) => {
         Check {
@@ -260,6 +295,17 @@ macro_rules! check {
             severity: Severity::$sev,
             fix_risk: FixRisk::$risk,
             detect: $f,
+            fix: None,
+        }
+    };
+    ($id:literal, $cat:ident, $sev:ident, $risk:ident, $f:ident, fix = $fix:ident) => {
+        Check {
+            id: $id,
+            category: Category::$cat,
+            severity: Severity::$sev,
+            fix_risk: FixRisk::$risk,
+            detect: $f,
+            fix: Some($fix),
         }
     };
 }
@@ -294,7 +340,8 @@ pub const ALL: &[Check] = &[
         Snapshots,
         Warning,
         Safe,
-        snapshots_services
+        snapshots_services,
+        fix = fix_snapper_timers
     ),
     check!(
         "services.failed",
@@ -308,14 +355,16 @@ pub const ALL: &[Check] = &[
         Services,
         Warning,
         Safe,
-        services_time_sync
+        services_time_sync,
+        fix = fix_time_sync
     ),
     check!(
         "security.firewall",
         Security,
         Warning,
         Safe,
-        security_firewall
+        security_firewall,
+        fix = fix_firewall
     ),
     check!("hardware.ram", Hardware, Info, Safe, hardware_ram),
 ];
@@ -505,5 +554,23 @@ mod tests {
             hardware_ram(&Fake::default()),
             Outcome::Skipped(_)
         ));
+    }
+
+    #[test]
+    fn fixes_enable_units_and_report_errors() {
+        let ok = Fake::default().cmd("systemctl enable --now firewalld", 0, "");
+        assert_eq!(
+            fix_firewall(&ok).unwrap(),
+            vec!["enabled and started firewalld"]
+        );
+        let bad = Fake::default().cmd("systemctl enable --now firewalld", 1, "");
+        assert!(fix_firewall(&bad).unwrap_err().contains("exited 1"));
+        assert!(fix_firewall(&Fake::default()).is_err());
+        let t = Fake::default().cmd(
+            "systemctl enable --now snapper-timeline.timer snapper-cleanup.timer",
+            0,
+            "",
+        );
+        assert!(fix_snapper_timers(&t).is_ok());
     }
 }

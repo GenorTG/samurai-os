@@ -53,16 +53,17 @@ export CHECKUPDATES_DB="$CACHE_DIR/checkupdates-db"
 STATE="$STATE_DIR/update-check"
 REPORT=/var/lib/samurai/update-report.json
 LAST_UPDATE=/var/lib/samurai/last-update
+HEALTH_REPORT=/var/lib/samurai/health.json   # written by samurai-health.timer (root); world-readable
 STALE_DAYS=14
 
-write_state() {   # ARCH SAMURAI SECURITY REBOOT STALE PACNEW ERROR CHECKED
+write_state() {   # ARCH SAMURAI SECURITY REBOOT STALE PACNEW HEALTH ERROR CHECKED
     {
         printf 'checked=%s\n' "$CHECKED"
-        printf 'arch=%s\nsamurai=%s\nsecurity=%s\nreboot=%s\nstale_days=%s\npacnew=%s\nerror=%s\n' \
-            "$ARCH" "$SAMURAI" "$SECURITY" "$REBOOT" "$STALE" "$PACNEW" "$ERROR"
+        printf 'arch=%s\nsamurai=%s\nsecurity=%s\nreboot=%s\nstale_days=%s\npacnew=%s\nhealth=%s\nerror=%s\n' \
+            "$ARCH" "$SAMURAI" "$SECURITY" "$REBOOT" "$STALE" "$PACNEW" "$HEALTH" "$ERROR"
     } > "$STATE.tmp" && mv -f "$STATE.tmp" "$STATE"
-    printf '{"schema": 1, "checked": "%s", "arch": %s, "samurai": %s, "security": %s, "reboot": %s, "stale_days": %s, "pacnew": %s, "error": %s}\n' \
-        "$CHECKED" "$ARCH" "$SAMURAI" "$SECURITY" "$REBOOT" "$STALE" "$PACNEW" "$ERROR" \
+    printf '{"schema": 1, "checked": "%s", "arch": %s, "samurai": %s, "security": %s, "reboot": %s, "stale_days": %s, "pacnew": %s, "health": %s, "error": %s}\n' \
+        "$CHECKED" "$ARCH" "$SAMURAI" "$SECURITY" "$REBOOT" "$STALE" "$PACNEW" "$HEALTH" "$ERROR" \
         > "$STATE.json.tmp" && mv -f "$STATE.json.tmp" "$STATE.json"
 }
 
@@ -83,7 +84,7 @@ if [ "$MODE" = status ]; then
     exit 0
 fi
 
-ARCH=0; SAMURAI=0; SECURITY=0; REBOOT=0; STALE=0; PACNEW=0; ERROR=0
+ARCH=0; SAMURAI=0; SECURITY=0; REBOOT=0; STALE=0; PACNEW=0; HEALTH=0; ERROR=0
 CHECKED=$(date -Is)
 
 notify() {   # $1 summary, $2 body — desktop notification when a session bus is reachable
@@ -148,6 +149,12 @@ if command -v pacdiff >/dev/null 2>&1; then
     PACNEW=$(pacdiff -o 2>/dev/null | grep -c '\.pacnew$' || true)
 fi
 
+# health: warning-or-worse issues in the last `samurai health` report (spec 05). Info-level
+# findings (a stray .pacnew, no zram) never notify. A missing report counts as 0.
+if [ -r "$HEALTH_REPORT" ]; then
+    HEALTH=$(grep -o '"severity":"\(warning\|error\|critical\)","fix_risk":"[a-z-]*","status":"issue"' "$HEALTH_REPORT" | grep -c . || true)
+fi
+
 write_state
 if [ "$MODE" = check ] || [ "$JSON" -eq 1 ]; then
     print_state
@@ -165,6 +172,7 @@ fi
 [ "$REBOOT" -eq 1 ] && MSG="${MSG:+$MSG; }reboot pending"
 [ "$STALE" -ge "$STALE_DAYS" ] && MSG="${MSG:+$MSG; }not updated for $STALE days"
 [ "$PACNEW" -gt 0 ] && MSG="${MSG:+$MSG; }$PACNEW .pacnew file(s) to merge"
+[ "$HEALTH" -gt 0 ] && MSG="${MSG:+$MSG; }$HEALTH health issue(s) (samurai health)"
 if [ -n "$MSG" ]; then
     printf '%s\n' "$MSG"
     if command -v notify-send >/dev/null 2>&1 && [ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ]; then

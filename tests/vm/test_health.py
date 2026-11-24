@@ -110,8 +110,57 @@ def test_health_baseline_break_detect_repair(installed_vm):
     assert st["services.failed"] == "ok", rep
     assert st["pacman.pacnew"] == "ok", rep
 
+    # daily timer + sandboxed service write /var/lib/samurai/health.json (spec 05)
+    _, out = ga.exec("systemctl is-enabled samurai-health.timer", check=False)
+    assert out.strip() == "enabled", out
+    ga.exec("systemctl stop firewalld", check=False)
+    _, out = ga.exec(
+        "systemctl start samurai-health.service; echo START-RC=$?; systemctl is-failed samurai-health.service; "
+        "stat -c '%a' /var/lib/samurai/health.json; cat /var/lib/samurai/health.json",
+        check=False)
+    assert "START-RC=0" in out, f"issues found must not fail the unit: {out}"
+    head, _, body = out.partition("\n644\n")
+    assert body, f"report missing or wrong mode: {out}"
+    assert "failed" not in head, head
+    stored = json.loads(body)
+    st = _status(stored)
+    assert stored["schema"] == 1 and stored["issues"] >= 1
+    assert st["security.firewall"] == "issue", stored
+    # the sandbox must not blind the checks: these answer ok/issue, never skipped
+    for must in ("packages.core", "services.failed", "pacman.conf"):
+        assert st[must] in ("ok", "issue"), f"{must} skipped under the unit sandbox: {stored}"
+    ga.exec("systemctl start firewalld", check=False)
+
     # human output + usage error exit code
     _, out = ga.exec("samurai health --category services; echo rc=$?", check=False)
     assert "services.failed" in out, out
     _, out = ga.exec("samurai health --bogus >/dev/null 2>&1; echo rc=$?", check=False)
     assert out.strip().endswith("rc=2"), out
+
+
+def test_health_fix_is_snapshot_first_and_verified(installed_vm):
+    _, ga = installed_vm
+    # not root: refused, nothing touched
+    _, out = ga.exec("su samurai -c 'samurai health --fix --id security.firewall' 2>&1; echo rc=$?", check=False)
+    assert "needs root" in out and out.strip().endswith("rc=1"), out
+
+    # break the firewall completely (stopped AND disabled), then repair it
+    ga.exec("systemctl disable --now firewalld", check=False)
+    _, out = ga.exec("systemctl is-active firewalld; systemctl is-enabled firewalld", check=False)
+    assert "inactive" in out and "disabled" in out, out
+    _, before = ga.exec("snapper -c root list --columns number | wc -l", check=False)
+    _, out = ga.exec("samurai health --fix --id security.firewall; echo rc=$?", timeout=300, check=False)
+    assert "snapshot: created" in out, out
+    assert "fixed    security.firewall" in out and out.strip().endswith("rc=0"), out
+    _, out = ga.exec("systemctl is-active firewalld; systemctl is-enabled firewalld", check=False)
+    assert out.split() == ["active", "enabled"], out
+    _, after = ga.exec("snapper -c root list --columns number | wc -l", check=False)
+    assert int(after.strip()) == int(before.strip()) + 1, "exactly one pre-fix snapshot expected"
+    _, out = ga.exec("snapper -c root list --columns description | grep -c 'samurai health --fix'", check=False)
+    assert out.strip() == "1", out
+
+    # nothing left to fix: no snapshot, clean exit
+    _, out = ga.exec("samurai health --fix --id security.firewall; echo rc=$?", check=False)
+    assert "nothing to fix automatically" in out and out.strip().endswith("rc=0"), out
+    _, again = ga.exec("snapper -c root list --columns number | wc -l", check=False)
+    assert again.strip() == after.strip(), "no snapshot when there is nothing to fix"

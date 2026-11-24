@@ -26,8 +26,10 @@ pre_install() {
 
 post_install() {
     systemctl --global enable samurai-notifier.timer >/dev/null 2>&1 || true
+    systemctl enable samurai-health.timer >/dev/null 2>&1 || true
 }
 
 post_upgrade() {
     systemctl --global enable samurai-notifier.timer >/dev/null 2>&1 || true
+    systemctl enable samurai-health.timer >/dev/null 2>&1 || true
 }

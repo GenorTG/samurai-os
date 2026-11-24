@@ -45,6 +45,58 @@ fn run_tool(tool: &str, prefix: &[&str], rest: &[String]) -> ExitCode {
     ExitCode::from(2)
 }
 
+fn confirm_on_tty(yes: bool, id: &str, summary: &str) -> bool {
+    use std::io::{BufRead, IsTerminal, Write};
+    if yes {
+        return true;
+    }
+    if !std::io::stdin().is_terminal() {
+        eprintln!("samurai health: {id} needs confirmation; not a terminal, skipping (use --yes)");
+        return false;
+    }
+    eprint!("{id}: {summary}\nApply the fix? [y/N] ");
+    let _ = std::io::stderr().flush();
+    let mut line = String::new();
+    std::io::stdin().lock().read_line(&mut line).is_ok() && matches!(line.trim(), "y" | "Y" | "yes")
+}
+
+fn run_health_fix(opts: &health::Options) -> ExitCode {
+    use health::{system::System, FixAction, Snapshot};
+    let sys = RealSystem;
+    if sys
+        .run("id", &["-u"])
+        .is_none_or(|o| o.stdout.trim() != "0")
+    {
+        eprintln!("samurai health: --fix needs root (try: sudo samurai health --fix)");
+        return ExitCode::from(1);
+    }
+    let findings = health::run(&sys, ALL, &opts.filter);
+    if !health::has_actionable_fix(ALL, &findings) {
+        print!("{}", health::render_text(&findings));
+        println!("nothing to fix automatically");
+        return ExitCode::from(health::exit_code(&findings) as u8);
+    }
+    match health::pre_fix_snapshot(&sys) {
+        Snapshot::Created => println!("snapshot: created (snapper root)"),
+        Snapshot::Unavailable(why) => {
+            eprintln!("samurai health: no pre-fix snapshot ({why}); continuing")
+        }
+        Snapshot::Failed(why) => {
+            eprintln!("samurai health: pre-fix snapshot failed ({why}); not fixing anything");
+            return ExitCode::from(1);
+        }
+    }
+    let yes = opts.yes;
+    let reports = health::apply_fixes(&sys, ALL, &findings, &mut |f, i| {
+        confirm_on_tty(yes, f.id, &i.summary)
+    });
+    print!("{}", health::render_fix_text(&reports));
+    let unresolved = reports
+        .iter()
+        .any(|r| !matches!(r.action, FixAction::Fixed(_)));
+    ExitCode::from(u8::from(unresolved))
+}
+
 fn run_health(args: &[String]) -> ExitCode {
     let opts = match health::parse_args(args, ALL) {
         Ok(o) => o,
@@ -64,11 +116,27 @@ fn run_health(args: &[String]) -> ExitCode {
         }
         return ExitCode::SUCCESS;
     }
+    if opts.fix {
+        return run_health_fix(&opts);
+    }
     let findings = health::run(&RealSystem, ALL, &opts.filter);
+    let epoch = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    if opts.write {
+        // the stored report always covers every check, whatever filter the run used
+        let all = if opts.filter == health::Filter::default() {
+            None
+        } else {
+            Some(health::run(&RealSystem, ALL, &health::Filter::default()))
+        };
+        let report = health::render_json(all.as_deref().unwrap_or(&findings), epoch);
+        if let Err(e) = health::write_atomic(Path::new(health::REPORT_PATH), &report) {
+            eprintln!("samurai health: cannot write {}: {e}", health::REPORT_PATH);
+            return ExitCode::from(1);
+        }
+    }
     if opts.json {
-        let epoch = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |d| d.as_secs());
         print!("{}", health::render_json(&findings, epoch));
     } else {
         print!("{}", health::render_text(&findings));

@@ -47,14 +47,18 @@ impl System for RealSystem {
 #[cfg(test)]
 pub mod fake {
     use super::{CmdOut, System};
+    use std::cell::RefCell;
     use std::collections::{HashMap, HashSet};
 
-    /// Scripted system: commands are keyed by `"prog arg arg"`.
+    /// Scripted system. Commands are keyed by `"prog arg arg"`; repeating `cmd` for the same key
+    /// queues successive answers (the last one repeats), so a fix can flip a check's result.
     #[derive(Default)]
     pub struct Fake {
         files: HashMap<String, String>,
         paths: HashSet<String>,
-        cmds: HashMap<String, CmdOut>,
+        cmds: HashMap<String, Vec<CmdOut>>,
+        seen: RefCell<HashMap<String, usize>>,
+        log: RefCell<Vec<String>>,
     }
 
     impl Fake {
@@ -70,14 +74,16 @@ pub mod fake {
         }
 
         pub fn cmd(mut self, line: &str, code: i32, stdout: &str) -> Self {
-            self.cmds.insert(
-                line.to_string(),
-                CmdOut {
-                    code,
-                    stdout: stdout.to_string(),
-                },
-            );
+            self.cmds.entry(line.to_string()).or_default().push(CmdOut {
+                code,
+                stdout: stdout.to_string(),
+            });
             self
+        }
+
+        /// Every command line that was run, in order.
+        pub fn calls(&self) -> Vec<String> {
+            self.log.borrow().clone()
         }
     }
 
@@ -95,7 +101,13 @@ pub mod fake {
                 .chain(args.iter().copied())
                 .collect::<Vec<_>>()
                 .join(" ");
-            self.cmds.get(&key).cloned()
+            self.log.borrow_mut().push(key.clone());
+            let answers = self.cmds.get(&key)?;
+            let mut seen = self.seen.borrow_mut();
+            let n = seen.entry(key).or_insert(0);
+            let out = answers[(*n).min(answers.len() - 1)].clone();
+            *n += 1;
+            Some(out)
         }
     }
 }
