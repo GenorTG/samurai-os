@@ -1,0 +1,14 @@
+# Keep the boot menu in step with installed kernels. Runs after mkinitcpio's hooks
+# (90-mkinitcpio-install.hook builds the images this looks for). A no-op while no boot
+# configuration exists yet (installation).
+[Trigger]
+Type = Path
+Operation = Install
+Operation = Upgrade
+Operation = Remove
+Target = usr/lib/modules/*/vmlinuz
+
+[Action]
+Description = Updating Samurai OS boot entries...
+When = PostTransaction
+Exec = /usr/local/bin/samurai boot sync

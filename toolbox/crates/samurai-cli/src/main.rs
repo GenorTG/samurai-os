@@ -5,6 +5,7 @@ use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
+use samurai_core::boot;
 use samurai_core::clean;
 use samurai_core::diag::{self, Cmd};
 use samurai_core::fix;
@@ -157,6 +158,41 @@ fn sudo_target(sys: &RealSystem) -> Option<String> {
         .ok()
         .filter(|u| !u.is_empty() && u != "root");
     user.filter(|_| is_root)
+}
+
+fn run_boot(args: &[String]) -> ExitCode {
+    let check = match boot::parse_args(args) {
+        Ok(boot::Cmd::Help) => {
+            print!("{}", boot::USAGE);
+            return ExitCode::SUCCESS;
+        }
+        Ok(boot::Cmd::Sync { check }) => check,
+        Err(e) => {
+            eprintln!("samurai boot: {e}\n");
+            eprint!("{}", boot::USAGE);
+            return ExitCode::from(2);
+        }
+    };
+    match boot::sync(&RealSystem, !check) {
+        Ok(boot::Outcome::InSync) => {
+            println!("boot entries match the installed kernels");
+            ExitCode::SUCCESS
+        }
+        Ok(boot::Outcome::NotManaged(why)) => {
+            println!("nothing to do: {why}");
+            ExitCode::SUCCESS
+        }
+        Ok(boot::Outcome::Changed(lines)) => {
+            for l in &lines {
+                println!("{}{l}", if check { "would " } else { "" });
+            }
+            ExitCode::from(u8::from(check))
+        }
+        Err(e) => {
+            eprintln!("samurai boot: {e}");
+            ExitCode::from(1)
+        }
+    }
 }
 
 fn run_mirrors(args: &[String]) -> ExitCode {
@@ -493,6 +529,7 @@ fn main() -> ExitCode {
         Action::Clean => run_clean(&rest),
         Action::Fix => run_fix(&rest),
         Action::Mirrors => run_mirrors(&rest),
+        Action::Boot => run_boot(&rest),
         Action::Version => {
             let v = read_version_file(Path::new(TOOLS_VERSION_FILE)).or_else(pacman_version);
             println!("{}", version_line(v.as_deref()));

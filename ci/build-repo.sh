@@ -99,7 +99,8 @@ for src in /src/pkgbuilds/*/; do
         tar -C /src/toolbox --exclude=target -cf - . | tar -C "$pkg/toolbox" -xf -
         for name in samurai-update samurai-snap samurai-rescue samurai-apps samurai-notifier validate-interventions.py \
                     samurai-notifier.service samurai-notifier.timer \
-                    samurai-health.service samurai-health.timer; do
+                    samurai-health.service samurai-health.timer \
+                    95-samurai-boot.hook; do
             cp -a "/src/updates/$name" "$pkg/"
         done
         cp -a /src/updates/interventions/0001-update-mechanism-demo.toml "$pkg/"

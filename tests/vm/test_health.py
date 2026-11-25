@@ -417,3 +417,51 @@ def test_mirrors_status_and_refresh(installed_vm):
     assert "rc=0" in out, out
     _, rep = _health(ga, "--id", "pacman.mirrors")
     assert rep["results"][0]["status"] == "ok", rep
+
+
+def test_zz_boot_entries_follow_kernels_and_the_machine_boots(installed_vm):
+    """Runs last: it replaces the installed kernel and reboots."""
+    vm, ga = installed_vm
+    conf = "/boot/limine/limine.conf"
+    # a normal user cannot read the ESP: that must be "skipped", never a false critical
+    _, out = ga.exec("su samurai -c 'samurai health --json'", timeout=120, check=False)
+    st = _status(json.loads(out))
+    for cid in ("boot.kernels-present", "boot.initramfs", "boot.entries"):
+        assert st[cid] == "skipped", (cid, st[cid])
+    _, out = ga.exec("samurai boot sync --check; echo rc=$?", check=False)
+    assert "match the installed kernels" in out and out.strip().endswith("rc=0"), out
+
+    # a foreign entry must survive everything below
+    ga.exec(f"printf '\\n/Keep Me\\n    protocol: efi_chainload\\n    path: boot():/EFI/none.efi\\n' >> {conf}", check=False)
+    # installing a kernel: the pacman hook adds its entry
+    _, out = ga.exec("pacman -S --noconfirm linux-lts >/tmp/lts.log 2>&1; echo rc=$?; grep -i 'boot entr' /tmp/lts.log; tail -5 /tmp/lts.log", timeout=1200, check=False)
+    assert "rc=0" in out and "Updating Samurai OS boot entries" in out, out
+    _, menu = ga.exec(f"cat {conf}", check=False)
+    assert "/Samurai OS (linux-lts)" in menu and "vmlinuz-linux-lts" in menu and "/Keep Me" in menu, menu
+    assert menu.index("/Samurai OS (linux)") < menu.index("/Samurai OS (linux-lts)"), "default must not change"
+
+    # removing the original (default) kernel: its entry goes, the machine must still boot
+    _, out = ga.exec("pacman -R --noconfirm linux >/tmp/rm.log 2>&1; echo rc=$?; tail -8 /tmp/rm.log", timeout=600, check=False)
+    assert "rc=0" in out, out
+    _, menu = ga.exec(f"cat {conf}", check=False)
+    assert "/Samurai OS (linux)\n" not in menu + "\n" and "/Samurai OS (linux-lts)" in menu and "/Keep Me" in menu, menu
+    first = next(l for l in menu.splitlines() if l.startswith("/"))
+    assert first == "/Samurai OS (linux-lts)", f"the default must be our remaining kernel, got {first!r}"
+    _, out = ga.exec(f"test -s {conf}.bak && echo BAK; samurai health --id boot.entries; echo rc=$?", check=False)
+    assert "BAK" in out and "ok       boot.entries" in out, out
+
+    # --fix repairs a hand-broken menu
+    ga.exec(f"cp {conf} /root/limine.good; sed -i '/^\\/Samurai OS (linux-lts)$/i /Samurai OS (ghost)\\n    protocol: linux\\n    path: boot():/vmlinuz-ghost\\n' {conf}", check=False)
+    _, out = ga.exec("samurai health --fix --id boot.entries; echo rc=$?", timeout=300, check=False)
+    assert "fixed    boot.entries" in out and "rc=0" in out, out
+    _, menu = ga.exec(f"cat {conf}", check=False)
+    assert "ghost" not in menu and "/Samurai OS (linux-lts)" in menu, menu
+
+    ga.exec("sync", check=False)   # vm.reboot() is a hard reset
+    ga.close()
+    vm.reboot()
+    vm.wait_for("login:", timeout=300)
+    ga = vm.qga()
+    _, out = ga.exec("uname -r; systemctl --failed --no-legend | head -5", check=False)
+    assert "lts" in out.splitlines()[0], f"did not boot the new kernel: {out}"
+    ga.close()

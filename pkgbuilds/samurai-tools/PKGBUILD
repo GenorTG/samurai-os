@@ -6,7 +6,7 @@
 #   for f in ...; do sha256sum "$f"; done   (or updpkgsums in the staged dir)
 pkgname=samurai-tools
 pkgver=0.4.0
-pkgrel=12
+pkgrel=13
 pkgdesc="Samurai OS CLI (Rust dispatcher), updater, executors, app catalog tool, update notifier and shell completions"
 arch=(x86_64)
 url="https://github.com/GenorTG/samurai-os"
@@ -47,6 +47,7 @@ source=(
     samurai-notifier.timer
     samurai-health.service
     samurai-health.timer
+    95-samurai-boot.hook
     samurai.bash
     samurai.fish
     0001-update-mechanism-demo.toml
@@ -66,8 +67,9 @@ sha256sums=(
     '832e6dede8d1bf108c41c2eb9d856cc7bc565c73c280e79359e181feb2996eac'
     '7532127b6305afb2b465631ee842442f1182ea8616f6d1f5d420dadbde51e35b'
     'b6ecd99a5c8def7315492de18157c4681c575abe7ebfc8bf03a22009cdafcbc1'
-    '23e41a33254499be2549a7118bf6e088f11761e64301fe729f76c23572f2b647'
-    'b69e6383ecb766bf558e4af84e22a2a73c23f4c0787b52949dcb58ec6cd51862'
+    '001759df7f3395c9c66d28149d4362b44b1f8b7d40b542a8c22dd44d97046bf7'
+    '2dee26b29bbd073807d5beab767bd7c6bd0eeb8c7db59554ec9f5962892eefdc'
+    'b071800129106ec329c61739bb8433b92066db9f8ba78af967afd913660198e8'
     '3fbf554fe2729136489e72fe11a162bd17d25cb170fb72863c793d0664eeb877'
     '60a47ce64a90aab079c0a8d50c126ee795fd9263d0304a3b63128862066c7331'
     'c03375cb3acd7ead49fbe319a44a596b493b1e716388a10346271b33ca47fdf8'
@@ -97,6 +99,7 @@ package() {
     install -Dm644 samurai-notifier.timer "$pkgdir/usr/lib/systemd/user/samurai-notifier.timer"
     install -Dm644 samurai-health.service "$pkgdir/usr/lib/systemd/system/samurai-health.service"
     install -Dm644 samurai-health.timer "$pkgdir/usr/lib/systemd/system/samurai-health.timer"
+    install -Dm644 95-samurai-boot.hook "$pkgdir/usr/share/libalpm/hooks/95-samurai-boot.hook"
     install -Dm644 samurai.bash "$pkgdir/usr/share/bash-completion/completions/samurai"
     install -Dm644 samurai.fish "$pkgdir/usr/share/fish/vendor_completions.d/samurai.fish"
     install -Dm755 validate-interventions.py "$pkgdir/usr/lib/samurai/validate-interventions.py"

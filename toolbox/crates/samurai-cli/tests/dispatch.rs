@@ -302,3 +302,14 @@ fn mirrors_usage_and_help() {
     assert_eq!(o.status.code(), Some(0));
     assert!(out(&o).starts_with("usage: samurai mirrors"));
 }
+
+#[test]
+fn boot_usage_and_help() {
+    let d = sandbox("boot");
+    for bad in [&["boot"][..], &["boot", "nope"], &["boot", "sync", "x"]] {
+        assert_eq!(run(&d, bad).status.code(), Some(2), "{bad:?}");
+    }
+    let o = run(&d, &["boot", "--help"]);
+    assert_eq!(o.status.code(), Some(0));
+    assert!(out(&o).starts_with("usage: samurai boot sync"));
+}

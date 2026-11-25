@@ -2,6 +2,7 @@
 
 use super::system::System;
 use super::{Category, Check, FixRisk, Issue, Outcome, Severity};
+use crate::boot;
 
 fn issue(summary: impl Into<String>, details: impl Into<String>, evidence: Vec<String>) -> Outcome {
     Outcome::Issue(Issue {
@@ -295,6 +296,9 @@ fn kernel_bases(sys: &dyn System) -> Vec<String> {
 }
 
 fn boot_kernels_present(sys: &dyn System) -> Outcome {
+    if !boot::boot_readable(sys) {
+        return Outcome::Skipped("/boot cannot be read (needs root)".into());
+    }
     let bases = kernel_bases(sys);
     if bases.is_empty() {
         return Outcome::Skipped("no installed kernel found".into());
@@ -325,6 +329,9 @@ fn missing_initramfs(sys: &dyn System) -> Vec<String> {
 }
 
 fn boot_initramfs(sys: &dyn System) -> Outcome {
+    if !boot::boot_readable(sys) {
+        return Outcome::Skipped("/boot cannot be read (needs root)".into());
+    }
     if kernel_bases(sys).is_empty() {
         return Outcome::Skipped("no installed kernel found".into());
     }
@@ -644,6 +651,26 @@ fn boot_esp_space(sys: &dyn System) -> Outcome {
     }
 }
 
+fn boot_entries(sys: &dyn System) -> Outcome {
+    match boot::sync(sys, false) {
+        Ok(boot::Outcome::InSync) => Outcome::Ok,
+        Ok(boot::Outcome::NotManaged(why)) => Outcome::Skipped(why),
+        Ok(boot::Outcome::Changed(lines)) => issue(
+            "the boot menu does not match the installed kernels",
+            "Update it: samurai boot sync",
+            lines,
+        ),
+        Err(why) => Outcome::Skipped(why),
+    }
+}
+
+fn fix_boot_entries(sys: &dyn System) -> Result<Vec<String>, String> {
+    match boot::sync(sys, true)? {
+        boot::Outcome::Changed(lines) => Ok(lines),
+        _ => Ok(Vec::new()),
+    }
+}
+
 macro_rules! check {
     ($id:literal, $cat:ident, $sev:ident, $risk:ident, $f:ident) => {
         Check {
@@ -724,6 +751,14 @@ pub const ALL: &[Check] = &[
         fix = fix_firewall
     ),
     check!("hardware.ram", Hardware, Info, Safe, hardware_ram),
+    check!(
+        "boot.entries",
+        Boot,
+        Error,
+        Safe,
+        boot_entries,
+        fix = fix_boot_entries
+    ),
     check!(
         "pacman.mirrors",
         Packages,
@@ -1004,9 +1039,21 @@ mod tests {
 
     fn kernels(extra: Fake) -> Fake {
         extra
+            .dir("/boot", &["EFI"])
             .dir("/usr/lib/modules", &["6.12.1-arch1-1", "6.12.2-zen1-1"])
             .file("/usr/lib/modules/6.12.1-arch1-1/pkgbase", "linux\n")
             .file("/usr/lib/modules/6.12.2-zen1-1/pkgbase", "linux-zen\n")
+    }
+
+    #[test]
+    fn boot_checks_skip_when_boot_is_unreadable() {
+        // a normal user cannot list the ESP (mode 0700): that is not a missing kernel
+        let locked = Fake::default()
+            .dir("/usr/lib/modules", &["6.12.1-arch1-1"])
+            .file("/usr/lib/modules/6.12.1-arch1-1/pkgbase", "linux\n");
+        for check in [boot_kernels_present, boot_initramfs, boot_entries] {
+            assert!(matches!(check(&locked), Outcome::Skipped(_)));
+        }
     }
 
     #[test]

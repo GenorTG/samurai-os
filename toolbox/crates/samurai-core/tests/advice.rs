@@ -1,9 +1,10 @@
 //! Advice printed to users must name commands that exist: every `samurai ...` mention in a
 //! message string has to parse.
 
-use samurai_core::{clean, diag, fix, health, mirrors, parse, Action};
+use samurai_core::{boot, clean, diag, fix, health, mirrors, parse, Action};
 
-const SOURCES: [&str; 3] = [
+const SOURCES: [&str; 4] = [
+    include_str!("../src/boot/mod.rs"),
     include_str!("../src/health/checks.rs"),
     include_str!("../src/mirrors/mod.rs"),
     include_str!("../src/fix/mod.rs"),
@@ -47,6 +48,7 @@ fn every_suggested_command_exists() {
                 Action::Clean => clean::parse_args(&args).is_ok(),
                 Action::Fix => fix::parse_args(&args).is_ok(),
                 Action::Mirrors => mirrors::parse_args(&args).is_ok(),
+                Action::Boot => boot::parse_args(&args).is_ok(),
                 Action::Health => health::parse_args(&args, health::checks::ALL).is_ok(),
                 Action::Diag => diag::parse_args(&args).is_ok(),
                 _ => true,

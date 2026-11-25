@@ -21,6 +21,9 @@ pub trait System {
     fn mtime(&self, path: &str) -> Option<u64>;
     /// Current time in seconds since the epoch.
     fn now(&self) -> u64;
+    /// Replace a file atomically (temp file + rename in the same directory).
+    fn write(&self, path: &str, content: &str) -> Result<(), String>;
+    fn remove(&self, path: &str) -> Result<(), String>;
     /// `None` when the program cannot be started (missing). A non-zero exit is still `Some`.
     fn run(&self, prog: &str, args: &[&str]) -> Option<CmdOut>;
     /// Like [`run`](System::run) but as an unprivileged user (uid, gid): used when root works inside
@@ -86,6 +89,25 @@ impl System for RealSystem {
 
     fn exists(&self, path: &str) -> bool {
         Path::new(path).exists()
+    }
+
+    fn write(&self, path: &str, content: &str) -> Result<(), String> {
+        let tmp = format!("{path}.samurai-tmp");
+        let result = fs::File::create(&tmp)
+            .and_then(|mut f| {
+                use std::io::Write;
+                f.write_all(content.as_bytes())?;
+                f.sync_all()
+            })
+            .and_then(|()| fs::rename(&tmp, path));
+        result.map_err(|e| {
+            let _ = fs::remove_file(&tmp);
+            format!("cannot write {path}: {e}")
+        })
+    }
+
+    fn remove(&self, path: &str) -> Result<(), String> {
+        fs::remove_file(path).map_err(|e| format!("cannot remove {path}: {e}"))
     }
 
     fn mtime(&self, path: &str) -> Option<u64> {
@@ -196,6 +218,7 @@ pub mod fake {
         cmds: HashMap<String, Vec<CmdOut>>,
         seen: RefCell<HashMap<String, usize>>,
         log: RefCell<Vec<String>>,
+        written: RefCell<Vec<(String, String)>>,
     }
 
     impl Fake {
@@ -238,6 +261,11 @@ pub mod fake {
             self
         }
 
+        /// Every file write or removal, in order.
+        pub fn writes(&self) -> Vec<(String, String)> {
+            self.written.borrow().clone()
+        }
+
         /// Every command line that was run, in order.
         pub fn calls(&self) -> Vec<String> {
             self.log.borrow().clone()
@@ -251,6 +279,20 @@ pub mod fake {
 
         fn exists(&self, path: &str) -> bool {
             self.paths.contains(path)
+        }
+
+        fn write(&self, path: &str, content: &str) -> Result<(), String> {
+            self.written
+                .borrow_mut()
+                .push((path.to_string(), content.to_string()));
+            Ok(())
+        }
+
+        fn remove(&self, path: &str) -> Result<(), String> {
+            self.written
+                .borrow_mut()
+                .push((path.to_string(), "<removed>".to_string()));
+            Ok(())
         }
 
         fn mtime(&self, path: &str) -> Option<u64> {
