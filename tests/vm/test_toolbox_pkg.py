@@ -29,8 +29,9 @@ def test_rust_cli_on_live_system(mirror):
         vm.serial_connect()
         vm.login_root()
         qga = vm.ensure_qga()
-        _, out = qga.exec("head -c 2 /usr/local/bin/samurai")
-        assert out.startswith("#!"), "live ISO should still ship the shell shim"
+        # the live medium ships the real CLI: every advertised command works before any install
+        _, out = qga.exec("head -c 4 /usr/local/bin/samurai | od -An -c; samurai health >/dev/null 2>&1; echo health-rc=$?", timeout=120, check=False)
+        assert "E   L   F" in out and ("health-rc=0" in out or "health-rc=1" in out), out
         _, out = qga.exec(
             f"curl -fsSL http://10.0.2.2:8966/{pkg.name} -o /tmp/st.pkg.tar.zst && "
             "pacman -U --noconfirm -dd --overwrite '/usr/local/bin/samurai' --overwrite '/usr/local/bin/samurai-*' "

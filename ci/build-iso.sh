@@ -66,6 +66,16 @@ for f in "$repo_root"/updates/samurai "$repo_root"/updates/samurai-*; do
     cp -f "$f" "$bin_dir/$(basename "$f")"
     chmod 755 "$bin_dir/$(basename "$f")"
 done
+# the live medium (and the target's first boot, which copies these tools) runs the
+# real Rust CLI, not the old shell shim: build it from this tree, offline, in a
+# throwaway container
+echo "==> building the samurai CLI for the live medium"
+docker run --rm -v "$repo_root/toolbox":/src:ro -v "$bin_dir":/out "$image" bash -c '
+set -euo pipefail
+pacman -Syu --noconfirm --needed rust gcc >/dev/null
+cd /src && CARGO_TARGET_DIR=/tmp/target cargo build --release --locked --offline -p samurai-cli
+install -m755 /tmp/target/release/samurai /out/samurai
+'
 for f in samurai-notifier.service samurai-notifier.timer; do
     cp -f "$repo_root/updates/$f" "$lib_dir/$f"
 done

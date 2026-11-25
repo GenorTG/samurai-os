@@ -13,7 +13,7 @@ import pytest
 from conftest import INSTALL_TIMEOUT, find_iso
 from vm import VM
 
-TESTING_BLOCK = "[samurai-testing]\\nInclude = /etc/pacman.d/samurai-testing-mirrorlist\\nSigLevel = Required DatabaseRequired\\n\\n"
+TESTING_BLOCK = r"[samurai-testing]\nInclude = /etc/pacman.d/samurai-testing-mirrorlist\nSigLevel = Required DatabaseRequired\n"
 
 
 def test_published_channel_update(mirror):
@@ -41,9 +41,10 @@ def test_published_channel_update(mirror):
         _, before = ga.exec("pacman -Q samurai-tools || echo none", check=False)
         print("tools right after install:", before.strip())
         if channel == "testing":
-            ga.exec(
-                "python3 - <<'PY'\nfrom pathlib import Path\np=Path('/etc/pacman.conf'); t=p.read_text()\n"
-                f"i=t.index('[samurai]'); p.write_text(t[:i]+'{TESTING_BLOCK}'+t[i:])\nPY")
+            # one line on purpose: the guest-agent wrapper does not survive heredocs
+            ga.exec("sed -i '/^\\[samurai\\]$/i " + TESTING_BLOCK + "' /etc/pacman.conf")
+            _, conf = ga.exec("grep -A3 '^\\[samurai-testing\\]' /etc/pacman.conf; grep -n '^\\[samurai' /etc/pacman.conf")
+            assert "samurai-testing-mirrorlist" in conf and conf.index("[samurai-testing]") >= 0, conf
         _, out = ga.exec("samurai-update --noconfirm >/tmp/up.log 2>&1; echo UP-RC=$?; tail -25 /tmp/up.log", timeout=1500, check=False)
         assert "UP-RC=0" in out or "UP-RC=2" in out, out
         _, ver = ga.exec("pacman -Q samurai-tools samurai-release samurai-keyring samurai-mirrorlist", check=False)
