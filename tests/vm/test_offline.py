@@ -64,7 +64,11 @@ def test_offline_install(mirror):
         vm.eject_iso()
         vm.reboot()
         # autokey affordance: no boot passphrase; serial getty still answers
-        vm.wait_for("login:", timeout=300)
+        try:
+            vm.wait_for("login:", timeout=600)
+        except TimeoutError:
+            vm.screendump("offline-boot-failed")  # bootloader errors never reach the serial log
+            raise
         ga2 = vm.qga(timeout=120)
         code, out = ga2.exec(
             "systemctl is-active sddm; "

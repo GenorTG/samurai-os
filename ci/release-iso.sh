@@ -131,7 +131,14 @@ $verify_block
 Write either ISO to a USB stick (\`sudo dd if=<iso> of=/dev/sdX bs=4M status=progress oflag=sync\`, or
 copy it onto a Ventoy stick), boot it and run \`samurai-install\` for the guided wizard.
 
-### New in this release
+### The \`samurai\` command
+- \`samurai health\` (system checks; \`--fix\` takes a snapshot first), also run daily by a timer.
+- \`samurai diag\` (diagnostics; the support bundle redacts private data by default).
+- \`samurai clean\`, \`samurai fix\`, \`samurai mirrors\`.
+- \`samurai kernel\` and \`samurai boot sync\`: boot entries follow installed kernels.
+- \`samurai update\`, \`apps\`, \`snap\`, \`rescue\`, \`status\`.
+
+### Highlights
 - **Two installers**: online netinstall and a full offline ISO. Offline installs resolve from a local
   repository on the medium, so a machine gets only what it needs.
 - **\`samurai apps\`**: optional apps and bundles (\`@gaming\`, \`@dev\`, \`@creative\`, \`@office\`,
@@ -155,6 +162,11 @@ copy it onto a Ventoy stick), boot it and run \`samurai-install\` for the guided
   clean reboot.
 - LUKS2 + btrfs subvolumes, multi-kernel boot entries (linux-cachyos, linux-zen), SDDM up, no failed units.
 - Staged updates from the signed \`[samurai]\` repo, snapshot + rescue rollback, attended wizard install.
+- The toolbox: health detect and repair, redacted diagnostics, cleanup, mirror refresh, kernel
+  install, default change and reboot (Limine, Arch kernels).
+
+Not yet covered by a VM test: NVIDIA hardware, CachyOS kernel switching, and boot entry
+management on GRUB or systemd-boot.
 
 Source, specs and VM tests: <https://github.com/GenorTG/samurai-os>. Website: <https://genortg.github.io/samurai-os/>.
 EOF
