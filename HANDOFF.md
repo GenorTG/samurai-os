@@ -4,6 +4,15 @@
 Personal Arch-based distro: upstream Arch repos unchanged, CachyOS below Arch, signed Samurai repo,
 guided installer and CLI/toolbox. VM validation runs on genorbox1. Site: <https://genortg.github.io/samurai-os/>.
 
+## Released (2026-11-25)
+- Packages: `x86_64` (stable) and `x86_64-testing` on `GenorTG/samurai-repo`, built from 562ee45+ and published
+  locally with `ci/build-repo.sh build/repo` + `ci/publish-repo.sh build/repo <channel>` (stable = the exact
+  files tested on testing): samurai-tools 0.4.0-14, keyring 20261117-4, mirrorlist 1-4, release 0.0.1-8.
+  Genor OK'd publishing 2026-11-25. Testing db is also uploaded as `samurai-testing.db` (pacman section name).
+  `repo.smart-samurai.pl` fallback mirror: not checked/synced.
+- ISOs: GitHub release `v0.0.1.75` (online + split offline, signed SHA256SUMS), built as `build/rel-*-15`.
+  `release-iso.sh` needs `gh` on PATH (pass `--setenv=PATH` under systemd-run).
+
 ## State (2026-11-22)
 - Specs 00–14 and ADR-0001…0008 remain the product source of truth.
 - M0–M4 complete (ISO identity; LUKS2/btrfs installer; update/notifier; rescue rollback; guided installer).
@@ -35,6 +44,12 @@ guided installer and CLI/toolbox. VM validation runs on genorbox1. Site: <https:
   install, reboot with zero failed units. `test_offline.py` forces NVIDIA and asserts DKMS for both kernels.
 
 ## Verification status
+- r15 ISOs + published stable repo (2026-11-25): live-ISO CLI, published-channel update (testing and stable,
+  `tests/vm/test_channel.py`), smoke, update, rollback, daily, attended, kde, offline PASS.
+- r15 offline FAILED once under host load ~11-25 (no login 300 s after the post-install reboot; squashfs
+  errors in the log are just the ejected live disc); cause not captured. Then 2/2 PASS at lower load. The test
+  now waits 600 s and screendumps `offline-boot-failed` if it recurs. Never run a QMP watcher beside the
+  harness: QMP takes one client and `makefile()` keeps it open (blocked a run).
 - r14 ISOs (installer ee802dd, 2026-11-24): smoke, update, rollback, attended, daily, kde, offline PASS (`.tmp/regress.sh`).
 - r13 ISOs (installer 7573e08): offline, daily, kde, attended, update, rollback, smoke, archive PASS.
 - smoke: PASS (2 passed, 8m12s) after the mirrorlist assertion fix. All r13 scenarios are now green.
@@ -50,13 +65,13 @@ guided installer and CLI/toolbox. VM validation runs on genorbox1. Site: <https:
    - `boot sync [--check]` (`boot/mod.rs`) + hook `updates/95-samurai-boot.hook` (PostTransaction on kernel install/remove) + check `boot.entries` (fix): Limine, systemd-boot, GRUB. Touches only our entries, copies the existing cmdline, never empties the menu, keeps `limine.conf.bak`; if our default entry is removed one of OURS takes first place. Boot checks report "skipped" for non-root (ESP is 0700; was a false critical). The live ISO's tool copy ships no hook: it arrives with the package.
    - `kernel list|install|remove|default` (`kernel/mod.rs`): fixed catalog of 6; pacman only, never `-Sy`; headers when dkms (+`cachyos/pahole`); warns before adding a kernel to a prebuilt-NVIDIA system; refuses to remove the running or last bootable kernel; `default` for Limine/systemd-boot (not GRUB). Not VM-tested: CachyOS kernels, NVIDIA, systemd-boot/GRUB (unit tests only).
    - **Root hardening rules (keep them):** `RealSystem` resolves programs only from `TRUSTED_PATH` with a scrubbed environment (never the caller's `$PATH`); under sudo, `diag bundle --out` must resolve inside the caller's home; under sudo, user-file targets run via `System::run_as` (uid/gid of the caller; std drops supplementary groups). VM harness HTTP mirror binds 127.0.0.1 only.
-   - Installer now enables `btrfs-scrub@-.timer` (spec 06), verified on ISO `build/rel-online-14` (not yet released).
+   - Installer enables `btrfs-scrub@-.timer` (spec 06); released in v0.0.1.75. The live ISO now builds and ships the Rust CLI.
    VM-verified on 0.4.0-14 (`test_health.py` 9 passed, 9m43s) (full install, then `pacman -U` of the local pkg): `tests/vm/test_toolbox_pkg.py` (live ISO) + `tests/vm/test_health.py` (9 tests; also fix lock/keyring/dkms, age checks, sudo hardening, mirrors, kernel swap + reboot: baseline, break/detect/repair, timer+sandbox, notifier, `--fix` snapshot-first, initramfs rebuild, btrfs timers, diag with planted user/IP/MAC/email/password, clean incl. orphan confirmation). Run: `SAMURAI_TEST_TOOLS_PKG=<pkg> SAMURAI_TEST_ISO=<iso> SAMURAI_VM_RUN_ID=<id> pytest -q -s tests/vm/test_health.py`.
-   Not done: publishing 0.4.x (item 4), needs-confirm health fixes, ~15 more spec-05 checks, `fix audio|pacman|reinstall-all`, `boot get/set`, `boot`, `hw`, `queue`, helper+polkit (D-Bus), GUI.
+   Not done: needs-confirm health fixes, ~15 more spec-05 checks, `fix audio|pacman|reinstall-all`, `boot get/set`, `hw`, `queue`, helper+polkit (D-Bus), GUI.
 2. Qt toolbox GUI as a client of `samurai apps --json` / `samurai update --json`.
 3. Firewall presets (KDE Connect, Steam, Sunshine), Secure Boot (sbctl), TPM2 unlock (spec 09, M8).
-4. Configure `samurai-testing` environment secrets so `publish-testing-repo.yml` can publish
-   samurai-tools 0.2.0 (until then installed systems carry the ISO's tool copies).
+4. Optional automation: `samurai-testing` environment secrets (signing subkey + fine-grained repo token,
+   docs/KEYS.md) so `publish-testing-repo.yml` publishes on push; needs Genor. Until then publish locally.
 5. Signing-key backup (docs/KEYS.md) still TODO.
 
 ## Commands and build gotchas
