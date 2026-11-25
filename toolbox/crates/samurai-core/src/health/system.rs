@@ -26,6 +26,8 @@ pub trait System {
     fn remove(&self, path: &str) -> Result<(), String>;
     /// `None` when the program cannot be started (missing). A non-zero exit is still `Some`.
     fn run(&self, prog: &str, args: &[&str]) -> Option<CmdOut>;
+    /// Run with the terminal attached (long, chatty commands such as pacman). Returns the exit code.
+    fn run_visible(&self, prog: &str, args: &[&str]) -> Option<i32>;
     /// Like [`run`](System::run) but as an unprivileged user (uid, gid): used when root works inside
     /// a user's files, so a symlink in their home cannot steer root.
     fn run_as(&self, uid: u32, gid: u32, prog: &str, args: &[&str]) -> Option<CmdOut>;
@@ -134,6 +136,14 @@ impl System for RealSystem {
 
     fn run(&self, prog: &str, args: &[&str]) -> Option<CmdOut> {
         collect(&mut command_for(prog, args)?)
+    }
+
+    fn run_visible(&self, prog: &str, args: &[&str]) -> Option<i32> {
+        let mut c = command_for(prog, args)?;
+        c.stdin(Stdio::inherit())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit());
+        Some(c.status().ok()?.code().unwrap_or(-1))
     }
 
     fn run_as(&self, uid: u32, gid: u32, prog: &str, args: &[&str]) -> Option<CmdOut> {
@@ -305,6 +315,10 @@ pub mod fake {
 
         fn list_dir(&self, path: &str) -> Vec<String> {
             self.dirs.get(path).cloned().unwrap_or_default()
+        }
+
+        fn run_visible(&self, prog: &str, args: &[&str]) -> Option<i32> {
+            self.run(prog, args).map(|o| o.code)
         }
 
         fn run_as(&self, uid: u32, gid: u32, prog: &str, args: &[&str]) -> Option<CmdOut> {

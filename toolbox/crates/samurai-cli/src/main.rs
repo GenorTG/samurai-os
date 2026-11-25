@@ -10,6 +10,7 @@ use samurai_core::clean;
 use samurai_core::diag::{self, Cmd};
 use samurai_core::fix;
 use samurai_core::health::{self, checks::ALL, system::RealSystem};
+use samurai_core::kernel;
 use samurai_core::mirrors;
 use samurai_core::status;
 use samurai_core::{
@@ -158,6 +159,59 @@ fn sudo_target(sys: &RealSystem) -> Option<String> {
         .ok()
         .filter(|u| !u.is_empty() && u != "root");
     user.filter(|_| is_root)
+}
+
+fn run_kernel(args: &[String]) -> ExitCode {
+    use health::system::System;
+    let cmd = match kernel::parse_args(args) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("samurai kernel: {e}\n");
+            eprint!("{}", kernel::USAGE);
+            return ExitCode::from(2);
+        }
+    };
+    let sys = RealSystem;
+    if cmd == kernel::Cmd::Help {
+        print!("{}", kernel::USAGE);
+        return ExitCode::SUCCESS;
+    }
+    if cmd != kernel::Cmd::List
+        && sys
+            .run("id", &["-u"])
+            .is_none_or(|o| o.stdout.trim() != "0")
+    {
+        eprintln!("samurai kernel: needs root (try: sudo samurai kernel ...)");
+        return ExitCode::from(1);
+    }
+    let result: Result<(), String> = match cmd {
+        kernel::Cmd::Help => Ok(()),
+        kernel::Cmd::List => kernel::list(&sys).map(|t| print!("{t}")),
+        kernel::Cmd::Install { name, yes } => kernel::plan_install(&sys, &name).and_then(|plan| {
+            for w in &plan.warnings {
+                eprintln!("warning: {w}");
+            }
+            if !plan.warnings.is_empty() && !confirm_on_tty(yes, "kernel install", "install anyway")
+            {
+                return Err("declined".into());
+            }
+            kernel::install(&sys, &plan)?;
+            // the pacman hook already did this; running it again reports the real state
+            boot::sync(&sys, true).map(|_| println!("{name} installed; boot menu up to date"))
+        }),
+        kernel::Cmd::Remove { name } => kernel::plan_remove(&sys, &name).and_then(|packages| {
+            kernel::remove(&sys, &packages)?;
+            boot::sync(&sys, true).map(|_| println!("{name} removed; boot menu up to date"))
+        }),
+        kernel::Cmd::Default { name } => boot::set_default(&sys, &name).map(|m| println!("{m}")),
+    };
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("samurai kernel: {e}");
+            ExitCode::from(1)
+        }
+    }
 }
 
 fn run_boot(args: &[String]) -> ExitCode {
@@ -530,6 +584,7 @@ fn main() -> ExitCode {
         Action::Fix => run_fix(&rest),
         Action::Mirrors => run_mirrors(&rest),
         Action::Boot => run_boot(&rest),
+        Action::Kernel => run_kernel(&rest),
         Action::Version => {
             let v = read_version_file(Path::new(TOOLS_VERSION_FILE)).or_else(pacman_version);
             println!("{}", version_line(v.as_deref()));

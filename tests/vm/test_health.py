@@ -457,11 +457,33 @@ def test_zz_boot_entries_follow_kernels_and_the_machine_boots(installed_vm):
     _, menu = ga.exec(f"cat {conf}", check=False)
     assert "ghost" not in menu and "/Samurai OS (linux-lts)" in menu, menu
 
+    # `samurai kernel`: guard rails, install, choose the default, remove
+    _, out = ga.exec("samurai kernel list", check=False)
+    assert any(l.startswith("linux-lts ") and "installed" in l and "default" in l for l in out.splitlines()), out
+    _, out = ga.exec("samurai kernel remove linux-lts 2>&1; echo rc=$?", check=False)
+    assert "rc=1" in out, f"removing the running/last kernel must be refused: {out}"
+    _, out = ga.exec("su samurai -c 'samurai kernel install linux-zen' 2>&1; echo rc=$?", check=False)
+    assert "needs root" in out and "rc=1" in out, out
+    _, out = ga.exec("samurai kernel install linux-zen >/tmp/zen.log 2>&1; echo rc=$?; tail -5 /tmp/zen.log", timeout=1200, check=False)
+    assert "rc=0" in out and "linux-zen installed" in out, out
+    _, menu = ga.exec(f"cat {conf}", check=False)
+    assert "/Samurai OS (linux-zen)" in menu, menu
+    _, out = ga.exec("samurai kernel default linux-zen; echo rc=$?", check=False)
+    assert "now the default" in out and "rc=0" in out, out
+    _, menu = ga.exec(f"cat {conf}", check=False)
+    assert next(l for l in menu.splitlines() if l.startswith("/")) == "/Samurai OS (linux-zen)", menu
     ga.exec("sync", check=False)   # vm.reboot() is a hard reset
     ga.close()
     vm.reboot()
     vm.wait_for("login:", timeout=300)
     ga = vm.qga()
     _, out = ga.exec("uname -r; systemctl --failed --no-legend | head -5", check=False)
-    assert "lts" in out.splitlines()[0], f"did not boot the new kernel: {out}"
+    assert "zen" in out.splitlines()[0], f"did not boot the chosen default kernel: {out}"
+    # now that zen runs, lts can go; zen (running) cannot
+    _, out = ga.exec("samurai kernel remove linux-zen 2>&1; echo rc=$?", check=False)
+    assert "running kernel" in out and "rc=1" in out, out
+    _, out = ga.exec("samurai kernel remove linux-lts >/tmp/rm2.log 2>&1; echo rc=$?; tail -4 /tmp/rm2.log", timeout=600, check=False)
+    assert "rc=0" in out and "linux-lts removed" in out, out
+    _, menu = ga.exec(f"cat {conf}", check=False)
+    assert "linux-lts" not in menu and "/Keep Me" in menu, menu
     ga.close()

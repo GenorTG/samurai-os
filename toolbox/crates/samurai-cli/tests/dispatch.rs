@@ -313,3 +313,18 @@ fn boot_usage_and_help() {
     assert_eq!(o.status.code(), Some(0));
     assert!(out(&o).starts_with("usage: samurai boot sync"));
 }
+
+#[test]
+fn kernel_usage_and_help() {
+    let d = sandbox("kernel");
+    for bad in [
+        &["kernel"][..],
+        &["kernel", "install"],
+        &["kernel", "list", "x"],
+    ] {
+        assert_eq!(run(&d, bad).status.code(), Some(2), "{bad:?}");
+    }
+    let o = run(&d, &["kernel", "--help"]);
+    assert_eq!(o.status.code(), Some(0));
+    assert!(out(&o).starts_with("usage: samurai kernel"));
+}

@@ -15,7 +15,7 @@ _samurai() {
     sub="${COMP_WORDS[2]:-}"
 
     if [ "$COMP_CWORD" -eq 1 ]; then
-        mapfile -t COMPREPLY < <(compgen -W "update apps snap rescue status health diag clean fix mirrors boot version help" -- "$cur")
+        mapfile -t COMPREPLY < <(compgen -W "update apps snap rescue status health diag clean fix mirrors boot kernel version help" -- "$cur")
         return 0
     fi
 
@@ -74,6 +74,13 @@ _samurai() {
         clean)
             mapfile -t COMPREPLY < <(compgen -W "pkgcache journal coredumps thumbnails orphans cache all \
                 --preview --json --yes --keep --help" -- "$cur")
+            ;;
+        kernel)
+            if [ "$COMP_CWORD" -eq 2 ]; then
+                mapfile -t COMPREPLY < <(compgen -W "list install remove default --help" -- "$cur")
+            else
+                mapfile -t COMPREPLY < <(compgen -W "linux linux-lts linux-zen linux-hardened linux-cachyos linux-cachyos-lts --yes" -- "$cur")
+            fi
             ;;
         boot)
             mapfile -t COMPREPLY < <(compgen -W "sync --check --help" -- "$cur")

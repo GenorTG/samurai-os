@@ -112,11 +112,9 @@ fn wanted(kernels: &[Kernel], k: &str, fallback: bool) -> bool {
         .any(|x| x.name == k && (!fallback || x.fallback))
 }
 
-pub fn plan_limine(conf: &str, kernels: &[Kernel]) -> Result<(String, Changes), String> {
-    if kernels.is_empty() {
-        return Err("no bootable kernel found; refusing to rewrite the boot menu".into());
-    }
-    let mut preamble: Vec<&str> = Vec::new();
+/// Lines before the first entry, and one block per line starting with `/`.
+fn split_blocks(conf: &str) -> (Vec<&str>, Vec<Vec<&str>>) {
+    let mut preamble = Vec::new();
     let mut blocks: Vec<Vec<&str>> = Vec::new();
     for line in conf.lines() {
         if line.starts_with('/') {
@@ -127,6 +125,28 @@ pub fn plan_limine(conf: &str, kernels: &[Kernel]) -> Result<(String, Changes), 
             preamble.push(line);
         }
     }
+    (preamble, blocks)
+}
+
+fn join_blocks(preamble: &[&str], blocks: impl Iterator<Item = Vec<String>>) -> String {
+    let mut out: Vec<String> = preamble.iter().map(|l| (*l).to_string()).collect();
+    for b in blocks {
+        if out.last().is_some_and(|l| !l.is_empty()) {
+            out.push(String::new());
+        }
+        out.extend(b);
+    }
+    let mut text = out.join("\n");
+    text.truncate(text.trim_end().len());
+    text.push('\n');
+    text
+}
+
+pub fn plan_limine(conf: &str, kernels: &[Kernel]) -> Result<(String, Changes), String> {
+    if kernels.is_empty() {
+        return Err("no bootable kernel found; refusing to rewrite the boot menu".into());
+    }
+    let (preamble, blocks) = split_blocks(conf);
     let cmdline = blocks
         .iter()
         .filter(|b| managed(b).is_some_and(|(_, f)| !f))
@@ -191,17 +211,7 @@ pub fn plan_limine(conf: &str, kernels: &[Kernel]) -> Result<(String, Changes), 
     if changes.is_empty() {
         return Ok((conf.to_string(), changes));
     }
-    let mut out: Vec<String> = preamble.iter().map(|l| (*l).to_string()).collect();
-    for b in kept {
-        if out.last().is_some_and(|l| !l.is_empty()) {
-            out.push(String::new());
-        }
-        out.extend(b);
-    }
-    let mut text = out.join("\n");
-    text.truncate(text.trim_end().len());
-    text.push('\n');
-    Ok((text, changes))
+    Ok((join_blocks(&preamble, kept.into_iter()), changes))
 }
 
 fn sd_file(k: &str, fallback: bool) -> String {
@@ -340,6 +350,84 @@ pub fn sync(sys: &dyn System, apply: bool) -> Result<Outcome, String> {
     Ok(Outcome::NotManaged(
         "no Limine, systemd-boot or GRUB configuration found".into(),
     ))
+}
+
+/// Kernel the menu boots by default, when it is one of ours.
+pub fn default_kernel(sys: &dyn System) -> Option<String> {
+    if sys.exists(LIMINE_CONF) {
+        let conf = sys.read(LIMINE_CONF)?;
+        let lines: Vec<&str> = conf.lines().skip_while(|l| !l.starts_with('/')).collect();
+        let end = lines
+            .iter()
+            .skip(1)
+            .position(|l| l.starts_with('/'))
+            .map_or(lines.len(), |i| i + 1);
+        return managed(&lines[..end]).map(|(k, _)| k);
+    }
+    let loader = sys.read(SD_LOADER)?;
+    let entry = loader
+        .lines()
+        .find_map(|l| l.strip_prefix("default "))?
+        .trim();
+    let name = entry.strip_prefix("samurai-")?.strip_suffix(".conf")?;
+    Some(name.trim_end_matches("-fallback").to_string())
+}
+
+/// Limine config with the normal entry of `kernel` first.
+pub fn limine_with_default(conf: &str, kernel: &str) -> Result<String, String> {
+    let (preamble, mut blocks) = split_blocks(conf);
+    let i = blocks
+        .iter()
+        .position(|b| managed(b).is_some_and(|(k, f)| k == kernel && !f))
+        .ok_or(format!(
+            "no boot entry for {kernel}; run: samurai boot sync"
+        ))?;
+    let chosen = blocks.remove(i);
+    blocks.insert(0, chosen);
+    Ok(join_blocks(
+        &preamble,
+        blocks
+            .iter()
+            .map(|b| b.iter().map(|l| (*l).to_string()).collect()),
+    ))
+}
+
+pub fn set_default(sys: &dyn System, kernel: &str) -> Result<String, String> {
+    if !boot_readable(sys) {
+        return Err("/boot cannot be read (run as root, and check that the ESP is mounted)".into());
+    }
+    if !bootable_kernels(sys).iter().any(|k| k.name == kernel) {
+        return Err(format!("{kernel} is not an installed, bootable kernel"));
+    }
+    if sys.exists(LIMINE_CONF) {
+        let conf = sys
+            .read(LIMINE_CONF)
+            .ok_or(format!("cannot read {LIMINE_CONF}"))?;
+        let new = limine_with_default(&conf, kernel)?;
+        sys.write(&format!("{LIMINE_CONF}.bak"), &conf)?;
+        sys.write(LIMINE_CONF, &new)?;
+        return Ok(format!("{kernel} is now the default (Limine)"));
+    }
+    if sys.exists(SD_LOADER) {
+        let file = sd_file(kernel, false);
+        if !sys.exists(&format!("{SD_ENTRIES}/{file}")) {
+            return Err(format!(
+                "no boot entry for {kernel}; run: samurai boot sync"
+            ));
+        }
+        let old = sys
+            .read(SD_LOADER)
+            .ok_or(format!("cannot read {SD_LOADER}"))?;
+        let mut lines: Vec<String> = old
+            .lines()
+            .filter(|l| !l.starts_with("default "))
+            .map(str::to_string)
+            .collect();
+        lines.push(format!("default {file}"));
+        sys.write(SD_LOADER, &format!("{}\n", lines.join("\n")))?;
+        return Ok(format!("{kernel} is now the default (systemd-boot)"));
+    }
+    Err("choosing the default is only supported for Limine and systemd-boot".into())
 }
 
 pub const USAGE: &str = "usage: samurai boot sync [--check]

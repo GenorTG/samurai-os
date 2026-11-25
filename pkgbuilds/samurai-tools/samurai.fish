@@ -1,7 +1,7 @@
 # fish completion for samurai (shipped by samurai-tools; fish is the default shell)
 
 function __samurai_no_cmd
-    not __fish_seen_subcommand_from update apps snap rescue status health diag clean fix mirrors boot version help
+    not __fish_seen_subcommand_from update apps snap rescue status health diag clean fix mirrors boot kernel version help
 end
 
 function __samurai_apps_ids
@@ -22,6 +22,7 @@ complete -c samurai -n __samurai_no_cmd -a clean   -d 'free disk space (preview 
 complete -c samurai -n __samurai_no_cmd -a fix     -d 'targeted repairs'
 complete -c samurai -n __samurai_no_cmd -a mirrors -d 'show or refresh the mirrorlist'
 complete -c samurai -n __samurai_no_cmd -a boot    -d 'sync boot entries with installed kernels'
+complete -c samurai -n __samurai_no_cmd -a kernel  -d 'list, install, remove, choose kernels'
 complete -c samurai -n __samurai_no_cmd -a version -d 'print the samurai-tools version'
 complete -c samurai -n __samurai_no_cmd -a help    -d 'usage'
 
@@ -128,3 +129,7 @@ complete -c samurai -n '__fish_seen_subcommand_from mirrors' -a 'status refresh'
 # boot
 complete -c samurai -n '__fish_seen_subcommand_from boot' -a 'sync'
 complete -c samurai -n '__fish_seen_subcommand_from sync' -l check -d 'report only'
+
+# kernel
+complete -c samurai -n '__fish_seen_subcommand_from kernel; and not __fish_seen_subcommand_from list install remove default' -a 'list install remove default'
+complete -c samurai -n '__fish_seen_subcommand_from kernel; and __fish_seen_subcommand_from install remove default' -a 'linux linux-lts linux-zen linux-hardened linux-cachyos linux-cachyos-lts'

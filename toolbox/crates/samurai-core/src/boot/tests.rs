@@ -256,3 +256,53 @@ fn argument_parsing() {
         assert!(parse_args(&a(bad)).is_err(), "{bad:?}");
     }
 }
+
+#[test]
+fn choosing_a_default_moves_only_that_entry_to_the_front() {
+    let (two, _) = plan_limine(CONF, &[k("linux", false), k("linux-lts", true)]).unwrap();
+    let new = limine_with_default(&two, "linux-lts").unwrap();
+    assert_eq!(
+        titles(&new)[0],
+        "/Samurai OS (linux-lts)",
+        "the normal entry, not the fallback"
+    );
+    let mut a = titles(&two);
+    let mut b = titles(&new);
+    a.sort_unstable();
+    b.sort_unstable();
+    assert_eq!(a, b, "nothing added or lost");
+    assert!(new.starts_with("timeout: 3\n"));
+    assert!(limine_with_default(CONF, "linux-zen")
+        .unwrap_err()
+        .contains("boot sync"));
+
+    let sys = machine(&["linux", "linux-lts"]).file(LIMINE_CONF, &two);
+    assert_eq!(default_kernel(&sys).as_deref(), Some("linux"));
+    set_default(&sys, "linux-lts").unwrap();
+    assert_eq!(sys.writes()[0].0, format!("{LIMINE_CONF}.bak"));
+    assert_eq!(sys.writes()[1].1, new);
+    assert!(set_default(&sys, "linux-zen")
+        .unwrap_err()
+        .contains("not an installed"));
+    // a foreign first entry means no kernel of ours is the default
+    let foreign = Fake::default().file(
+        LIMINE_CONF,
+        "timeout: 3\n/Windows\n    protocol: efi_chainload\n",
+    );
+    assert_eq!(default_kernel(&foreign), None);
+}
+
+#[test]
+fn systemd_boot_default_is_written_to_loader_conf() {
+    let sys = machine(&["linux"])
+        .file(SD_LOADER, "timeout 3\ndefault @saved\n")
+        .path(&format!("{SD_ENTRIES}/samurai-linux.conf"));
+    set_default(&sys, "linux").unwrap();
+    assert_eq!(
+        sys.writes(),
+        vec![(
+            SD_LOADER.to_string(),
+            "timeout 3\ndefault samurai-linux.conf\n".to_string()
+        )]
+    );
+}
