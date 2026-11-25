@@ -198,7 +198,7 @@ fn pacman_pacnew(sys: &dyn System) -> Outcome {
     }
     issue(
         format!("{} .pacnew/.pacsave file(s) to merge", files.len()),
-        "Merge them: samurai pacdiff (or pacdiff)",
+        "Merge them: pacdiff",
         files,
     )
 }
@@ -229,7 +229,7 @@ fn pacman_conf(sys: &dyn System) -> Outcome {
     }
     issue(
         "pacman.conf deviates from the distro defaults",
-        "Restore the defaults: samurai fix pacman",
+        "Compare /etc/pacman.conf with the Samurai OS defaults and restore the missing lines",
         problems,
     )
 }
@@ -529,7 +529,7 @@ fn pacman_mirrors(sys: &dyn System) -> Outcome {
     }
     issue(
         "the mirrorlist is older than 30 days",
-        "Stale mirrors are slow or gone. Refresh: samurai mirrors refresh (or reflector)",
+        "Stale mirrors are slow or gone. Refresh: samurai mirrors refresh",
         vec![format!("{path} last changed {days} days ago")],
     )
 }
@@ -636,7 +636,7 @@ fn boot_esp_space(sys: &dyn System) -> Outcome {
     match used {
         Some(u) if u >= 80 => issue(
             format!("the ESP is {u}% full"),
-            "Kernels and initramfs images fill it; remove old ones or unused kernels (spec 05: samurai clean boot)",
+            "Kernels and initramfs images fill it; remove unused kernels: pacman -Rns <kernel>",
             vec![format!("/boot {u}% used")],
         ),
         Some(_) => Outcome::Ok,

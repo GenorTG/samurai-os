@@ -7,6 +7,7 @@ pub mod clean;
 pub mod diag;
 pub mod fix;
 pub mod health;
+pub mod mirrors;
 pub mod status;
 
 use std::fs;
@@ -27,6 +28,7 @@ commands
   diag        diagnostics and the redacted support bundle: samurai diag --help
   clean       free disk space (preview first): samurai clean --help
   fix         targeted repairs: lock, keyring, dkms (samurai fix --help)
+  mirrors     show or refresh the Arch mirrorlist (samurai mirrors --help)
   version     print the samurai-tools version
   help        this text
 
@@ -52,6 +54,8 @@ pub enum Action {
     Clean,
     /// `samurai fix`: targeted pacman repairs.
     Fix,
+    /// `samurai mirrors`: show and refresh the Arch mirrorlist.
+    Mirrors,
     Version,
     Help,
     Unknown(String),
@@ -80,6 +84,7 @@ pub fn parse(cmd: &str) -> Action {
         "diag" => Action::Diag,
         "clean" => Action::Clean,
         "fix" => Action::Fix,
+        "mirrors" => Action::Mirrors,
         "version" | "--version" | "-V" => Action::Version,
         "help" | "--help" | "-h" => Action::Help,
         other => Action::Unknown(other.to_string()),
@@ -149,6 +154,7 @@ mod tests {
         assert_eq!(parse("diag"), Action::Diag);
         assert_eq!(parse("clean"), Action::Clean);
         assert_eq!(parse("fix"), Action::Fix);
+        assert_eq!(parse("mirrors"), Action::Mirrors);
         for v in ["version", "--version", "-V"] {
             assert_eq!(parse(v), Action::Version);
         }

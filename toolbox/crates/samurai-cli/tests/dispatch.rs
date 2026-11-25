@@ -287,3 +287,18 @@ fn fix_usage_help_and_root_requirement() {
         assert!(String::from_utf8_lossy(&o.stderr).contains("needs root"));
     }
 }
+
+#[test]
+fn mirrors_usage_and_help() {
+    let d = sandbox("mirrors");
+    for bad in [
+        &["mirrors"][..],
+        &["mirrors", "nope"],
+        &["mirrors", "refresh", "--all"],
+    ] {
+        assert_eq!(run(&d, bad).status.code(), Some(2), "{bad:?}");
+    }
+    let o = run(&d, &["mirrors", "--help"]);
+    assert_eq!(o.status.code(), Some(0));
+    assert!(out(&o).starts_with("usage: samurai mirrors"));
+}

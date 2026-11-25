@@ -9,6 +9,7 @@ use samurai_core::clean;
 use samurai_core::diag::{self, Cmd};
 use samurai_core::fix;
 use samurai_core::health::{self, checks::ALL, system::RealSystem};
+use samurai_core::mirrors;
 use samurai_core::status;
 use samurai_core::{
     parse, parse_pacman_q, read_version_file, resolve_tool, version_line, Action,
@@ -156,6 +157,48 @@ fn sudo_target(sys: &RealSystem) -> Option<String> {
         .ok()
         .filter(|u| !u.is_empty() && u != "root");
     user.filter(|_| is_root)
+}
+
+fn run_mirrors(args: &[String]) -> ExitCode {
+    use health::system::System;
+    let cmd = match mirrors::parse_args(args) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("samurai mirrors: {e}\n");
+            eprint!("{}", mirrors::USAGE);
+            return ExitCode::from(2);
+        }
+    };
+    let sys = RealSystem;
+    let result = match cmd {
+        mirrors::Cmd::Help => {
+            print!("{}", mirrors::USAGE);
+            return ExitCode::SUCCESS;
+        }
+        mirrors::Cmd::Status => mirrors::status(&sys),
+        mirrors::Cmd::Refresh => {
+            if sys
+                .run("id", &["-u"])
+                .is_none_or(|o| o.stdout.trim() != "0")
+            {
+                eprintln!(
+                    "samurai mirrors: refresh needs root (try: sudo samurai mirrors refresh)"
+                );
+                return ExitCode::from(1);
+            }
+            mirrors::refresh(&sys).map(|m| format!("refreshed: {m}\n"))
+        }
+    };
+    match result {
+        Ok(text) => {
+            print!("{text}");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("samurai mirrors: {e}");
+            ExitCode::from(1)
+        }
+    }
 }
 
 fn run_fix(args: &[String]) -> ExitCode {
@@ -449,6 +492,7 @@ fn main() -> ExitCode {
         Action::Diag => run_diag(&rest),
         Action::Clean => run_clean(&rest),
         Action::Fix => run_fix(&rest),
+        Action::Mirrors => run_mirrors(&rest),
         Action::Version => {
             let v = read_version_file(Path::new(TOOLS_VERSION_FILE)).or_else(pacman_version);
             println!("{}", version_line(v.as_deref()));

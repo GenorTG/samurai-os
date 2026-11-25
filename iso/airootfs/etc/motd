@@ -4,6 +4,6 @@ Your blade is the `samurai` command:
   samurai update       refresh the system — a snapshot is taken first, always
   samurai snap         capture this moment before you act
   samurai rescue       for when the path darkens
-  samurai toolbox      shape the machine to your hand
+  samurai health       check the blade for nicks, and mend them
 
 Ethernet walks in on its own. Wi-Fi answers only to iwctl.

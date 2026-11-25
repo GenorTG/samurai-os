@@ -340,7 +340,7 @@ Your blade is the `samurai` command:
   samurai snap         capture this moment before you act
   samurai rescue       for when the path darkens
   samurai apps         find and install optional apps (samurai apps bundles)
-  samurai toolbox      shape the machine to your hand
+  samurai health       check the blade for nicks, and mend them
 EOF
 cat > /etc/issue <<'EOF'
 Samurai OS \s \m (\l)

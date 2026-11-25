@@ -390,3 +390,30 @@ def test_sudo_hardening_path_confinement_and_unprivileged_user_cleanup(installed
     _, out = ga.exec(f"{sudo} samurai clean thumbnails; echo rc=$?; cat /root/victim/thumbnails/keep", timeout=120, check=False)
     assert out.strip().endswith("keep"), f"root deleted through a user symlink: {out}"
     ga.exec("su samurai -c 'rm -f ~/.cache ~/escape'; rm -rf /root/victim /tmp/evil /home/samurai/b.txt", check=False)
+
+
+def test_mirrors_status_and_refresh(installed_vm):
+    _, ga = installed_vm
+    _, out = ga.exec("samurai mirrors status; echo rc=$?", check=False)
+    assert "servers:" in out and out.strip().endswith("rc=0"), out
+    _, out = ga.exec("su samurai -c 'samurai mirrors refresh' 2>&1; echo rc=$?", check=False)
+    assert "needs root" in out and out.strip().endswith("rc=1"), out
+    # reflector arrives as a samurai-tools dependency
+    _, out = ga.exec("pacman -Q reflector", check=False)
+    assert out.startswith("reflector "), out
+    _, before = ga.exec("sha256sum < /etc/pacman.d/mirrorlist", check=False)
+    _, out = ga.exec("samurai mirrors refresh 2>&1; echo rc=$?; ls /etc/pacman.d/", timeout=400, check=False)
+    assert "mirrorlist.samurai-new" not in out, out
+    if "rc=0" not in out:
+        # no reflector service reachable: the old list must be untouched
+        _, after = ga.exec("sha256sum < /etc/pacman.d/mirrorlist", check=False)
+        assert after == before, out
+        pytest.fail(f"mirror refresh failed on a networked VM: {out}")
+    assert "mirrorlist.bak" in out, out
+    _, bak = ga.exec("sha256sum < /etc/pacman.d/mirrorlist.bak", check=False)
+    assert bak == before, "backup must be the previous list"
+    # the new list works for a signature-checked sync + install through samurai update's tool chain
+    _, out = ga.exec("pacman -Syu --noconfirm >/tmp/syu.log 2>&1; echo rc=$?; tail -3 /tmp/syu.log", timeout=1200, check=False)
+    assert "rc=0" in out, out
+    _, rep = _health(ga, "--id", "pacman.mirrors")
+    assert rep["results"][0]["status"] == "ok", rep
