@@ -19,6 +19,7 @@ See `docs/specs/01-ARCHITECTURE.md` "Source layout". Today only `docs/`, `script
 - Creating or pushing to public GitHub repos, generating the real signing key, and any install on
   real hardware need Genor's explicit OK.
 - VM disks live in `.vm/` (git-ignored). Clean overlays and old ISOs after test runs.
+- Retention (Genor 2026-11-25): keep only the newest ISO per flavor in `build/`; delete superseded builds, their work/profile/offline-pkgs dirs, VM disks and old test logs as new ones roll out. No need to ask.
 
 ## Gotchas
 - genorbox1 is Debian: archiso, makepkg and pacman run only inside `archlinux` containers.
