@@ -12,6 +12,10 @@ guided installer and CLI/toolbox. VM validation runs on genorbox1. Site: <https:
   `repo.smart-samurai.pl` fallback mirror: not checked/synced.
 - ISOs: GitHub release `v0.0.1.75` (online + split offline, signed SHA256SUMS), built as `build/rel-*-15`.
   `release-iso.sh` needs `gh` on PATH (pass `--setenv=PATH` under systemd-run).
+  All 4 ISO asset digests match the signed SHA256SUMS (checked via the GitHub API).
+- Website is NOT live: GitHub Pages was never enabled on the repo (`pages.yml` fails, URL 404); the link was
+  removed from the v0.0.1.75 notes (template in `release-iso.sh` still has it). Enabling needs Genor's OK:
+  `gh api -X POST repos/GenorTG/samurai-os/pages -f build_type=workflow && gh workflow run pages.yml`.
 
 ## State (2026-11-22)
 - Specs 00–14 and ADR-0001…0008 remain the product source of truth.
