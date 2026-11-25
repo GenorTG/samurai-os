@@ -7,7 +7,7 @@
 
 pkgname=samurai-keyring
 pkgver=20261117
-pkgrel=3
+pkgrel=4
 pkgdesc="Samurai OS build keyring for pacman"
 arch=(any)
 url="https://github.com/GenorTG/samurai-os"

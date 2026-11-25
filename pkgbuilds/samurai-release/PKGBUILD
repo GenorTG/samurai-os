@@ -14,7 +14,7 @@
 
 pkgname=samurai-release
 pkgver=0.0.1
-pkgrel=7
+pkgrel=8
 pkgdesc="Samurai OS identity: os-release hook + /etc/lsb-release"
 arch=(any)
 url="https://github.com/GenorTG/samurai-os"

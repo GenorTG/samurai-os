@@ -5,7 +5,7 @@
 
 pkgname=samurai-mirrorlist
 pkgver=1
-pkgrel=3
+pkgrel=4
 pkgdesc="Samurai OS pacman mirrorlists ([samurai] and [samurai-testing])"
 arch=(any)
 url="https://github.com/GenorTG/samurai-repo"

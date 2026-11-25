@@ -106,26 +106,30 @@ fi
 
 mapfile -t existing < <(gh release view "$channel" --repo "$gh_repo" --json assets -q '.assets[].name')
 
+# pacman asks for <section name>.db: the [samurai-testing] section needs the same
+# signed database under that name (a detached signature covers the bytes, not the name)
+db_assets=(samurai.db samurai.db.sig samurai.files samurai.files.sig)
+if [ "$channel" = x86_64-testing ]; then
+    for f in "${db_assets[@]}"; do cp -f "$f" "samurai-testing.${f#samurai.}"; done
+    db_assets+=(samurai-testing.db samurai-testing.db.sig samurai-testing.files samurai-testing.files.sig)
+fi
+
 # 1. packages + sigs (clobber: a re-run of the same build is harmless)
 keep=("${pkgs[@]}" "${pkgs[@]/%/.sig}")
 gh release upload "$channel" --repo "$gh_repo" --clobber "${keep[@]}"
 # 2. the db LAST: this is the atomic switch-over
-gh release upload "$channel" --repo "$gh_repo" --clobber \
-    samurai.db samurai.db.sig samurai.files samurai.files.sig
+gh release upload "$channel" --repo "$gh_repo" --clobber "${db_assets[@]}"
 # 3. stale assets: nothing published now references them
 for a in "${existing[@]}"; do
-    case "$a" in
-        samurai.db|samurai.db.sig|samurai.files|samurai.files.sig) continue ;;
-    esac
     stale=1
-    for k in "${keep[@]}"; do [ "$a" = "$k" ] && { stale=0; break; }; done
+    for k in "${keep[@]}" "${db_assets[@]}"; do [ "$a" = "$k" ] && { stale=0; break; }; done
     [ "$stale" -eq 1 ] || continue
     echo "==> removing stale asset $a"
     gh release delete-asset "$channel" "$a" --repo "$gh_repo" -y
 done
 
 # post-condition: the remote set is exactly the local set, byte sizes included
-python3 - "$(gh release view "$channel" --repo "$gh_repo" --json assets -q '.assets[] | "\(.name) \(.size)"')" "${keep[@]}" samurai.db samurai.db.sig samurai.files samurai.files.sig <<'PY'
+python3 - "$(gh release view "$channel" --repo "$gh_repo" --json assets -q '.assets[] | "\(.name) \(.size)"')" "${keep[@]}" "${db_assets[@]}" <<'PY'
 import os, sys
 remote = dict(line.rsplit(" ", 1) for line in sys.argv[1].splitlines() if line)
 local = {f: str(os.path.getsize(f)) for f in sys.argv[2:]}
