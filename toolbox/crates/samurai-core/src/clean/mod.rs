@@ -31,6 +31,9 @@ pub struct Ctx {
     pub home: Option<String>,
     /// How many cached versions of each package `pkgcache` keeps.
     pub keep: usize,
+    /// (uid, gid) of the real user when root runs on their behalf (`sudo`): user targets then run
+    /// as that user, so a symlink inside their home cannot steer root.
+    pub user: Option<(u32, u32)>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -94,11 +97,28 @@ fn safe_abs(path: &str) -> bool {
 }
 
 /// `du -sb PATH` → bytes.
-fn du(sys: &dyn System, path: &str) -> Option<u64> {
+/// Command in the user's own files: unprivileged when root acts for someone else.
+fn user_run(
+    sys: &dyn System,
+    ctx: &Ctx,
+    prog: &str,
+    args: &[&str],
+) -> Option<crate::health::system::CmdOut> {
+    match ctx.user {
+        Some((uid, gid)) => sys.run_as(uid, gid, prog, args),
+        None => sys.run(prog, args),
+    }
+}
+
+fn du(sys: &dyn System, ctx: &Ctx, as_user: bool, path: &str) -> Option<u64> {
     if !safe_abs(path) {
         return None;
     }
-    let o = sys.run("du", &["-sb", path])?;
+    let o = if as_user {
+        user_run(sys, ctx, "du", &["-sb", path])?
+    } else {
+        sys.run("du", &["-sb", path])?
+    };
     (o.code == 0)
         .then(|| o.stdout.split_whitespace().next()?.parse().ok())
         .flatten()
@@ -227,8 +247,8 @@ fn journal_apply(sys: &dyn System, _: &Ctx) -> Result<String, String> {
 
 const COREDUMPS: &str = "/var/lib/systemd/coredump";
 
-fn coredumps_preview(sys: &dyn System, _: &Ctx) -> Preview {
-    match du(sys, COREDUMPS) {
+fn coredumps_preview(sys: &dyn System, ctx: &Ctx) -> Preview {
+    match du(sys, ctx, false, COREDUMPS) {
         Some(b) => Preview {
             bytes: Some(b),
             ..Preview::default()
@@ -259,7 +279,7 @@ fn user_path(ctx: &Ctx, sub: &str) -> Option<String> {
 }
 
 fn dir_preview(sys: &dyn System, ctx: &Ctx, sub: &str) -> Preview {
-    match user_path(ctx, sub).and_then(|p| du(sys, &p)) {
+    match user_path(ctx, sub).and_then(|p| du(sys, ctx, true, &p)) {
         Some(b) => Preview {
             bytes: Some(b),
             ..Preview::default()
@@ -276,8 +296,13 @@ fn dir_apply(sys: &dyn System, ctx: &Ctx, sub: &str, what: &str) -> Result<Strin
     if !sys.exists(&p) {
         return Ok(format!("{what}: nothing to remove"));
     }
-    run_ok(sys, "find", &[&p, "-mindepth", "1", "-delete"], what)?;
-    Ok(format!("emptied {p}"))
+    // as the user when root acts for them: find never follows a symlinked start path, and the
+    // user's own permissions bound what can be deleted
+    match user_run(sys, ctx, "find", &[&p, "-mindepth", "1", "-delete"]) {
+        Some(o) if o.code == 0 => Ok(format!("emptied {p}")),
+        Some(o) => Err(format!("{what}: find exited {}", o.code)),
+        None => Err(format!("{what}: find is not installed")),
+    }
 }
 
 fn thumbnails_preview(sys: &dyn System, ctx: &Ctx) -> Preview {
@@ -498,6 +523,7 @@ mod tests {
         Ctx {
             home: Some("/home/alice".into()),
             keep: 2,
+            user: None,
         }
     }
 
@@ -636,6 +662,7 @@ mod tests {
             let c = Ctx {
                 home: home.map(str::to_string),
                 keep: 2,
+                user: None,
             };
             let s = Fake::default();
             assert_eq!(cache_preview(&s, &c).bytes, None, "{home:?}");
@@ -648,6 +675,35 @@ mod tests {
             .unwrap()
             .contains("nothing to remove"));
         assert!(none.calls().is_empty());
+    }
+
+    #[test]
+    fn under_sudo_user_targets_run_unprivileged_and_system_targets_do_not() {
+        let sys = Fake::default()
+            .path("/home/alice/.cache/thumbnails")
+            .cmd("du -sb /home/alice/.cache/thumbnails", 0, "1000\t/x\n")
+            .cmd(
+                "find /home/alice/.cache/thumbnails -mindepth 1 -delete",
+                0,
+                "",
+            )
+            .cmd("du -sb /var/lib/systemd/coredump", 0, "5\t/x\n");
+        let c = Ctx {
+            user: Some((1000, 1001)),
+            ..ctx()
+        };
+        assert_eq!(thumbnails_preview(&sys, &c).bytes, Some(1000));
+        assert!(thumbnails_apply(&sys, &c).is_ok());
+        assert_eq!(coredumps_preview(&sys, &c).bytes, Some(5));
+        assert_eq!(
+            sys.calls(),
+            vec![
+                "@1000:1001 du -sb /home/alice/.cache/thumbnails",
+                "@1000:1001 find /home/alice/.cache/thumbnails -mindepth 1 -delete",
+                "du -sb /var/lib/systemd/coredump",
+            ],
+            "user files as the user, system files as root"
+        );
     }
 
     #[test]

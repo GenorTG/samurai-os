@@ -1,7 +1,7 @@
 # fish completion for samurai (shipped by samurai-tools; fish is the default shell)
 
 function __samurai_no_cmd
-    not __fish_seen_subcommand_from update apps snap rescue status health version help
+    not __fish_seen_subcommand_from update apps snap rescue status health diag clean fix version help
 end
 
 function __samurai_apps_ids
@@ -17,6 +17,9 @@ complete -c samurai -n __samurai_no_cmd -a snap    -d 'snapshot manager'
 complete -c samurai -n __samurai_no_cmd -a rescue  -d 'recovery tool (live ISO or installed system)'
 complete -c samurai -n __samurai_no_cmd -a status  -d 'last update check and update report'
 complete -c samurai -n __samurai_no_cmd -a health  -d 'read-only health checks'
+complete -c samurai -n __samurai_no_cmd -a diag    -d 'diagnostics and redacted support bundle'
+complete -c samurai -n __samurai_no_cmd -a clean   -d 'free disk space (preview first)'
+complete -c samurai -n __samurai_no_cmd -a fix     -d 'targeted repairs'
 complete -c samurai -n __samurai_no_cmd -a version -d 'print the samurai-tools version'
 complete -c samurai -n __samurai_no_cmd -a help    -d 'usage'
 
@@ -92,3 +95,27 @@ complete -c samurai -n '__fish_seen_subcommand_from health' -l category -x -a 'p
 complete -c samurai -n '__fish_seen_subcommand_from health' -l id -x -a '(samurai health --list 2>/dev/null)' -d 'only this check'
 complete -c samurai -n '__fish_seen_subcommand_from health' -l json -d 'machine-readable output'
 complete -c samurai -n '__fish_seen_subcommand_from health' -l list -d 'print the check ids'
+complete -c samurai -n '__fish_seen_subcommand_from health' -l write -d 'write the report for the notifier'
+complete -c samurai -n '__fish_seen_subcommand_from health' -l fix -d 'repair what has an automatic fix'
+complete -c samurai -n '__fish_seen_subcommand_from health' -l yes -d 'approve risky fixes'
+
+# diag
+complete -c samurai -n '__fish_seen_subcommand_from diag; and not __fish_seen_subcommand_from info services logs disks gpu bundle' -a 'info services logs disks gpu bundle'
+complete -c samurai -n '__fish_seen_subcommand_from logs' -l kernel -d 'kernel log'
+complete -c samurai -n '__fish_seen_subcommand_from logs' -l pacman -d 'pacman log'
+complete -c samurai -n '__fish_seen_subcommand_from logs' -l update -d 'last samurai update log'
+complete -c samurai -n '__fish_seen_subcommand_from logs' -l lines -x -d 'number of lines'
+complete -c samurai -n '__fish_seen_subcommand_from bundle' -l no-redact -d 'keep private data (asks twice)'
+complete -c samurai -n '__fish_seen_subcommand_from bundle' -l out -r -d 'output file'
+
+# clean
+complete -c samurai -n '__fish_seen_subcommand_from clean' -a 'pkgcache journal coredumps thumbnails orphans cache all'
+complete -c samurai -n '__fish_seen_subcommand_from clean' -l preview -d 'show sizes, change nothing'
+complete -c samurai -n '__fish_seen_subcommand_from clean' -l json -d 'machine-readable preview'
+complete -c samurai -n '__fish_seen_subcommand_from clean' -l yes -d 'approve confirmations'
+complete -c samurai -n '__fish_seen_subcommand_from clean' -l keep -x -d 'package versions to keep'
+
+# fix
+complete -c samurai -n '__fish_seen_subcommand_from fix; and not __fish_seen_subcommand_from lock keyring dkms' -a 'lock keyring dkms'
+complete -c samurai -n '__fish_seen_subcommand_from keyring' -l reset -d 'rebuild the keyring (asks)'
+complete -c samurai -n '__fish_seen_subcommand_from keyring' -l yes -d 'approve the reset'

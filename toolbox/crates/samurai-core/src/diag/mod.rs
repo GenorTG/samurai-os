@@ -327,6 +327,18 @@ pub fn home_of(sys: &dyn System, user: &str) -> Option<String> {
     })
 }
 
+/// True when `candidate`'s directory really lives inside `base` (symlinks resolved, `..` gone).
+/// Root writing a bundle for a `sudo` user must stay inside that user's home.
+pub fn confined(base: &std::path::Path, candidate: &std::path::Path) -> bool {
+    let (Ok(base), Some(parent)) = (std::fs::canonicalize(base), candidate.parent()) else {
+        return false;
+    };
+    let Ok(parent) = std::fs::canonicalize(parent) else {
+        return false;
+    };
+    candidate.file_name().is_some() && parent.starts_with(&base)
+}
+
 pub fn redactor(sys: &dyn System, extra_users: &[String]) -> Redactor {
     Redactor::new(user_names(sys, extra_users), sys.read("/etc/hostname"))
 }
@@ -649,6 +661,38 @@ mod tests {
         ] {
             assert!(parse_args(&a(bad)).is_err(), "{bad:?}");
         }
+    }
+
+    #[test]
+    fn confinement_resolves_symlinks_and_dotdot_and_prefix_tricks() {
+        use std::fs;
+        let root = std::env::temp_dir().join(format!("samurai-confine-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let home = root.join("home");
+        let outside = root.join("home2");
+        fs::create_dir_all(home.join("sub")).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        std::os::unix::fs::symlink(&outside, home.join("link")).unwrap();
+        assert!(confined(&home, &home.join("bundle.txt")));
+        assert!(confined(&home, &home.join("sub/bundle.txt")));
+        assert!(
+            !confined(&home, &outside.join("bundle.txt")),
+            "sibling directory with a common name prefix"
+        );
+        assert!(!confined(&home, &home.join("../home2/bundle.txt")), "..");
+        assert!(
+            !confined(&home, &home.join("link/bundle.txt")),
+            "a symlinked directory escaping the home"
+        );
+        assert!(
+            !confined(&home, &home.join("missing/bundle.txt")),
+            "parent must exist"
+        );
+        assert!(!confined(&home, std::path::Path::new("/")), "no file name");
+        assert!(
+            !confined(&root.join("nope"), &home.join("x")),
+            "base must exist"
+        );
     }
 
     #[test]

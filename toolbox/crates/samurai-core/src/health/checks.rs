@@ -512,6 +512,138 @@ fn fix_btrfs_timers(sys: &dyn System) -> Result<Vec<String>, String> {
     )
 }
 
+const DAY: u64 = 86_400;
+const LAST_UPDATE: &str = "/var/lib/samurai/last-update";
+
+fn age_days(sys: &dyn System, path: &str) -> Option<u64> {
+    sys.mtime(path).map(|t| sys.now().saturating_sub(t) / DAY)
+}
+
+fn pacman_mirrors(sys: &dyn System) -> Outcome {
+    let path = "/etc/pacman.d/mirrorlist";
+    let Some(days) = age_days(sys, path) else {
+        return Outcome::Skipped("mirrorlist not found".into());
+    };
+    if days <= 30 {
+        return Outcome::Ok;
+    }
+    issue(
+        "the mirrorlist is older than 30 days",
+        "Stale mirrors are slow or gone. Refresh: samurai mirrors refresh (or reflector)",
+        vec![format!("{path} last changed {days} days ago")],
+    )
+}
+
+fn packages_outdated(sys: &dyn System) -> Outcome {
+    let Some(days) = age_days(sys, LAST_UPDATE) else {
+        return Outcome::Skipped("no `samurai update` has completed yet".into());
+    };
+    if days < 14 {
+        return Outcome::Ok;
+    }
+    issue(
+        format!("no full update for {days} days"),
+        "Update soon; long gaps make updates riskier. Run: samurai update",
+        vec![format!("{LAST_UPDATE} last changed {days} days ago")],
+    )
+}
+
+fn packages_partial_upgrade(sys: &dyn System) -> Outcome {
+    // `pacman -Sy` without -u leaves the sync db newer than the installed set: unsupported on Arch
+    let (Some(last), Some(db)) = (
+        sys.mtime(LAST_UPDATE),
+        sys.mtime("/var/lib/pacman/sync/core.db"),
+    ) else {
+        return Outcome::Skipped("no update record or sync database yet".into());
+    };
+    if db <= last + 3600 {
+        return Outcome::Ok;
+    }
+    let Some(o) = sys.run("pacman", &["-Qu"]) else {
+        return Outcome::Skipped("pacman not available".into());
+    };
+    let pending = lines(&o.stdout);
+    if o.code != 0 || pending.is_empty() {
+        return Outcome::Ok;
+    }
+    issue(
+        "the package database was synced without a full upgrade",
+        "Installing anything now can create a partial upgrade. Run: samurai update",
+        pending.into_iter().take(10).collect(),
+    )
+}
+
+/// First-match-wins value of `key` over `files` (OpenSSH semantics: the first obtained value is used).
+fn sshd_value(files: &[String], key: &str) -> Option<String> {
+    files.iter().flat_map(|f| f.lines()).find_map(|l| {
+        let l = l.split('#').next().unwrap_or("").trim();
+        let mut it = l.split_whitespace();
+        (it.next()?.eq_ignore_ascii_case(key)).then(|| it.next().unwrap_or("").to_ascii_lowercase())
+    })
+}
+
+fn security_ssh(sys: &dyn System) -> Outcome {
+    match sys.run("systemctl", &["is-active", "sshd"]) {
+        Some(o) if o.stdout.trim() == "active" => {}
+        Some(_) => return Outcome::Skipped("sshd is not running".into()),
+        None => return Outcome::Skipped("systemctl not available".into()),
+    }
+    // drop-ins come first (sshd_config includes /etc/ssh/sshd_config.d/*.conf at the top), then the main file
+    let mut files: Vec<String> = sys
+        .list_dir("/etc/ssh/sshd_config.d")
+        .into_iter()
+        .filter(|f| f.ends_with(".conf"))
+        .filter_map(|f| sys.read(&format!("/etc/ssh/sshd_config.d/{f}")))
+        .collect();
+    files.extend(sys.read("/etc/ssh/sshd_config"));
+    let mut problems = Vec::new();
+    if sshd_value(&files, "PasswordAuthentication")
+        .as_deref()
+        .unwrap_or("yes")
+        == "yes"
+    {
+        problems.push("PasswordAuthentication is enabled".to_string());
+    }
+    if sshd_value(&files, "PermitRootLogin").as_deref() == Some("yes") {
+        problems.push("PermitRootLogin is yes".to_string());
+    }
+    if problems.is_empty() {
+        return Outcome::Ok;
+    }
+    issue(
+        "sshd accepts passwords or root logins",
+        "Use keys: set PasswordAuthentication no and PermitRootLogin prohibit-password in a drop-in under /etc/ssh/sshd_config.d/",
+        problems,
+    )
+}
+
+fn boot_esp_space(sys: &dyn System) -> Outcome {
+    match sys.run("findmnt", &["-no", "FSTYPE", "/boot"]) {
+        Some(o) if o.stdout.trim() == "vfat" => {}
+        Some(_) => return Outcome::Skipped("/boot is not a separate ESP".into()),
+        None => return Outcome::Skipped("findmnt not available".into()),
+    }
+    let Some(o) = sys.run("df", &["-P", "/boot"]) else {
+        return Outcome::Skipped("df not available".into());
+    };
+    let used: Option<u32> = o.stdout.lines().nth(1).and_then(|l| {
+        l.split_whitespace()
+            .nth(4)?
+            .trim_end_matches('%')
+            .parse()
+            .ok()
+    });
+    match used {
+        Some(u) if u >= 80 => issue(
+            format!("the ESP is {u}% full"),
+            "Kernels and initramfs images fill it; remove old ones or unused kernels (spec 05: samurai clean boot)",
+            vec![format!("/boot {u}% used")],
+        ),
+        Some(_) => Outcome::Ok,
+        None => Outcome::Skipped("could not read /boot usage".into()),
+    }
+}
+
 macro_rules! check {
     ($id:literal, $cat:ident, $sev:ident, $risk:ident, $f:ident) => {
         Check {
@@ -592,6 +724,29 @@ pub const ALL: &[Check] = &[
         fix = fix_firewall
     ),
     check!("hardware.ram", Hardware, Info, Safe, hardware_ram),
+    check!(
+        "pacman.mirrors",
+        Packages,
+        Warning,
+        ManualOnly,
+        pacman_mirrors
+    ),
+    check!(
+        "packages.outdated",
+        Packages,
+        Warning,
+        ManualOnly,
+        packages_outdated
+    ),
+    check!(
+        "packages.partial-upgrade",
+        Packages,
+        Warning,
+        ManualOnly,
+        packages_partial_upgrade
+    ),
+    check!("security.ssh", Security, Warning, ManualOnly, security_ssh),
+    check!("boot.esp-space", Boot, Warning, ManualOnly, boot_esp_space),
     check!(
         "boot.kernels-present",
         Boot,
@@ -1063,5 +1218,135 @@ mod tests {
             "",
         );
         assert!(fix_btrfs_timers(&f).is_ok());
+    }
+
+    const NOW: u64 = 100 * DAY;
+
+    #[test]
+    fn mirrorlist_and_update_age() {
+        let m = "/etc/pacman.d/mirrorlist";
+        assert!(matches!(
+            pacman_mirrors(&Fake::default()),
+            Outcome::Skipped(_)
+        ));
+        assert_eq!(
+            pacman_mirrors(&Fake::default().at(NOW).mtime(m, NOW - 30 * DAY)),
+            Outcome::Ok
+        );
+        let i = is_issue(&pacman_mirrors(
+            &Fake::default().at(NOW).mtime(m, NOW - 31 * DAY),
+        ))
+        .clone();
+        assert!(i.evidence[0].contains("31 days"));
+        assert!(matches!(
+            packages_outdated(&Fake::default()),
+            Outcome::Skipped(_)
+        ));
+        assert_eq!(
+            packages_outdated(&Fake::default().at(NOW).mtime(LAST_UPDATE, NOW - 13 * DAY)),
+            Outcome::Ok
+        );
+        let i = is_issue(&packages_outdated(
+            &Fake::default().at(NOW).mtime(LAST_UPDATE, NOW - 20 * DAY),
+        ))
+        .clone();
+        assert!(i.summary.contains("20 days"));
+    }
+
+    #[test]
+    fn partial_upgrade_needs_a_newer_db_and_pending_upgrades() {
+        let db = "/var/lib/pacman/sync/core.db";
+        let base = |last: u64, dbt: u64| Fake::default().mtime(LAST_UPDATE, last).mtime(db, dbt);
+        assert!(matches!(
+            packages_partial_upgrade(&Fake::default()),
+            Outcome::Skipped(_)
+        ));
+        // db synced by the update itself (not newer than the update record): fine
+        assert_eq!(
+            packages_partial_upgrade(&base(1000, 900).cmd("pacman -Qu", 0, "foo 1 -> 2\n")),
+            Outcome::Ok
+        );
+        // db newer, but nothing pending: fine
+        assert_eq!(
+            packages_partial_upgrade(&base(1000, 99_999).cmd("pacman -Qu", 1, "")),
+            Outcome::Ok
+        );
+        // db newer AND upgrades pending: partial-upgrade risk
+        let i = is_issue(&packages_partial_upgrade(&base(1000, 99_999).cmd(
+            "pacman -Qu",
+            0,
+            "foo 1 -> 2\nbar 3 -> 4\n",
+        )))
+        .clone();
+        assert_eq!(i.evidence, vec!["foo 1 -> 2", "bar 3 -> 4"]);
+    }
+
+    #[test]
+    fn sshd_first_match_wins_and_only_when_running() {
+        let active = || Fake::default().cmd("systemctl is-active sshd", 0, "active\n");
+        assert!(matches!(
+            security_ssh(&Fake::default().cmd("systemctl is-active sshd", 3, "inactive\n")),
+            Outcome::Skipped(_)
+        ));
+        // defaults: password auth is on in OpenSSH when unset
+        let i = is_issue(&security_ssh(
+            &active().file("/etc/ssh/sshd_config", "#PasswordAuthentication yes\n"),
+        ))
+        .clone();
+        assert_eq!(i.evidence, vec!["PasswordAuthentication is enabled"]);
+        // hardened
+        let ok = active().file(
+            "/etc/ssh/sshd_config",
+            "PasswordAuthentication no\nPermitRootLogin prohibit-password\n",
+        );
+        assert_eq!(security_ssh(&ok), Outcome::Ok);
+        // a drop-in wins over the main file (it is included first), in either direction
+        let dropin_off = active()
+            .dir("/etc/ssh/sshd_config.d", &["99-x.conf", "ignored.txt"])
+            .file(
+                "/etc/ssh/sshd_config.d/99-x.conf",
+                "PasswordAuthentication no\n",
+            )
+            .file(
+                "/etc/ssh/sshd_config.d/ignored.txt",
+                "PasswordAuthentication yes\n",
+            )
+            .file("/etc/ssh/sshd_config", "PasswordAuthentication yes\n");
+        assert_eq!(security_ssh(&dropin_off), Outcome::Ok);
+        // first occurrence wins inside one file; root login yes is flagged, trailing comments ignored
+        let bad = active().file(
+            "/etc/ssh/sshd_config",
+            "PasswordAuthentication no # keys only\nPermitRootLogin yes\nPermitRootLogin no\n",
+        );
+        assert_eq!(
+            is_issue(&security_ssh(&bad)).evidence,
+            vec!["PermitRootLogin is yes"]
+        );
+        assert_eq!(sshd_value(&["Foo bar\n".to_string()], "baz"), None);
+    }
+
+    #[test]
+    fn esp_space() {
+        let esp = || Fake::default().cmd("findmnt -no FSTYPE /boot", 0, "vfat\n");
+        let hdr = "Filesystem 1024-blocks Used Available Capacity Mounted on\n";
+        assert!(matches!(
+            boot_esp_space(&Fake::default().cmd("findmnt -no FSTYPE /boot", 0, "btrfs\n")),
+            Outcome::Skipped(_)
+        ));
+        assert_eq!(
+            boot_esp_space(&esp().cmd(
+                "df -P /boot",
+                0,
+                &format!("{hdr}/dev/vda1 1000 500 500 50% /boot\n")
+            )),
+            Outcome::Ok
+        );
+        let i = is_issue(&boot_esp_space(&esp().cmd(
+            "df -P /boot",
+            0,
+            &format!("{hdr}/dev/vda1 1000 850 150 85% /boot\n"),
+        )))
+        .clone();
+        assert!(i.summary.contains("85%"));
     }
 }

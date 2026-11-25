@@ -59,7 +59,9 @@ class Mirror:
             self.dir = REPO / "tests" / "vm" / "assets"
         handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(self.dir))
         socketserver.TCPServer.allow_reuse_address = True
-        self.httpd = socketserver.TCPServer(("0.0.0.0", port), handler)
+        # loopback only: QEMU's user network reaches the host's loopback at 10.0.2.2, and the
+        # served profile (throwaway password hash) has no business on the LAN
+        self.httpd = socketserver.TCPServer(("127.0.0.1", port), handler)
         self.thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
 
     def __enter__(self):

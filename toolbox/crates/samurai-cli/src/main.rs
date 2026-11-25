@@ -7,6 +7,7 @@ use std::process::{Command, ExitCode};
 
 use samurai_core::clean;
 use samurai_core::diag::{self, Cmd};
+use samurai_core::fix;
 use samurai_core::health::{self, checks::ALL, system::RealSystem};
 use samurai_core::status;
 use samurai_core::{
@@ -139,16 +140,80 @@ fn write_private(path: &Path, text: &str, owner: Option<(u32, u32)>) -> std::io:
 
 /// Home directory of the real user: the `sudo` caller's (from /etc/passwd), else `$HOME`.
 fn real_home(sys: &RealSystem) -> Option<String> {
+    match sudo_target(sys) {
+        Some(u) => diag::home_of(sys, &u),
+        None => std::env::var("HOME").ok(),
+    }
+}
+
+/// The user `sudo` was invoked by, when we are root on their behalf.
+fn sudo_target(sys: &RealSystem) -> Option<String> {
     use health::system::System;
     let is_root = sys
         .run("id", &["-u"])
         .is_some_and(|o| o.stdout.trim() == "0");
-    let sudo_user = std::env::var("SUDO_USER")
+    let user = std::env::var("SUDO_USER")
         .ok()
         .filter(|u| !u.is_empty() && u != "root");
-    match sudo_user.filter(|_| is_root) {
-        Some(u) => diag::home_of(sys, &u),
-        None => std::env::var("HOME").ok(),
+    user.filter(|_| is_root)
+}
+
+fn run_fix(args: &[String]) -> ExitCode {
+    use health::{system::System, Snapshot};
+    let opts = match fix::parse_args(args) {
+        Ok(o) => o,
+        Err(e) => {
+            eprintln!("samurai fix: {e}\n");
+            eprint!("{}", fix::USAGE);
+            return ExitCode::from(2);
+        }
+    };
+    let Some(repair) = opts.repair.filter(|_| !opts.help) else {
+        print!("{}", fix::USAGE);
+        return ExitCode::SUCCESS;
+    };
+    let sys = RealSystem;
+    if sys
+        .run("id", &["-u"])
+        .is_none_or(|o| o.stdout.trim() != "0")
+    {
+        eprintln!(
+            "samurai fix: needs root (try: sudo samurai fix {})",
+            repair.name()
+        );
+        return ExitCode::from(1);
+    }
+    if repair.needs_confirm()
+        && !confirm_on_tty(
+            opts.yes,
+            repair.name(),
+            "deletes /etc/pacman.d/gnupg and rebuilds the keyring from scratch",
+        )
+    {
+        println!("declined {}", repair.name());
+        return ExitCode::from(1);
+    }
+    if repair.wants_snapshot() {
+        match health::pre_fix_snapshot(&sys) {
+            Snapshot::Created => println!("snapshot: created (snapper root)"),
+            Snapshot::Unavailable(why) => {
+                eprintln!("samurai fix: no pre-fix snapshot ({why}); continuing")
+            }
+            Snapshot::Failed(why) => {
+                eprintln!("samurai fix: pre-fix snapshot failed ({why}); not repairing anything");
+                return ExitCode::from(1);
+            }
+        }
+    }
+    match fix::run(&sys, repair) {
+        Ok(changes) => {
+            println!("fixed    {}: {}", repair.name(), changes.join("; "));
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            println!("failed   {}: {e}", repair.name());
+            ExitCode::from(1)
+        }
     }
 }
 
@@ -167,9 +232,11 @@ fn run_clean(args: &[String]) -> ExitCode {
         return ExitCode::SUCCESS;
     }
     let sys = RealSystem;
+    let user = sudo_target(&sys).and_then(|u| diag::ids_of(&sys, &u));
     let ctx = clean::Ctx {
         home: real_home(&sys),
         keep: opts.keep,
+        user,
     };
     let targets: Vec<&clean::Target> = opts
         .targets
@@ -253,24 +320,17 @@ fn run_diag(args: &[String]) -> ExitCode {
 }
 
 fn run_diag_bundle(sys: &RealSystem, redact: bool, out: Option<String>) -> ExitCode {
-    use health::system::System;
     if !redact && !confirm_unredacted() {
         return ExitCode::from(2);
     }
     let epoch = now_epoch();
     // under sudo the bundle belongs in the invoking user's home, owned by them
-    let sudo_user = std::env::var("SUDO_USER")
-        .ok()
-        .filter(|u| !u.is_empty() && u != "root");
-    let is_root = sys
-        .run("id", &["-u"])
-        .is_some_and(|o| o.stdout.trim() == "0");
-    let user = sudo_user.filter(|_| is_root);
+    let user = sudo_target(sys);
     let home = match &user {
         Some(u) => diag::home_of(sys, u),
         None => std::env::var("HOME").ok(),
     };
-    let path = match (out, home) {
+    let path = match (out, home.clone()) {
         (Some(p), _) => std::path::PathBuf::from(p),
         (None, Some(h)) => Path::new(&h).join(format!("samurai-diag-{epoch}.txt")),
         (None, None) => {
@@ -278,6 +338,19 @@ fn run_diag_bundle(sys: &RealSystem, redact: bool, out: Option<String>) -> ExitC
             return ExitCode::from(1);
         }
     };
+    let path = match std::env::current_dir() {
+        Ok(cwd) if path.is_relative() => cwd.join(path),
+        _ => path,
+    };
+    // root writing for a sudo user creates a file and hands it over: only inside their home
+    if user.is_some()
+        && !home
+            .as_deref()
+            .is_some_and(|h| diag::confined(Path::new(h), &path))
+    {
+        eprintln!("samurai diag: under sudo, --out must be inside your home directory");
+        return ExitCode::from(2);
+    }
     let mut text = diag::render(&diag::bundle(sys, epoch));
     if redact {
         let mut extra: Vec<String> = user.iter().cloned().collect();
@@ -375,6 +448,7 @@ fn main() -> ExitCode {
         Action::Health => run_health(&rest),
         Action::Diag => run_diag(&rest),
         Action::Clean => run_clean(&rest),
+        Action::Fix => run_fix(&rest),
         Action::Version => {
             let v = read_version_file(Path::new(TOOLS_VERSION_FILE)).or_else(pacman_version);
             println!("{}", version_line(v.as_deref()));

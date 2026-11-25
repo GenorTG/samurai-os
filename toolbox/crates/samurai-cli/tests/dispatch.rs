@@ -261,3 +261,29 @@ fn clean_usage_preview_and_refusals() {
     );
     assert_eq!(o.status.code(), Some(1));
 }
+
+#[test]
+fn fix_usage_help_and_root_requirement() {
+    let d = sandbox("fix");
+    for bad in [
+        &["fix"][..],
+        &["fix", "nope"],
+        &["fix", "lock", "--bogus"],
+        &["fix", "lock", "--reset"],
+    ] {
+        assert_eq!(run(&d, bad).status.code(), Some(2), "{bad:?}");
+    }
+    let o = run(&d, &["fix", "--help"]);
+    assert_eq!(o.status.code(), Some(0));
+    assert!(out(&o).starts_with("usage: samurai fix"));
+    // the test process is not root: a valid repair is refused before anything runs
+    let uid = Command::new("id")
+        .arg("-u")
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+    if uid.is_ok_and(|u| u != "0") {
+        let o = run(&d, &["fix", "lock"]);
+        assert_eq!(o.status.code(), Some(1));
+        assert!(String::from_utf8_lossy(&o.stderr).contains("needs root"));
+    }
+}

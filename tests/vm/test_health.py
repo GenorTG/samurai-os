@@ -309,3 +309,84 @@ def test_clean_previews_refuses_non_root_and_frees_space(installed_vm):
     # `all` never touches orphans
     _, out = ga.exec("pacman -S --asdeps --noconfirm tree >/dev/null 2>&1; samurai clean all >/dev/null 2>&1; pacman -Q tree; pacman -Rns --noconfirm tree >/dev/null 2>&1", timeout=300, check=False)
     assert "tree " in out, f"`clean all` removed an orphan: {out}"
+
+
+def test_fix_lock_keyring_dkms_and_age_checks(installed_vm):
+    _, ga = installed_vm
+    # every v1 check answers on a real system (ok / issue / skipped, never missing)
+    _, rep = _health(ga)
+    st = _status(rep)
+    assert len(st) >= 24, sorted(st)
+    for cid in ("pacman.mirrors", "packages.outdated", "packages.partial-upgrade", "security.ssh", "boot.esp-space"):
+        assert st[cid] in ("ok", "issue", "skipped"), (cid, st[cid])
+
+    # age checks: break, detect, repair, re-detect
+    ga.exec("touch -d '40 days ago' /etc/pacman.d/mirrorlist", check=False)
+    _, rep = _health(ga, "--id", "pacman.mirrors")
+    assert rep["results"][0]["status"] == "issue", rep
+    ga.exec("touch /etc/pacman.d/mirrorlist", check=False)
+    _, rep = _health(ga, "--id", "pacman.mirrors")
+    assert rep["results"][0]["status"] == "ok", rep
+    ga.exec("mkdir -p /var/lib/samurai && touch -d '20 days ago' /var/lib/samurai/last-update", check=False)
+    _, rep = _health(ga, "--id", "packages.outdated")
+    assert rep["results"][0]["status"] == "issue" and "20 days" in rep["results"][0]["summary"], rep
+    ga.exec("touch /var/lib/samurai/last-update", check=False)
+    _, rep = _health(ga, "--id", "packages.outdated")
+    assert rep["results"][0]["status"] == "ok", rep
+
+    # fix lock: nothing to do, then refuse while a package manager runs, then remove a stale lock
+    _, out = ga.exec("rm -f /var/lib/pacman/db.lck; samurai fix lock; echo rc=$?", check=False)
+    assert "nothing to do" in out and out.strip().endswith("rc=0"), out
+    ga.exec("touch /var/lib/pacman/db.lck; cp /usr/bin/sleep /tmp/pacman; (/tmp/pacman 300 >/dev/null 2>&1 &) ; sleep 1", check=False)
+    _, out = ga.exec("samurai fix lock; echo rc=$?; test -e /var/lib/pacman/db.lck && echo LOCK-STILL-THERE", check=False)
+    assert "a package manager is running" in out and "rc=1" in out and "LOCK-STILL-THERE" in out, out
+    ga.exec("pkill -x pacman; rm -f /tmp/pacman; sleep 1", check=False)
+    _, out = ga.exec("samurai fix lock; echo rc=$?; test -e /var/lib/pacman/db.lck && echo LOCK-STILL-THERE", check=False)
+    assert "removed stale" in out and "rc=0" in out and "LOCK-STILL-THERE" not in out, out
+
+    # fix keyring: populate is harmless; reset needs --yes (no terminal here) and takes a snapshot first
+    _, out = ga.exec("samurai fix keyring; echo rc=$?", timeout=300, check=False)
+    assert "fixed    keyring" in out and out.strip().endswith("rc=0"), out
+    ga.exec("touch /etc/pacman.d/gnupg/reset-marker", check=False)
+    _, out = ga.exec("samurai fix keyring --reset; echo rc=$?; test -e /etc/pacman.d/gnupg/reset-marker && echo MARKER-KEPT", timeout=120, check=False)
+    assert "declined keyring" in out and "rc=1" in out and "MARKER-KEPT" in out, f"reset must need confirmation: {out}"
+    _, before = ga.exec("snapper -c root list --columns number | wc -l", check=False)
+    _, out = ga.exec("samurai fix keyring --reset --yes; echo rc=$?; test -e /etc/pacman.d/gnupg/reset-marker && echo MARKER-KEPT", timeout=600, check=False)
+    assert "snapshot: created" in out and "fixed    keyring" in out and "rc=0" in out and "MARKER-KEPT" not in out, out
+    _, after = ga.exec("snapper -c root list --columns number | wc -l", check=False)
+    assert int(after.strip()) == int(before.strip()) + 1, (before, after)
+    # the rebuilt keyring really verifies signatures: install a package through it
+    _, out = ga.exec("pacman -S --noconfirm --needed tree >/tmp/tree2.log 2>&1; echo rc=$?; tail -2 /tmp/tree2.log", timeout=300, check=False)
+    assert "rc=0" in out, f"signature-checked install failed after the keyring reset: {out}"
+    ga.exec("pacman -Rns --noconfirm tree >/dev/null 2>&1", check=False)
+
+    # fix dkms: no dkms in the test profile, so this is a clean no-op
+    _, out = ga.exec("samurai fix dkms; echo rc=$?", timeout=300, check=False)
+    assert "fixed    dkms" in out and "rc=0" in out, out
+    # not root: refused
+    _, out = ga.exec("su samurai -c 'samurai fix lock' 2>&1; echo rc=$?", check=False)
+    assert "needs root" in out and out.strip().endswith("rc=1"), out
+
+
+def test_sudo_hardening_path_confinement_and_unprivileged_user_cleanup(installed_vm):
+    _, ga = installed_vm
+    sudo = "SUDO_USER=samurai"   # what sudo sets; the harness shell is already root
+    # 1. a hostile $PATH cannot substitute the tools root runs
+    ga.exec("mkdir -p /tmp/evil && printf '#!/bin/sh\\ntouch /tmp/evil/RAN\\necho inactive\\n' > /tmp/evil/systemctl && chmod 755 /tmp/evil/systemctl", check=False)
+    _, out = ga.exec("PATH=/tmp/evil:$PATH /usr/local/bin/samurai health --id security.firewall; echo rc=$?; test -e /tmp/evil/RAN && echo HIJACKED", check=False)
+    assert "HIJACKED" not in out and "ok       security.firewall" in out, out
+
+    # 2. under sudo, --out may not leave the invoking user's home (plain, `..`, and through a symlink)
+    ga.exec("su samurai -c 'ln -sfn /etc ~/escape'", check=False)
+    for target in ("/etc/samurai-planted.txt", "/home/samurai/../../etc/samurai-planted.txt", "/home/samurai/escape/samurai-planted.txt"):
+        _, out = ga.exec(f"{sudo} samurai diag bundle --out {target} 2>&1; echo rc=$?; test -e /etc/samurai-planted.txt && echo PLANTED", timeout=300, check=False)
+        assert "rc=2" in out and "inside your home" in out and "PLANTED" not in out, (target, out)
+    _, out = ga.exec(f"rm -f /home/samurai/b.txt; {sudo} samurai diag bundle --out /home/samurai/b.txt; echo rc=$?; stat -c '%U %a' /home/samurai/b.txt", timeout=300, check=False)
+    assert "rc=0" in out and "samurai 600" in out, out
+
+    # 3. user targets under sudo run as that user: a symlinked cache cannot make root delete for them
+    ga.exec("mkdir -p /root/victim/thumbnails && echo keep > /root/victim/thumbnails/keep && chmod 700 /root/victim", check=False)
+    ga.exec("su samurai -c 'rm -rf ~/.cache && ln -s /root/victim ~/.cache'", check=False)
+    _, out = ga.exec(f"{sudo} samurai clean thumbnails; echo rc=$?; cat /root/victim/thumbnails/keep", timeout=120, check=False)
+    assert out.strip().endswith("keep"), f"root deleted through a user symlink: {out}"
+    ga.exec("su samurai -c 'rm -f ~/.cache ~/escape'; rm -rf /root/victim /tmp/evil /home/samurai/b.txt", check=False)

@@ -15,7 +15,7 @@ _samurai() {
     sub="${COMP_WORDS[2]:-}"
 
     if [ "$COMP_CWORD" -eq 1 ]; then
-        mapfile -t COMPREPLY < <(compgen -W "update apps snap rescue status health version help" -- "$cur")
+        mapfile -t COMPREPLY < <(compgen -W "update apps snap rescue status health diag clean fix version help" -- "$cur")
         return 0
     fi
 
@@ -62,13 +62,33 @@ _samurai() {
                 mapfile -t COMPREPLY < <(compgen -W "--yes --device --help" -- "$cur")
             fi
             ;;
+        diag)
+            if [ "$COMP_CWORD" -eq 2 ]; then
+                mapfile -t COMPREPLY < <(compgen -W "info services logs disks gpu bundle --help" -- "$cur")
+            elif [ "$sub" = logs ]; then
+                mapfile -t COMPREPLY < <(compgen -W "--kernel --pacman --update --lines" -- "$cur")
+            elif [ "$sub" = bundle ]; then
+                mapfile -t COMPREPLY < <(compgen -W "--no-redact --out" -- "$cur")
+            fi
+            ;;
+        clean)
+            mapfile -t COMPREPLY < <(compgen -W "pkgcache journal coredumps thumbnails orphans cache all \
+                --preview --json --yes --keep --help" -- "$cur")
+            ;;
+        fix)
+            if [ "$COMP_CWORD" -eq 2 ]; then
+                mapfile -t COMPREPLY < <(compgen -W "lock keyring dkms --help" -- "$cur")
+            elif [ "$sub" = keyring ]; then
+                mapfile -t COMPREPLY < <(compgen -W "--reset --yes" -- "$cur")
+            fi
+            ;;
         health)
             if [ "$prev" = "--category" ]; then
                 mapfile -t COMPREPLY < <(compgen -W "packages boot drivers storage snapshots services security hardware config" -- "$cur")
             elif [ "$prev" = "--id" ]; then
                 mapfile -t COMPREPLY < <(compgen -W "$(samurai health --list 2>/dev/null)" -- "$cur")
             else
-                mapfile -t COMPREPLY < <(compgen -W "--category --id --json --list --help" -- "$cur")
+                mapfile -t COMPREPLY < <(compgen -W "--category --id --json --list --write --fix --yes --help" -- "$cur")
             fi
             ;;
         status)

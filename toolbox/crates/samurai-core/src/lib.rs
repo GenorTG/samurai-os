@@ -5,6 +5,7 @@
 
 pub mod clean;
 pub mod diag;
+pub mod fix;
 pub mod health;
 pub mod status;
 
@@ -25,6 +26,7 @@ commands
   health      read-only health checks (spec 05): samurai health --help
   diag        diagnostics and the redacted support bundle: samurai diag --help
   clean       free disk space (preview first): samurai clean --help
+  fix         targeted repairs: lock, keyring, dkms (samurai fix --help)
   version     print the samurai-tools version
   help        this text
 
@@ -48,6 +50,8 @@ pub enum Action {
     Diag,
     /// `samurai clean`: preview and free disk space.
     Clean,
+    /// `samurai fix`: targeted pacman repairs.
+    Fix,
     Version,
     Help,
     Unknown(String),
@@ -75,6 +79,7 @@ pub fn parse(cmd: &str) -> Action {
         "health" => Action::Health,
         "diag" => Action::Diag,
         "clean" => Action::Clean,
+        "fix" => Action::Fix,
         "version" | "--version" | "-V" => Action::Version,
         "help" | "--help" | "-h" => Action::Help,
         other => Action::Unknown(other.to_string()),
@@ -143,6 +148,7 @@ mod tests {
         assert_eq!(parse("health"), Action::Health);
         assert_eq!(parse("diag"), Action::Diag);
         assert_eq!(parse("clean"), Action::Clean);
+        assert_eq!(parse("fix"), Action::Fix);
         for v in ["version", "--version", "-V"] {
             assert_eq!(parse(v), Action::Version);
         }
