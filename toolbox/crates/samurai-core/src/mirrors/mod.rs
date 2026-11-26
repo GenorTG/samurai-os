@@ -4,6 +4,7 @@
 //! `Server =` for the Arch layout. The previous list is kept as `.bak`. The package databases are
 //! deliberately NOT synced here: `-Sy` without `-u` is a partial upgrade.
 
+use crate::health::json_escape;
 use crate::health::system::System;
 
 pub const MIRRORLIST: &str = "/etc/pacman.d/mirrorlist";
@@ -55,18 +56,43 @@ pub fn validate(list: &str) -> Result<usize, String> {
     Ok(n)
 }
 
-pub fn status(sys: &dyn System) -> Result<String, String> {
+/// Age in whole days and the active `Server` lines of the Arch mirrorlist.
+fn read_list(sys: &dyn System) -> Result<(Option<u64>, Vec<String>), String> {
     let list = sys
         .read(MIRRORLIST)
         .ok_or(format!("cannot read {MIRRORLIST}"))?;
-    let servers: Vec<&str> = list
+    let servers = list
         .lines()
         .map(str::trim)
         .filter(|l| l.starts_with("Server"))
+        .map(str::to_string)
         .collect();
-    let age = sys.mtime(MIRRORLIST).map_or("unknown".to_string(), |t| {
-        format!("{} day(s)", sys.now().saturating_sub(t) / 86_400)
-    });
+    let age = sys
+        .mtime(MIRRORLIST)
+        .map(|t| sys.now().saturating_sub(t) / 86_400);
+    Ok((age, servers))
+}
+
+/// `{"schema":1,"path":..,"age_days":n|null,"servers":[url,..]}`
+pub fn status_json(sys: &dyn System) -> Result<String, String> {
+    let (age, servers) = read_list(sys)?;
+    let urls: Vec<String> = servers
+        .iter()
+        .map(|s| {
+            let url = s.split_once('=').map_or(s.as_str(), |(_, u)| u.trim());
+            format!("\"{}\"", json_escape(url))
+        })
+        .collect();
+    Ok(format!(
+        "{{\"schema\":1,\"path\":\"{MIRRORLIST}\",\"age_days\":{},\"servers\":[{}]}}\n",
+        age.map_or("null".to_string(), |a| a.to_string()),
+        urls.join(",")
+    ))
+}
+
+pub fn status(sys: &dyn System) -> Result<String, String> {
+    let (age, servers) = read_list(sys)?;
+    let age = age.map_or("unknown".to_string(), |a| format!("{a} day(s)"));
     let mut out = format!("{MIRRORLIST}\nage: {age}\nservers: {}\n", servers.len());
     for s in servers.iter().take(5) {
         out.push_str(&format!("  {s}\n"));
@@ -121,9 +147,9 @@ fn apply_candidate(sys: &dyn System, args: &[&str]) -> Result<String, String> {
     }
 }
 
-pub const USAGE: &str = "usage: samurai mirrors <status|refresh>
+pub const USAGE: &str = "usage: samurai mirrors <status [--json]|refresh>
 
-  status     age and servers of the Arch mirrorlist
+  status     age and servers of the Arch mirrorlist (--json: machine-readable)
   refresh    pick the 20 most recently synced https mirrors with reflector, validate the result,
              keep the old list as mirrorlist.bak (root). Does not sync package databases.
 
@@ -132,14 +158,15 @@ Exit codes: 0 ok, 1 failed, 2 usage error.
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Cmd {
-    Status,
+    Status { json: bool },
     Refresh,
     Help,
 }
 
 pub fn parse_args(args: &[String]) -> Result<Cmd, String> {
     match args {
-        [a] if a == "status" => Ok(Cmd::Status),
+        [a] if a == "status" => Ok(Cmd::Status { json: false }),
+        [a, b] if a == "status" && b == "--json" => Ok(Cmd::Status { json: true }),
         [a] if a == "refresh" => Ok(Cmd::Refresh),
         [a] if a == "--help" || a == "-h" => Ok(Cmd::Help),
         [] => Err("a command is required: status or refresh".into()),
@@ -237,7 +264,11 @@ mod tests {
     #[test]
     fn argument_parsing() {
         let a = |v: &[&str]| v.iter().map(|x| (*x).to_string()).collect::<Vec<_>>();
-        assert_eq!(parse_args(&a(&["status"])), Ok(Cmd::Status));
+        assert_eq!(parse_args(&a(&["status"])), Ok(Cmd::Status { json: false }));
+        assert_eq!(
+            parse_args(&a(&["status", "--json"])),
+            Ok(Cmd::Status { json: true })
+        );
         assert_eq!(parse_args(&a(&["refresh"])), Ok(Cmd::Refresh));
         assert_eq!(parse_args(&a(&["-h"])), Ok(Cmd::Help));
         for bad in [&[][..], &["nope"], &["refresh", "--all"], &["status", "x"]] {

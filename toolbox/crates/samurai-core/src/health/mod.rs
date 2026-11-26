@@ -118,6 +118,8 @@ pub struct Finding {
     pub category: Category,
     pub severity: Severity,
     pub fix_risk: FixRisk,
+    /// `--fix` can repair this check by itself (it has a fix that is not manual-only).
+    pub fixable: bool,
     pub outcome: Outcome,
 }
 
@@ -137,6 +139,7 @@ pub fn run(sys: &dyn System, checks: &[Check], filter: &Filter) -> Vec<Finding> 
             category: c.category,
             severity: c.severity,
             fix_risk: c.fix_risk,
+            fixable: c.fix.is_some() && c.fix_risk != FixRisk::ManualOnly,
             outcome: (c.detect)(sys),
         })
         .collect()
@@ -210,14 +213,15 @@ pub fn render_json(findings: &[Finding], checked_epoch: u64) -> String {
             };
             let ev: Vec<String> = evidence.iter().map(|e| format!("\"{}\"", json_escape(e))).collect();
             format!(
-                "{{\"id\":\"{}\",\"category\":\"{}\",\"severity\":\"{}\",\"fix_risk\":\"{}\",\"status\":\"{status}\",\"summary\":\"{}\",\"details\":\"{}\",\"evidence\":[{}]}}",
+                "{{\"id\":\"{}\",\"category\":\"{}\",\"severity\":\"{}\",\"fix_risk\":\"{}\",\"status\":\"{status}\",\"summary\":\"{}\",\"details\":\"{}\",\"evidence\":[{}],\"fixable\":{}}}",
                 f.id,
                 f.category.as_str(),
                 f.severity.as_str(),
                 f.fix_risk.as_str(),
                 json_escape(&summary),
                 json_escape(&details),
-                ev.join(",")
+                ev.join(","),
+                f.fixable
             )
         })
         .collect();

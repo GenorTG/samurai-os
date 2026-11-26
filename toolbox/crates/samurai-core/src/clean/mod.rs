@@ -419,8 +419,9 @@ pub fn render_json(rows: &[(&Target, Preview)]) -> String {
         .map(|(t, p)| {
             let ev: Vec<String> = p.items.iter().map(|i| format!("\"{}\"", json_escape(i))).collect();
             format!(
-                "{{\"id\":\"{}\",\"risk\":\"{}\",\"needs_root\":{},\"bytes\":{},\"note\":\"{}\",\"items\":[{}]}}",
+                "{{\"id\":\"{}\",\"description\":\"{}\",\"risk\":\"{}\",\"needs_root\":{},\"bytes\":{},\"note\":\"{}\",\"items\":[{}]}}",
                 t.id,
+                json_escape(t.description),
                 t.risk.as_str(),
                 t.needs_root,
                 p.bytes.map_or("null".to_string(), |b| b.to_string()),
@@ -778,7 +779,11 @@ mod tests {
             "{t}"
         );
         let j = render_json(&rows);
-        assert!(j.starts_with("{\"schema\":1,\"targets\":[{\"id\":\"pkgcache\",\"risk\":\"safe\",\"needs_root\":true,\"bytes\":3145728"));
+        let head = format!(
+            "{{\"schema\":1,\"targets\":[{{\"id\":\"pkgcache\",\"description\":\"{}\",\"risk\":\"safe\",\"needs_root\":true,\"bytes\":3145728",
+            find("pkgcache").unwrap().description
+        );
+        assert!(j.starts_with(&head), "{j}");
         assert!(j.contains("\"bytes\":null") && j.contains("a\\\"b"), "{j}");
     }
 }

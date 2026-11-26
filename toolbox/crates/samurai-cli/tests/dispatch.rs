@@ -27,6 +27,10 @@ fn run(dir: &Path, args: &[&str]) -> Output {
             Err(e) if e.raw_os_error() == Some(26) => {
                 std::thread::sleep(std::time::Duration::from_millis(20))
             }
+            // the same race one level down: the dispatcher could not exec a just-written stub
+            Ok(o) if String::from_utf8_lossy(&o.stderr).contains("os error 26") => {
+                std::thread::sleep(std::time::Duration::from_millis(20))
+            }
             r => return r.unwrap(),
         }
     }
@@ -89,6 +93,10 @@ fn status_is_native_and_read_only() {
                 .output()
             {
                 Err(e) if e.raw_os_error() == Some(26) => {
+                    std::thread::sleep(std::time::Duration::from_millis(20))
+                }
+                // the same race one level down: the dispatcher could not exec a just-written stub
+                Ok(o) if String::from_utf8_lossy(&o.stderr).contains("os error 26") => {
                     std::thread::sleep(std::time::Duration::from_millis(20))
                 }
                 r => return r.unwrap(),

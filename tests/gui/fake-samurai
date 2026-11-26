@@ -1,0 +1,143 @@
+#!/usr/bin/env python3
+"""A stand-in `samurai` for the offscreen GUI smoke test (ci/test-gui.sh).
+
+Answers every read the toolbox makes with fixture data in the CLI's real JSON shapes, including
+hostile strings (markup, very long names) to catch rich-text rendering and layout overflow.
+`apps list`, `search` and `bundles` come from the real catalog tool with a fake package index.
+"""
+import json
+import os
+import pathlib
+import subprocess
+import sys
+import time
+
+HERE = pathlib.Path(__file__).resolve().parent
+REPO = HERE.parents[1]
+a = sys.argv[1:]
+time.sleep(float(os.environ.get("FAKE_SAMURAI_DELAY", "0")))
+
+
+def out(obj, code=0):
+    print(json.dumps(obj))
+    sys.exit(code)
+
+
+def finding(i, cat, sev, risk, status, summary="", details="", evidence=(), fixable=False):
+    return {"id": i, "category": cat, "severity": sev, "fix_risk": risk, "status": status,
+            "summary": summary, "details": details, "evidence": list(evidence), "fixable": fixable}
+
+
+if a == ["version"]:
+    print("samurai 0.4.0-16 (samurai-tools)")
+elif a[:2] == ["status", "--json"] or a[:2] == ["status", "--check"]:
+    out({"schema": 1, "checked": "2026-11-26T09:14:02+01:00", "arch": 14, "samurai": 1,
+         "security": 2, "reboot": 1, "stale_days": 3, "pacnew": 1, "health": 2, "error": 0})
+elif a == ["status", "--report"]:
+    out({"schema": 1, "ok": False, "exit_code": 3, "stage": "news",
+         "error": "1 Arch news item(s) require manual intervention", "reboot_needed": False,
+         "reboot_reasons": [], "packages": {"upgraded": 0, "installed": 0, "removed": 0},
+         "warnings": ["news: could not verify one item"],
+         "news_pending": [{"title": "<b>glibc</b> update requires manual intervention",
+                           "url": "https://archlinux.org/news/example/"}],
+         "log": "/var/log/samurai/update-20261126-091402.log"})
+elif a[:2] == ["health", "--json"]:
+    out({"schema": 1, "checked_epoch": 1, "issues": 3, "results": [
+        finding("security.firewall", "security", "error", "safe", "issue", "the firewall is not running",
+                "enable and start firewalld", ["firewalld: inactive"], True),
+        finding("pacman.pacnew", "config", "info", "manual-only", "issue", "2 config files to merge",
+                "merge them with pacdiff",
+                ["/etc/pacman.conf.pacnew", "/etc/a/very/long/path/that/must/wrap/instead/of/pushing/"
+                 "the/button/out/of/the/window/mirrorlist.pacnew"]),
+        finding("boot.initramfs", "boot", "critical", "needs-confirm", "issue",
+                "<img src=http://example.org/x> initramfs missing for linux-zen",
+                "rebuild it with mkinitcpio -P", ["/boot/initramfs-linux-zen.img"], True),
+        finding("packages.core", "packages", "error", "safe", "ok"),
+        finding("services.failed", "services", "warning", "needs-confirm", "ok"),
+        finding("hardware.cpu-temp", "hardware", "warning", "manual-only", "skipped", "no sensor")]}, 1)
+elif a[:3] == ["kernel", "list", "--json"]:
+    def k(name, desc, installed=False, running=False, default=False, bootable=False, warn=(),
+          blocker=None):
+        return {"name": name, "description": desc, "installed": installed, "running": running,
+                "default": default, "bootable": bootable, "install_warnings": list(warn),
+                "remove_blocker": blocker}
+    warn = ["NVIDIA modules here are prebuilt (nvidia-open); linux-lts would boot without an "
+            "NVIDIA driver. Switch to nvidia-open-dkms to cover every kernel."]
+    out({"schema": 1, "boot_readable": True, "running": "linux-cachyos", "default": "linux-cachyos",
+         "kernels": [
+             k("linux", "Arch stable kernel", warn=warn, blocker="linux is not installed"),
+             k("linux-lts", "Arch long-term support kernel", warn=warn, blocker="x"),
+             k("linux-zen", "desktop-tuned kernel (Arch)", True, bootable=True),
+             k("linux-hardened", "security-hardened kernel (Arch)", blocker="x"),
+             k("linux-cachyos", "CachyOS performance kernel (Samurai default)", True, True, True,
+               True, blocker="linux-cachyos is the running kernel; boot another one first"),
+             k("linux-cachyos-lts", "CachyOS long-term support kernel", blocker="x")]})
+elif a[:3] == ["boot", "get", "--json"]:
+    p = lambda v, locked=False: {"value": v, "protected": locked}
+    out({"schema": 1, "bootloader": "Limine", "editable": True, "timeout": 3, "max_timeout": 60,
+         "default_kernel": "linux-cachyos", "parameters": [
+             p("root=UUID=3b0c9a1e-5d9f-4a0b-9e55-4c2f4b1d7a11", True), p("rootflags=subvol=@", True),
+             p("rw", True), p("rd.luks.name=8f14e45f-ceea-467f-9af4-7c3b1d2e9f00=root", True),
+             p("quiet"), p("loglevel=3"), p("console=tty1")]})
+elif a[:3] == ["clean", "--preview", "--json"]:
+    t = lambda i, d, r, root, b, note="", items=(): {
+        "id": i, "description": d, "risk": r, "needs_root": root, "bytes": b, "note": note,
+        "items": list(items)}
+    out({"schema": 1, "targets": [
+        t("pkgcache", "old and uninstalled package versions in /var/cache/pacman/pkg", "safe", True,
+          1610612736, "keeps the newest 2 version(s) of each package"),
+        t("journal", "systemd journal above 200M", "safe", True, 52428800, "vacuums the journal down to 200M"),
+        t("coredumps", "stored coredumps", "safe", True, 0),
+        t("thumbnails", "thumbnail cache of the current user", "safe", False, 7340032),
+        t("orphans", "packages installed as dependencies that nothing needs any more", "needs-confirm",
+          True, None, "never removed automatically", ["gtest", "cmake", "ninja"]),
+        t("cache", "the whole ~/.cache of the current user", "needs-confirm", False, 912345678,
+          "the whole ~/.cache: apps rebuild it, but logins and indexes restart cold")]})
+elif a[:3] == ["mirrors", "status", "--json"]:
+    out({"schema": 1, "path": "/etc/pacman.d/mirrorlist", "age_days": 9, "servers": [
+        f"https://mirror{i}.example.org/archlinux/$repo/os/$arch" for i in range(20)]})
+elif a[:3] == ["snap", "list", "--json"]:
+    s = lambda i, t, d: {"id": i, "type": t, "date": "2026-11-26 0%d:00:00" % (i % 10),
+                         "description": d, "cleanup": ""}
+    out({"schema": 1, "config": "root", "snapshots": [
+        s(1, "single", "before first update"), s(2, "pre", "pacman -S --needed htop"),
+        s(3, "post", "htop"), s(4, "single", "<b>bold?</b> " + "a long description " * 6)]})
+elif a[:1] == ["diag"]:
+    if a[1:2] == ["bundle"]:
+        print("== bundle ==\nredacted")
+    else:
+        print(f"== {' '.join(a[1:])} ==")
+        for i in range(60):
+            print(f"line {i}: Linux samurai 6.18.0-cachyos <user1> " + "x" * (i % 7) * 30)
+elif a[:1] == ["apps"] and ("--dry-run" in a):
+    print("Installing 1 app(s): htop\n  pacman packages (1): htop\ncommands:\n"
+          "  $ sudo pacman -S --needed --noconfirm htop\n(dry run: nothing changed)")
+elif a[:1] == ["apps"]:
+    import tomllib
+    if a[1:2] == ["bundles"]:   # may arrive after the list, as on a busy machine
+        time.sleep(float(os.environ.get("FAKE_BUNDLES_DELAY", "0")))
+    index = pathlib.Path(os.environ.get("TMPDIR", "/tmp")) / "gui-apps-index.json"
+    names = set()
+    for f in ("garuda-setup-wizard.toml", "samurai.toml"):
+        def walk(o):
+            if isinstance(o, dict):
+                names.update(p for p in o.get("packages", []) if isinstance(p, str))
+                for v in o.values():
+                    walk(v)
+            elif isinstance(o, list):
+                for v in o:
+                    walk(v)
+        walk(tomllib.loads((REPO / "catalog" / f).read_text()))
+    index.write_text(json.dumps({"sync": {n: "extra" for n in names}, "groups": {},
+                                 "repos": ["core", "extra", "multilib"],
+                                 "installed": ["firefox", "htop", "gimp"],
+                                 "db_age_days": None if os.environ.get("FAKE_SAMURAI_NO_DB") else 0.1,
+                                 "pending_upgrades": []}))
+    env = dict(os.environ, SAMURAI_APPS_FAKE_INDEX=str(index), SAMURAI_CATALOG_DIR=str(REPO / "catalog"))
+    sys.exit(subprocess.run([sys.executable, str(REPO / "updates" / "samurai-apps"), *a[1:]], env=env).returncode)
+elif a[:1] == ["update"]:
+    for i in range(1, 8):
+        print(f"2026-11-26 stage {i}: working", file=sys.stderr)
+    out({"schema": 1, "ok": True, "stage": "report", "packages": {"upgraded": 3, "installed": 0, "removed": 0}})
+else:
+    print("fake samurai:", " ".join(a))

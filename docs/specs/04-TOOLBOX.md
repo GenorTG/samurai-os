@@ -146,7 +146,29 @@ rules at the top of `samurai.toml`), installed by `samurai-tools` to `/usr/share
   skipped is written to `/var/lib/samurai/firstboot-notes` as the exact `samurai apps install ...`
   command and shown in `/etc/motd`; `samurai welcome` will read the same file.
 
+## Machine-readable output (the GUI's only data source)
+| Command | JSON |
+|---------|------|
+| `samurai status --json` / `--report` | last update check / last `samurai update` report |
+| `samurai health --json` | results, each with `fixable` |
+| `samurai clean --preview --json <target...>` | sizes, notes, items, description |
+| `samurai apps list/search/info/bundles --json` | see below; list and search carry `db_age_days` (null: no databases yet) |
+| `samurai kernel list --json` | installed/running/default/bootable, install warnings, remove blockers |
+| `samurai boot get --json` | timeout, default kernel, parameters marked `protected` |
+| `samurai mirrors status --json` | age and server URLs |
+| `samurai snap list --json` | snapshots |
+| `samurai update --json` | final report on stdout, progress on stderr |
+| `samurai diag bundle --out -` | redacted bundle on stdout (nothing written to disk) |
+
+All documents carry `"schema": 1` (health, clean, apps, kernel, boot, mirrors, snap, update).
+
 ## GUI shape
+Built so far (`samurai-toolbox-gui`, `toolbox/gui/`): Overview · Health (with repairs) · Applications ·
+Cleanup · Kernels & boot · Updates (with mirrors) · Snapshots · Diagnostics, the log console, "copy as
+command" and a confirmation showing the exact command before every change. Root actions go through
+`pkexec` and `/usr/lib/samurai/gui-helper` until the D-Bus helper exists
+(`docs/reviews/toolbox-gui-threat-review.md`). The rest of this list is the target.
+
 - Pages: Home/Status · Update · Maintenance · Health · Diagnostics · Snapshots · Kernels · Boot ·
   Hardware · Network · Components · Settings & Tweaks · Security · Gaming · Repos · Logs.
 - An embedded log console under every action, fed by the task's log signal. A "copy as command"

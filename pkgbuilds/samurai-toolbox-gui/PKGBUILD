@@ -1,0 +1,38 @@
+# Maintainer: Samurai OS <build@smart-samurai.pl>
+# Samurai Toolbox, the KDE front end of the `samurai` CLI (spec 01, ADR-0004). A separate package
+# so that servers and other desktops do not pull Qt. The build driver stages toolbox/gui/ beside
+# this file as gui/ (see ci/build-repo.sh).
+pkgname=samurai-toolbox-gui
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Samurai Toolbox: Qt/Kirigami front end of the samurai command (updates, health, apps, cleanup, kernels, snapshots)"
+arch=(x86_64)
+url="https://github.com/GenorTG/samurai-os"
+license=('PolyForm-Noncommercial-1.0.0')
+depends=(
+    breeze-icons
+    gcc-libs
+    glibc
+    kirigami
+    polkit               # pkexec runs the helper
+    qqc2-desktop-style   # Plasma look of the controls
+    qt6-base
+    qt6-declarative
+    'samurai-tools>=0.4.0-16'   # the JSON outputs the pages read
+)
+makedepends=(cmake ninja)
+options=(!debug)
+optdepends=('polkit-kde-agent: password dialog in Plasma (part of plasma-desktop)')
+source=(LICENSE)
+sha256sums=('1be06492345bb03a60d13d23d744d979cc7cf1ce154da5227651f8dd78f25017')
+
+build() {
+    cmake -S "$startdir/gui" -B "$srcdir/build" -G Ninja \
+        -DCMAKE_BUILD_TYPE=None -DCMAKE_INSTALL_PREFIX=/usr -DSAMURAI_GUI_DEVTOOLS=OFF
+    cmake --build "$srcdir/build"
+}
+
+package() {
+    DESTDIR="$pkgdir" cmake --install "$srcdir/build"
+    install -Dm644 "$srcdir/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

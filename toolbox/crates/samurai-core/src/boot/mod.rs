@@ -436,7 +436,7 @@ pub const USAGE: &str = "usage: samurai boot <sync|get|set> ...
 
   sync [--check]            make the boot menu match the installed kernels (a pacman hook runs
                             this after kernel transactions); --check only reports, exit 1 if stale
-  get                       bootloader, menu timeout, default kernel, kernel parameters
+  get [--json]              bootloader, menu timeout, default kernel, kernel parameters
   set timeout <seconds>     menu timeout, 0 to 60
   set param add <p>         add a kernel parameter (replaces the same name; console= repeats)
   set param remove <p>      remove it (name removes all values, name=value only that one)
@@ -450,7 +450,7 @@ Exit codes: 0 ok, 1 failed or (sync --check) out of sync, 2 usage error.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Cmd {
     Sync { check: bool },
-    Get,
+    Get { json: bool },
     Set(settings::Change),
     Help,
 }
@@ -461,7 +461,8 @@ pub fn parse_args(args: &[String]) -> Result<Cmd, String> {
     match words.as_slice() {
         ["sync"] => Ok(Cmd::Sync { check: false }),
         ["sync", "--check"] => Ok(Cmd::Sync { check: true }),
-        ["get"] => Ok(Cmd::Get),
+        ["get"] => Ok(Cmd::Get { json: false }),
+        ["get", "--json"] => Ok(Cmd::Get { json: true }),
         ["set", "timeout", n] => n
             .parse()
             .map(|t| Cmd::Set(Change::Timeout(t)))

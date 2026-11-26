@@ -25,7 +25,7 @@ commands
   apps        optional apps from the catalog: list/search/info/install/remove/bundles
   snap        snapshot manager (spec 06): list/create/delete/diff/restore-file/repair/rollback
   rescue      recovery tool (spec 06): mount/chroot/bootloader/initramfs/kernel/rollback
-  status      last update check and last update report (user session)
+  status      last update check and report (--json, --report: report only, --check)
   health      read-only health checks (spec 05): samurai health --help
   diag        diagnostics and the redacted support bundle: samurai diag --help
   clean       free disk space (preview first): samurai clean --help

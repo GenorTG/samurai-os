@@ -53,7 +53,8 @@ def _find_ovmf() -> tuple[str, str]:
 
 class VM:
     def __init__(self, name: str, iso: str | None = None, disk: str | None = None,
-                 disk_size: str = "40G", ram: str = "4096", smp: str = "4"):
+                 disk_size: str = "40G", ram: str = "4096", smp: str = "4",
+                 pointer: bool = False):
         name = _artifact_name(name)
         self.name = name
         WORK.mkdir(parents=True, exist_ok=True)
@@ -66,6 +67,7 @@ class VM:
         if disk is None and os.path.exists(self.disk_path):
             os.unlink(self.disk_path)
         self.ram, self.smp = ram, smp
+        self.pointer = pointer  # absolute USB tablet, for scenarios that click in the GUI
         self.code, self.vars = _find_ovmf()
         self.vars_rw = str(WORK / f"{name}-VARS.fd")
         self.serial_sock = str(WORK / f"{name}-serial.sock")
@@ -103,6 +105,8 @@ class VM:
             "-device", "virtserialport,chardev=qga0,name=org.qemu.guest_agent.0",
             "-monitor", "none",
         ]
+        if self.pointer:
+            cmd += ["-device", "qemu-xhci", "-device", "usb-tablet"]
         if self.iso:
             cmd += ["-drive", f"file={self.iso},media=cdrom,read-only=on"]
         # pylint: disable=consider-using-with
@@ -244,6 +248,37 @@ class VM:
             self.send("systemctl start qemu-guest-agent.service\n")
             time.sleep(2)
             return self.qga()
+
+    # --- keyboard and pointer (what a person at the machine does) ---
+    def key(self, *keys: str) -> None:
+        """Press a chord of QEMU qcodes, e.g. key("alt", "r") or key("ret")."""
+        reply = self.qmp_command("send-key", keys=[{"type": "qcode", "data": k} for k in keys])
+        if "error" in reply:
+            raise RuntimeError(f"send-key {keys}: {reply['error']}")
+        time.sleep(0.15)
+
+    def type_text(self, text: str) -> None:
+        plain = {" ": "spc", "-": "minus", ".": "dot", "/": "slash", "=": "equal", ",": "comma"}
+        for ch in text:
+            if ch.isascii() and (ch.islower() or ch.isdigit()):
+                self.key(ch)
+            elif ch.isascii() and ch.isupper():
+                self.key("shift", ch.lower())
+            else:
+                self.key(plain[ch])
+
+    def click(self, x: int, y: int, screen: tuple[int, int]) -> None:
+        """Left click at pixel (x, y) of a `screen`-sized display (needs pointer=True)."""
+        def send(*events):
+            reply = self.qmp_command("input-send-event", events=list(events))
+            if "error" in reply:
+                raise RuntimeError(f"input-send-event: {reply['error']}")
+            time.sleep(0.2)
+
+        send(*({"type": "abs", "data": {"axis": axis, "value": value * 32767 // (size - 1)}}
+               for axis, value, size in (("x", x, screen[0]), ("y", y, screen[1]))))
+        for down in (True, False):
+            send({"type": "btn", "data": {"button": "left", "down": down}})
 
     # --- power ---
     def qmp_command(self, cmd: str, **args) -> dict:

@@ -247,7 +247,11 @@ fn argument_parsing() {
         Ok(Cmd::Sync { check: true })
     );
     assert_eq!(parse_args(&a(&["--help"])), Ok(Cmd::Help));
-    assert_eq!(parse_args(&a(&["get"])), Ok(Cmd::Get));
+    assert_eq!(parse_args(&a(&["get"])), Ok(Cmd::Get { json: false }));
+    assert_eq!(
+        parse_args(&a(&["get", "--json"])),
+        Ok(Cmd::Get { json: true })
+    );
     assert_eq!(
         parse_args(&a(&["set", "timeout", "5"])),
         Ok(Cmd::Set(settings::Change::Timeout(5)))

@@ -22,6 +22,22 @@ require_snapper() { command -v snapper >/dev/null 2>&1 || die "snapper is not in
 case "$cmd" in
     list)
         require_snapper
+        if [ "${1:-}" = --json ]; then
+            # machine-readable (schema 1) for the toolbox; snapshot 0 is the live system
+            raw=$(snapper --jsonout -c "$CONFIG" list --columns number,type,date,description,cleanup) \
+                || die "snapper cannot list config $CONFIG (needs root)"
+            printf '%s' "$raw" | python3 -I -c '
+import json, sys
+config = sys.argv[1]
+rows = json.load(sys.stdin).get(config, [])
+print(json.dumps({"schema": 1, "config": config, "snapshots": [
+    {"id": r["number"], "type": r.get("type") or "", "date": r.get("date") or "",
+     "description": r.get("description") or "", "cleanup": r.get("cleanup") or ""}
+    for r in rows if r.get("number")]}))
+' "$CONFIG"
+            exit 0
+        fi
+        [ $# -eq 0 ] || die "usage: samurai snap list [--json]" 2
         echo "== snapshots (config: $CONFIG) =="
         snapper -c "$CONFIG" list
         echo "== bootable snapshot entries (ESP) =="
@@ -144,7 +160,7 @@ case "$cmd" in
         ;;
 
     -h|--help|help)
-        echo "usage: samurai snap {list|create|delete|diff|restore-file|repair|rollback} [args]"
+        echo "usage: samurai snap {list [--json]|create|delete|diff|restore-file|repair|rollback} [args]"
         ;;
 
     *)

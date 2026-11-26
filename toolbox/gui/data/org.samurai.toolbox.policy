@@ -1,0 +1,335 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<!-- One action per operation of /usr/lib/samurai/gui-helper (toolbox/gui/common/operations.cpp),
+     selected by its first argument. Only reads are allowed without a password, and only in the
+     active local session. Nothing keeps an authorisation. tests/unit/test_gui_helper.py enforces
+     both rules. -->
+<policyconfig>
+  <vendor>Samurai OS</vendor>
+  <vendor_url>https://github.com/GenorTG/samurai-os</vendor_url>
+  <action id="org.samurai.toolbox.health-read">
+    <description>Run the health checks as administrator</description>
+    <message>Authentication is required to run the system health checks</message>
+    <icon_name>preferences-system</icon_name>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/samurai/gui-helper</annotate>
+    <annotate key="org.freedesktop.policykit.exec.argv1">health-read</annotate>
+  </action>
+  <action id="org.samurai.toolbox.kernel-list">
+    <description>Read the kernel and boot state</description>
+    <message>Authentication is required to read the installed kernels</message>
+    <icon_name>preferences-system</icon_name>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/samurai/gui-helper</annotate>
+    <annotate key="org.freedesktop.policykit.exec.argv1">kernel-list</annotate>
+  </action>
+  <action id="org.samurai.toolbox.boot-get">
+    <description>Read the boot settings</description>
+    <message>Authentication is required to read the boot settings</message>
+    <icon_name>preferences-system</icon_name>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/samurai/gui-helper</annotate>
+    <annotate key="org.freedesktop.policykit.exec.argv1">boot-get</annotate>
+  </action>
+  <action id="org.samurai.toolbox.snap-list">
+    <description>List system snapshots</description>
+    <message>Authentication is required to list system snapshots</message>
+    <icon_name>preferences-system</icon_name>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/samurai/gui-helper</annotate>
+    <annotate key="org.freedesktop.policykit.exec.argv1">snap-list</annotate>
+  </action>
+  <action id="org.samurai.toolbox.diag-bundle">
+    <description>Collect a redacted diagnostics bundle</description>
+    <message>Authentication is required to collect system logs and boot settings for a diagnostics bundle</message>
+    <icon_name>preferences-system</icon_name>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/samurai/gui-helper</annotate>
+    <annotate key="org.freedesktop.policykit.exec.argv1">diag-bundle</annotate>
+  </action>
+  <action id="org.samurai.toolbox.health-fix">
+    <description>Repair a health check</description>
+    <message>Authentication is required to repair a problem found by the health check</message>
+    <icon_name>preferences-system</icon_name>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/samurai/gui-helper</annotate>
+    <annotate key="org.freedesktop.policykit.exec.argv1">health-fix</annotate>
+  </action>
+  <action id="org.samurai.toolbox.health-fix-safe">
+    <description>Apply the safe repairs</description>
+    <message>Authentication is required to apply the safe repairs found by the health check</message>
+    <icon_name>preferences-system</icon_name>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/samurai/gui-helper</annotate>
+    <annotate key="org.freedesktop.policykit.exec.argv1">health-fix-safe</annotate>
+  </action>
+  <action id="org.samurai.toolbox.update">
+    <description>Update the system</description>
+    <message>Authentication is required to update the system</message>
+    <icon_name>preferences-system</icon_name>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/samurai/gui-helper</annotate>
+    <annotate key="org.freedesktop.policykit.exec.argv1">update</annotate>
+  </action>
+  <action id="org.samurai.toolbox.update-ack-news">
+    <description>Update the system after reading Arch news</description>
+    <message>Authentication is required to update the system although Arch news ask for manual steps</message>
+    <icon_name>preferences-system</icon_name>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/samurai/gui-helper</annotate>
+    <annotate key="org.freedesktop.policykit.exec.argv1">update-ack-news</annotate>
+  </action>
+  <action id="org.samurai.toolbox.apps-install">
+    <description>Install applications</description>
+    <message>Authentication is required to install applications</message>
+    <icon_name>preferences-system</icon_name>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/samurai/gui-helper</annotate>
+    <annotate key="org.freedesktop.policykit.exec.argv1">apps-install</annotate>
+  </action>
+  <action id="org.samurai.toolbox.apps-install-upgrade">
+    <description>Update the system and install applications</description>
+    <message>Authentication is required to update the system and install applications</message>
+    <icon_name>preferences-system</icon_name>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/samurai/gui-helper</annotate>
+    <annotate key="org.freedesktop.policykit.exec.argv1">apps-install-upgrade</annotate>
+  </action>
+  <action id="org.samurai.toolbox.apps-remove">
+    <description>Remove applications</description>
+    <message>Authentication is required to remove applications</message>
+    <icon_name>preferences-system</icon_name>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/samurai/gui-helper</annotate>
+    <annotate key="org.freedesktop.policykit.exec.argv1">apps-remove</annotate>
+  </action>
+  <action id="org.samurai.toolbox.clean">
+    <description>Free disk space</description>
+    <message>Authentication is required to delete system caches, logs or unused packages</message>
+    <icon_name>preferences-system</icon_name>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/samurai/gui-helper</annotate>
+    <annotate key="org.freedesktop.policykit.exec.argv1">clean</annotate>
+  </action>
+  <action id="org.samurai.toolbox.kernel-install">
+    <description>Install a kernel</description>
+    <message>Authentication is required to install a kernel</message>
+    <icon_name>preferences-system</icon_name>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/samurai/gui-helper</annotate>
+    <annotate key="org.freedesktop.policykit.exec.argv1">kernel-install</annotate>
+  </action>
+  <action id="org.samurai.toolbox.kernel-install-anyway">
+    <description>Install a kernel despite a warning</description>
+    <message>Authentication is required to install a kernel that was flagged with a warning</message>
+    <icon_name>preferences-system</icon_name>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/samurai/gui-helper</annotate>
+    <annotate key="org.freedesktop.policykit.exec.argv1">kernel-install-anyway</annotate>
+  </action>
+  <action id="org.samurai.toolbox.kernel-remove">
+    <description>Remove a kernel</description>
+    <message>Authentication is required to remove a kernel</message>
+    <icon_name>preferences-system</icon_name>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/samurai/gui-helper</annotate>
+    <annotate key="org.freedesktop.policykit.exec.argv1">kernel-remove</annotate>
+  </action>
+  <action id="org.samurai.toolbox.kernel-default">
+    <description>Choose the default kernel</description>
+    <message>Authentication is required to change which kernel boots by default</message>
+    <icon_name>preferences-system</icon_name>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/samurai/gui-helper</annotate>
+    <annotate key="org.freedesktop.policykit.exec.argv1">kernel-default</annotate>
+  </action>
+  <action id="org.samurai.toolbox.boot-timeout">
+    <description>Change the boot menu timeout</description>
+    <message>Authentication is required to change the boot menu timeout</message>
+    <icon_name>preferences-system</icon_name>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/samurai/gui-helper</annotate>
+    <annotate key="org.freedesktop.policykit.exec.argv1">boot-timeout</annotate>
+  </action>
+  <action id="org.samurai.toolbox.boot-param-add">
+    <description>Add a kernel parameter</description>
+    <message>Authentication is required to add a kernel boot parameter</message>
+    <icon_name>preferences-system</icon_name>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/samurai/gui-helper</annotate>
+    <annotate key="org.freedesktop.policykit.exec.argv1">boot-param-add</annotate>
+  </action>
+  <action id="org.samurai.toolbox.boot-param-remove">
+    <description>Remove a kernel parameter</description>
+    <message>Authentication is required to remove a kernel boot parameter</message>
+    <icon_name>preferences-system</icon_name>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/samurai/gui-helper</annotate>
+    <annotate key="org.freedesktop.policykit.exec.argv1">boot-param-remove</annotate>
+  </action>
+  <action id="org.samurai.toolbox.snap-create">
+    <description>Create a system snapshot</description>
+    <message>Authentication is required to create a system snapshot</message>
+    <icon_name>preferences-system</icon_name>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/samurai/gui-helper</annotate>
+    <annotate key="org.freedesktop.policykit.exec.argv1">snap-create</annotate>
+  </action>
+  <action id="org.samurai.toolbox.snap-delete">
+    <description>Delete a system snapshot</description>
+    <message>Authentication is required to delete a system snapshot</message>
+    <icon_name>preferences-system</icon_name>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/samurai/gui-helper</annotate>
+    <annotate key="org.freedesktop.policykit.exec.argv1">snap-delete</annotate>
+  </action>
+  <action id="org.samurai.toolbox.fix-lock">
+    <description>Remove a stale package database lock</description>
+    <message>Authentication is required to remove the package database lock</message>
+    <icon_name>preferences-system</icon_name>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/samurai/gui-helper</annotate>
+    <annotate key="org.freedesktop.policykit.exec.argv1">fix-lock</annotate>
+  </action>
+  <action id="org.samurai.toolbox.fix-keyring">
+    <description>Refresh the package signing keys</description>
+    <message>Authentication is required to refresh the package signing keys</message>
+    <icon_name>preferences-system</icon_name>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/samurai/gui-helper</annotate>
+    <annotate key="org.freedesktop.policykit.exec.argv1">fix-keyring</annotate>
+  </action>
+  <action id="org.samurai.toolbox.fix-keyring-reset">
+    <description>Reset the package signing keys</description>
+    <message>Authentication is required to delete and rebuild the package keyring</message>
+    <icon_name>preferences-system</icon_name>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/samurai/gui-helper</annotate>
+    <annotate key="org.freedesktop.policykit.exec.argv1">fix-keyring-reset</annotate>
+  </action>
+  <action id="org.samurai.toolbox.fix-dkms">
+    <description>Rebuild kernel modules</description>
+    <message>Authentication is required to rebuild the DKMS kernel modules</message>
+    <icon_name>preferences-system</icon_name>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/samurai/gui-helper</annotate>
+    <annotate key="org.freedesktop.policykit.exec.argv1">fix-dkms</annotate>
+  </action>
+  <action id="org.samurai.toolbox.mirrors-refresh">
+    <description>Refresh the mirror list</description>
+    <message>Authentication is required to replace the Arch mirror list</message>
+    <icon_name>preferences-system</icon_name>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/samurai/gui-helper</annotate>
+    <annotate key="org.freedesktop.policykit.exec.argv1">mirrors-refresh</annotate>
+  </action>
+</policyconfig>

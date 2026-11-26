@@ -41,6 +41,7 @@ const PUBLIC_NAMES: [&str; 9] = [
 pub struct Redactor {
     users: Vec<String>,
     hostname: Option<String>,
+    machine_id: Option<String>,
     seen: HashMap<(&'static str, String), usize>,
     counts: HashMap<&'static str, usize>,
 }
@@ -61,6 +62,15 @@ impl Redactor {
             hostname,
             ..Redactor::default()
         }
+    }
+
+    /// Hide the machine id wherever it occurs, also inside paths such as
+    /// `/var/log/journal/<id>/system.journal` where no token boundary surrounds it.
+    pub fn with_machine_id(mut self, id: Option<String>) -> Self {
+        self.machine_id = id
+            .map(|i| i.trim().to_ascii_lowercase())
+            .filter(|i| i.len() == 32 && i.bytes().all(|b| b.is_ascii_hexdigit()));
+        self
     }
 
     fn placeholder(&mut self, kind: &'static str, original: &str) -> String {
@@ -101,6 +111,12 @@ impl Redactor {
 
     fn redact_line(&mut self, line: &str) -> String {
         let mut s = line.to_string();
+        if let Some(id) = self.machine_id.clone() {
+            if s.contains(&id) {
+                let ph = self.placeholder("machine-id", &id);
+                s = s.replace(&id, &ph);
+            }
+        }
         s = self.keyed(&s, &SECRET_KEYS, "secret");
         s = self.keyed(&s, &SERIAL_KEYS, "serial");
         s = self.keyed(&s, &SSID_KEYS, "ssid");
@@ -409,6 +425,22 @@ mod tests {
 
     fn r() -> Redactor {
         Redactor::new(vec!["alice".into()], Some("archbox".into()))
+    }
+
+    #[test]
+    fn machine_id_is_hidden_even_inside_paths() {
+        let id = "3f97a028e94648b0b133cd79f23c5347";
+        let mut rd = r().with_machine_id(Some(format!("{id}\n")));
+        let out = rd.redact(&format!(
+            "File /var/log/journal/{id}/system.journal corrupted\nid {id}\n"
+        ));
+        assert_eq!(
+            out,
+            "File /var/log/journal/<machine-id1>/system.journal corrupted\nid <machine-id1>\n"
+        );
+        // an unreadable or odd value changes nothing
+        let mut none = r().with_machine_id(Some("uninitialized".into()));
+        assert_eq!(none.redact("uninitialized\n"), "uninitialized\n");
     }
 
     #[test]
