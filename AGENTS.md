@@ -61,6 +61,10 @@ See `docs/specs/01-ARCHITECTURE.md` "Source layout". Today only `docs/`, `script
 - A branch whose `[samurai]` packages are unpublished is tested with `ci/build-pkgs.sh` +
   `SAMURAI_LOCAL_PKGS=<dir> ci/build-iso.sh` (offline flavor only). Online installs of such a branch
   fail until the packages are published; release order is repo first, ISO second.
+- KDE reads `LookAndFeelPackage` only from the `[KDE]` group; the system default lives in
+  `/etc/xdg/kdeglobals` (`samurai-kde-defaults`). A `[General]` copy in skel was ignored and installs came
+  up light while the tests grepped the file and passed (2026-11-26). Assert the effective value in a live
+  session (`kreadconfig6 ... ColorScheme`), not file contents.
 - Arch builds Wine as pure WoW64 (2026-11-26): most `lib32-*` Wine libraries no longer exist.
 - Hold `/tmp/samurai-vm.lock` only while a VM test runs: an interactive VM session under the lock
   blocks every other lane (2026-11-26).
