@@ -129,44 +129,32 @@ sha256sum -c --ignore-missing SHA256SUMS          # joined ISO
 $verify_block
 
 Write either ISO to a USB stick (\`sudo dd if=<iso> of=/dev/sdX bs=4M status=progress oflag=sync\`, or
-copy it onto a Ventoy stick), boot it and run \`samurai-install\` for the guided wizard.
+copy it onto a Ventoy stick) and boot it. The live system is a KDE Plasma desktop with icons for the
+graphical installer, the terminal installer (\`samurai-install\`) and rescue.
 
-### The \`samurai\` command
-- \`samurai health\` (system checks; \`--fix\` takes a snapshot first), also run daily by a timer.
-- \`samurai diag\` (diagnostics; the support bundle redacts private data by default).
-- \`samurai clean\`, \`samurai fix\`, \`samurai mirrors\`.
-- \`samurai kernel\` and \`samurai boot sync\`: boot entries follow installed kernels.
-- \`samurai update\`, \`apps\`, \`snap\`, \`rescue\`, \`status\`.
+### New in this release
+- **Graphical installer** over the same install engine as the terminal one (ADR-0009).
+- **Samurai Toolbox**, a KDE app: health and repairs, apps, cleanup, kernels and boot settings, updates,
+  snapshots, diagnostics. Changes ask for the administrator password.
+- **Preinstalled by default** on KDE: command-line tools, fonts, KDE apps, performance settings, Breeze
+  Dark with a two-panel layout, PipeWire, Docker, and a gaming set (Steam, Heroic, GameMode, MangoHud,
+  gamescope, GE-Proton, Proton-CachyOS, Wine). Each choice can be changed in the installer.
+- **Optional at install**: browsers, Python 3.10-3.13, Miniforge, AI command-line tools, Ollama, Tailscale,
+  a reverse proxy. **Chaotic-AUR** is enabled, below Arch, with signature checking.
+- Fixed: \`samurai snap rollback\` failed on a running system, and a rescue rollback could leave an empty
+  kernel on the boot partition.
 
-### Highlights
-- **Two installers**: online netinstall and a full offline ISO. Offline installs resolve from a local
-  repository on the medium, so a machine gets only what it needs.
-- **\`samurai apps\`**: optional apps and bundles (\`@gaming\`, \`@dev\`, \`@creative\`, \`@office\`,
-  \`@media\`, \`@streaming\`) from one catalog, at install time (\`[packages] apps\`) or any time later.
-- **firewalld on by default**: zone \`public\`, inbound closed except DHCPv6; SSH only when
-  \`ssh_server = true\`. The guided wizard asks (default yes); profiles set \`[security] firewall\`.
-- **Base system defaults on every install**: CPU microcode (\`amd-ucode\`/\`intel-ucode\`, loaded by
-  the mkinitcpio \`microcode\` hook), zram swap (\`zram-generator\`, half of RAM up to 8 GiB, zstd),
-  NTP via \`systemd-timesyncd\`, and \`pacman-contrib\` (\`checkupdates\` for the notifier, a weekly
-  \`paccache\` timer for the package cache).
-- **NVIDIA auto-detect**: the NVIDIA stack goes on only when an NVIDIA GPU is present; DKMS when a
-  chosen kernel has no prebuilt module (\`[hardware] nvidia = "auto" | "yes" | "no"\`).
-- Day-one desktop: Firefox, PipeWire, Spectacle, Noto fonts + emoji, Flatpak, power profiles,
-  Bluetooth; \`[multilib]\` enabled for Steam and Wine.
+Existing installs get the new tools with \`samurai update\`, but not the new preinstalled software.
 
-### Verified in this release (QEMU/KVM, OVMF)
-- Offline install of the full KDE desktop with a dead mirror pinned: no network used; NVIDIA DKMS
-  modules built for both default kernels.
-- Daily-driver scenario: Plasma Wayland session, Dolphin/Konsole/Kate open, archive round trip,
-  network + HTTPS, PipeWire, firewall state, snapshot, first full \`samurai update\`, app install,
-  clean reboot.
-- LUKS2 + btrfs subvolumes, multi-kernel boot entries (linux-cachyos, linux-zen), SDDM up, no failed units.
-- Staged updates from the signed \`[samurai]\` repo, snapshot + rescue rollback, attended wizard install.
-- The toolbox: health detect and repair, redacted diagnostics, cleanup, mirror refresh, kernel
-  install, default change and reboot (Limine, Arch kernels).
+### Verified (QEMU/KVM, OVMF)
+- Graphical install of an encrypted KDE system from the offline ISO, then boot and login.
+- Offline install behind a dead mirror (NVIDIA DKMS modules built for both default kernels), default KDE
+  software and settings, guided terminal install, daily use with a full update.
+- Toolbox actions through the real password dialog, health detect and repair, both rollback paths.
+- Upgrade of an installed system to these packages from the published repository.
 
-Not yet covered by a VM test: NVIDIA hardware, CachyOS kernel switching, and boot entry
-management on GRUB or systemd-boot.
+Not verified: physical hardware, any real GPU, running games or Windows programs, CachyOS kernel
+switching, boot entry management on GRUB or systemd-boot, keyboard layouts other than US.
 
 Source, specs and VM tests: <https://github.com/GenorTG/samurai-os>. Website: <https://genortg.github.io/samurai-os/>.
 EOF

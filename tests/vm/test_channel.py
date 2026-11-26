@@ -3,17 +3,35 @@
 Installs from the ISO, then updates with `samurai update` from the PUBLISHED repository.
 
   SAMURAI_TEST_CHANNEL=testing|stable SAMURAI_TEST_TOOLS_VERSION=0.4.0 pytest -q -s test_channel.py
+
+SAMURAI_TEST_PROFILE_REF=<tag> when the ISO is older than the checkout: its installer rejects
+newer profile keys, so the test profile is built from that release's default profile.
 """
 from __future__ import annotations
 
 import os
+import re
+import subprocess
 
 import pytest
 
-from conftest import INSTALL_TIMEOUT, find_iso
+from conftest import INSTALL_TIMEOUT, REPO, find_iso, password_hash, with_test_autokey
 from vm import VM
 
 TESTING_BLOCK = r"[samurai-testing]\nInclude = /etc/pacman.d/samurai-testing-mirrorlist\nSigLevel = Required DatabaseRequired\n"
+
+
+def _release_profile(ref: str) -> str:
+    """The headless test profile for the installer shipped in release `ref`."""
+    text = subprocess.run(["git", "-C", str(REPO), "show", f"{ref}:installer/profile-default.toml"],
+                          check=True, capture_output=True, text=True).stdout
+    user = ('[user]\nname = "samurai"\nshell = "bash"\ngroups = ["wheel"]\n'
+            f'password_hash = "{password_hash()}"\n')
+    text = re.sub(r"\[user\].*?(?=\n\[|\Z)", user, text, flags=re.S)
+    text = text.replace('desktop = "kde"', 'desktop = "none"')
+    text = text.replace('kernels = ["linux-cachyos", "linux-zen"]', 'kernels = ["linux"]')
+    assert 'desktop = "none"' in text and 'kernels = ["linux"]' in text, "release profile changed shape"
+    return with_test_autokey(text)
 
 
 def test_published_channel_update(mirror):
@@ -21,6 +39,8 @@ def test_published_channel_update(mirror):
     want = os.environ.get("SAMURAI_TEST_TOOLS_VERSION", "")
     if channel not in ("testing", "stable") or not want:
         pytest.skip("set SAMURAI_TEST_CHANNEL=testing|stable and SAMURAI_TEST_TOOLS_VERSION")
+    if ref := os.environ.get("SAMURAI_TEST_PROFILE_REF", ""):
+        (mirror.dir / "profile-test.toml").write_text(_release_profile(ref))
     vm = VM(f"channel-{channel}", iso=str(find_iso()), disk_size="20G")
     vm.start()
     try:
