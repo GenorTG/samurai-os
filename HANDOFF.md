@@ -61,6 +61,9 @@ guided installer and CLI/toolbox. VM validation runs on genorbox1. Site: <https:
   updated); add `samurai-toolbox-gui` to the KDE package set and offline ISO closure (not done: lane A files).
 - Tests: `tests/unit/test_gui_helper.py` (helper + policy, host g++), `ci/test-gui.sh` (offscreen, fake CLI),
   `tests/vm/test_toolbox_gui.py` (Plasma VM, screen+mouse+password).
+  2026-11-26: 209 unit tests passed (2 skipped), 145 Rust tests, smoke 19/19; VM 11/11 from a fresh r15 offline
+  install (15m32s), then the 5 apps/update tests on the final commit after a one-line QML fix (5m29s).
+  Screenshots: `~/.openclaw/workspace/samurai-shots/toolbox/`.
 - Not done: D-Bus helper/queue, welcome/setup assistant, tray, command palette, i18n, spec 04 pages without
   a CLI yet (hardware, network, components, settings, security, gaming, repos), GUI for `fix reinstall-all`,
   `snap diff/restore-file/rollback`. Not VM-exercised from the GUI: fix-* repairs, mirrors refresh,
