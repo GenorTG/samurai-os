@@ -231,8 +231,8 @@ def test_default_kde_system(mirror):
         c.run("effects-live", env + " qdbus6 org.kde.KWin /Effects org.kde.kwin.Effects.loadedEffects",
               ["overview"], absent=["blur", "slidingpopups", "squash"])
         c.run("session-health", "systemctl --failed --no-legend | wc -l; "
-              f"pgrep -u {USER} -x kwin_wayland >/dev/null && echo KWIN-OK; "
-              "wpctl --version >/dev/null; echo", ["KWIN-OK"])
+              f"pgrep -u {USER} -x kwin_wayland >/dev/null && echo KWIN-OK", ["KWIN-OK"])
+        c.run("audio", env + " wpctl status | head -4", ["PipeWire"], timeout=60)
         c.ga.exec("sleep 10", timeout=40)
         vm.screendump("defaults-01-desktop")
         # started by the user's systemd manager: the real session environment
