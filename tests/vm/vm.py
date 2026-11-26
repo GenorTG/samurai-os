@@ -246,34 +246,41 @@ class VM:
             return self.qga()
 
     # --- power ---
-    def qmp_command(self, cmd: str, **args) -> dict:
+    @staticmethod
+    def _qmp_reply(stream) -> dict:
+        """The reply to the last command. Asynchronous events can arrive first;
+        taking one for the reply and disconnecting makes QEMU drop the queued
+        command (a post-install system_reset got lost this way, 2026-11-26)."""
+        while True:
+            line = stream.readline()
+            if not line:
+                raise ConnectionError("QMP socket closed before the reply")
+            message = json.loads(line)
+            if "return" in message or "error" in message:
+                return message
+
+    def _qmp_call(self, cmd: str, args: dict | None = None) -> dict:
         self.wait_socket(self.qmp_sock)
-        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        s.settimeout(30)
-        s.connect(self.qmp_sock)
-        f = s.makefile("rw")
-        f.readline()  # greeting
-        f.write('{"execute": "qmp_capabilities"}\n'); f.flush(); f.readline()
-        req = {"execute": cmd}
-        if args:
-            req["arguments"] = args
-        f.write(json.dumps(req) + "\n"); f.flush()
-        resp = f.readline()
-        s.close()
-        return json.loads(resp)
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+            s.settimeout(30)
+            s.connect(self.qmp_sock)
+            with s.makefile("rw") as stream:
+                stream.readline()  # greeting
+                stream.write('{"execute": "qmp_capabilities"}\n')
+                stream.flush()
+                self._qmp_reply(stream)
+                request: dict = {"execute": cmd}
+                if args:
+                    request["arguments"] = args
+                stream.write(json.dumps(request) + "\n")
+                stream.flush()
+                return self._qmp_reply(stream)
+
+    def qmp_command(self, cmd: str, **args) -> dict:
+        return self._qmp_call(cmd, args)
 
     def qmp_query_block(self) -> list:
-        self.wait_socket(self.qmp_sock)
-        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        s.settimeout(30)
-        s.connect(self.qmp_sock)
-        f = s.makefile("rw")
-        f.readline()
-        f.write('{"execute": "qmp_capabilities"}\n'); f.flush(); f.readline()
-        f.write('{"execute": "query-block"}\n'); f.flush()
-        resp = json.loads(f.readline())
-        s.close()
-        return resp.get("return", [])
+        return self._qmp_call("query-block").get("return", [])
 
     def eject_iso(self) -> None:
         """Remove the attached ISO so the reboot lands on the installed disk
@@ -285,7 +292,9 @@ class VM:
                 return
 
     def reboot(self) -> None:
-        self.qmp_command("system_reset")
+        reply = self.qmp_command("system_reset")
+        if "error" in reply:
+            raise RuntimeError(f"system_reset failed: {reply['error']}")
 
     def stop(self) -> None:
         if self.proc:
