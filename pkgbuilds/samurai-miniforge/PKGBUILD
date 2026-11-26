@@ -1,0 +1,41 @@
+# Maintainer: Samurai OS <build@smart-samurai.pl>
+# Spec: docs/specs/13-DEVELOPER-ENVIRONMENT.md "Conda". Repackages the official
+# Miniforge installer, pinned by the .sha256 published with the release.
+# conda embeds its prefix, so build() installs into the real /opt/miniforge:
+# the build environment must provide that directory, empty and writable
+# (ci/build-pkgs.sh creates it inside the throwaway build container).
+pkgname=samurai-miniforge
+_ver=26.9.4-2
+pkgver=26.9.4.2
+pkgrel=1
+pkgdesc="Miniforge (conda + mamba, conda-forge) in /opt/miniforge"
+arch=(x86_64)
+url="https://github.com/conda-forge/miniforge"
+license=('BSD-3-Clause')
+depends=(bash glibc)
+options=(!strip !debug !zipman)
+source=("$url/releases/download/$_ver/Miniforge3-$_ver-Linux-x86_64.sh"
+        condarc LICENSE)
+noextract=("Miniforge3-$_ver-Linux-x86_64.sh")
+sha256sums=(
+    'bbaf16b3897da24c4be50315934ba74848f617b4495982841d6a0a60e0edbbdf'
+    'd13b1bdaccc3a77d4bc6d68bd047e6965c4f989de0817b583998c1a8a9f24319'
+    '1be06492345bb03a60d13d23d744d979cc7cf1ce154da5227651f8dd78f25017'
+)
+
+build() {
+    [ -d /opt/miniforge ] && [ -w /opt/miniforge ] && [ -z "$(ls -A /opt/miniforge)" ] ||
+        { error "/opt/miniforge must exist, be empty and writable in the build environment"; return 1; }
+    # -u: the directory already exists; -b: batch (accepts the BSD licence)
+    HOME="$srcdir" bash "$srcdir/Miniforge3-$_ver-Linux-x86_64.sh" -b -u -p /opt/miniforge
+}
+
+package() {
+    install -dm755 "$pkgdir/opt"
+    cp -a /opt/miniforge "$pkgdir/opt/miniforge"
+    # downloaded package cache is not part of the installation
+    rm -rf "$pkgdir/opt/miniforge/pkgs"/*.conda "$pkgdir/opt/miniforge/pkgs"/*.tar.bz2
+    install -m644 "$srcdir/condarc" "$pkgdir/opt/miniforge/.condarc"
+    install -Dm644 "$pkgdir/opt/miniforge/LICENSE.txt" "$pkgdir/usr/share/licenses/$pkgname/LICENSE.miniforge"
+    install -Dm644 "$srcdir/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE.packaging"
+}

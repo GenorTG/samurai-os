@@ -1,0 +1,31 @@
+# Maintainer: Samurai OS <build@smart-samurai.pl>
+# Spec: docs/specs/13-DEVELOPER-ENVIRONMENT.md (uv config, conda shell hooks,
+# PEP 668 hint, AI-CLI self-updaters off).
+pkgname=samurai-settings-dev
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Samurai OS developer defaults: uv, conda shell hooks, AI CLI updater switches"
+arch=(any)
+url="https://github.com/GenorTG/samurai-os"
+license=('PolyForm-Noncommercial-1.0.0')
+depends=(python uv samurai-settings-shell)
+backup=(etc/uv/uv.toml)
+source=(uv.toml samurai-dev.sh 50-dev.sh samurai-dev.fish 50-samurai-dev.env LICENSE)
+sha256sums=(
+    '9b9ab3438e0c16cb64bdf5386ce6149a06ad3f04ecfd1d489095692cf1c05b69'
+    'a03f3213085922424fd349a157fa7172d6e95210bd1ebadf03dd53d8a1b8a02d'
+    '430060b90bc51c7b057fd6fcbc8fdf361db440becb2e1890654210e1d240acb9'
+    '7c98de4cbfc985c88cf730e3e5510f8a6785ad98ccd3988ecdbd1252e56015c0'
+    'd2f2e97e6fa4458a7e0b5605179382ad8e269263d97283eed3242ee81d5705f0'
+    '1be06492345bb03a60d13d23d744d979cc7cf1ce154da5227651f8dd78f25017'
+)
+
+package() {
+    cd "$srcdir"
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+    install -Dm644 uv.toml "$pkgdir/etc/uv/uv.toml"
+    install -Dm644 samurai-dev.sh "$pkgdir/etc/profile.d/samurai-dev.sh"
+    install -Dm644 50-dev.sh "$pkgdir/usr/share/samurai/shell/bash.d/50-dev.sh"
+    install -Dm644 samurai-dev.fish "$pkgdir/usr/share/fish/vendor_conf.d/samurai-dev.fish"
+    install -Dm644 50-samurai-dev.env "$pkgdir/usr/lib/environment.d/50-samurai-dev.conf"
+}

@@ -1,0 +1,44 @@
+# Maintainer: Samurai OS <build@smart-samurai.pl>
+# Spec: docs/specs/14-KDE-DESKTOP.md (Breeze Dark, panels, monitor widgets,
+# reduced effects, Baloo file names only, SDDM greeter, Konsole profile).
+pkgname=samurai-settings-kde
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Samurai OS KDE Plasma defaults: theme, panel layout, monitor widgets, reduced effects"
+arch=(any)
+url="https://github.com/GenorTG/samurai-os"
+license=('PolyForm-Noncommercial-1.0.0')
+# kscreen/lscpu/kstatsviewer/qdbus6 are used by samurai-plasma-layout
+depends=(python util-linux plasma-workspace ksystemstats plasma-systemmonitor qt6-tools konsole ttf-jetbrains-mono-nerd)
+backup=(etc/skel/.config/kdeglobals)
+install=samurai-settings-kde.install
+source=(
+    samurai-kde-defaults
+    samurai-plasma-layout
+    samurai-plasma-layout.desktop
+    skel-kdeglobals
+    Samurai.profile
+    10-samurai-kde.conf
+    LICENSE
+)
+sha256sums=(
+    'cc15ee240c7f8b407a11ddea2ede4ade6a757814c05199729207b4542b4d77ca'
+    '4c8517f09590f45962e5709bc49884fefd43f6302e8279ac578549664968aa72'
+    '2a8d901f4a4de23379f10f91ff618bed3feb9882bfe562898a5e9988e33ea6d9'
+    '552764141e38fa046ddbe6f7a3986a5b0332daf571f8498afdfab117772ea6b0'
+    '05905280d9c05b9b9a3040e7f4441913ae167afe7a74f2cdbeb4e6f28506112d'
+    '8ff3a4ce6f99477925a16825c2d3bfe0786507c52594f01a0191d51e809818ea'
+    '1be06492345bb03a60d13d23d744d979cc7cf1ce154da5227651f8dd78f25017'
+)
+
+package() {
+    cd "$srcdir"
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+    install -Dm755 samurai-kde-defaults "$pkgdir/usr/bin/samurai-kde-defaults"
+    install -Dm755 samurai-plasma-layout "$pkgdir/usr/bin/samurai-plasma-layout"
+    install -Dm644 samurai-plasma-layout.desktop \
+        "$pkgdir/etc/skel/.config/autostart/samurai-plasma-layout.desktop"
+    install -Dm644 skel-kdeglobals "$pkgdir/etc/skel/.config/kdeglobals"
+    install -Dm644 Samurai.profile "$pkgdir/usr/share/konsole/Samurai.profile"
+    install -Dm644 10-samurai-kde.conf "$pkgdir/usr/lib/sddm/sddm.conf.d/10-samurai-kde.conf"
+}

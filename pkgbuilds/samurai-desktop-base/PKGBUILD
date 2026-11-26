@@ -1,0 +1,23 @@
+# Maintainer: Samurai OS <build@smart-samurai.pl>
+# Spec: docs/specs/10-DEFAULTS-AND-SOFTWARE.md audio, fonts, Bluetooth.
+# Reason: shared by every desktop choice (spec 08 page 6).
+pkgname=samurai-desktop-base
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Samurai OS desktop base: PipeWire audio, fonts, Bluetooth, Flatpak"
+arch=(any)
+url="https://github.com/GenorTG/samurai-os"
+license=('PolyForm-Noncommercial-1.0.0')
+depends=(
+    pipewire pipewire-pulse pipewire-alsa pipewire-jack wireplumber realtime-privileges
+    noto-fonts noto-fonts-cjk noto-fonts-emoji ttf-jetbrains-mono-nerd ttf-liberation
+    bluez bluez-utils flatpak xdg-user-dirs power-profiles-daemon nvtop
+)
+source=(LICENSE)
+sha256sums=(
+    '1be06492345bb03a60d13d23d744d979cc7cf1ce154da5227651f8dd78f25017'
+)
+
+package() {
+    install -Dm644 "$srcdir/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

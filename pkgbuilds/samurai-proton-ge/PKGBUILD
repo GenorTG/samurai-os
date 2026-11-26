@@ -1,0 +1,37 @@
+# Maintainer: Samurai OS <build@smart-samurai.pl>
+# Spec: docs/specs/10-DEFAULTS-AND-SOFTWARE.md "Gaming". Repackages the official
+# GE-Proton release, pinned by the .sha512sum published with the release.
+pkgname=samurai-proton-ge
+_tag=GE-Proton11-14
+pkgver=11.14
+pkgrel=1
+pkgdesc="GE-Proton, system-wide Steam compatibility tool"
+arch=(x86_64)
+url="https://github.com/GloriousEggroll/proton-ge-custom"
+license=('custom:Proton')
+depends=(python)
+optdepends=('steam: Steam lists it as a compatibility tool'
+            'umu-launcher: run it outside Steam')
+provides=(proton-ge-custom)
+conflicts=(proton-ge-custom proton-ge-custom-bin)
+options=(!strip !debug !zipman)
+source=("$url/releases/download/$_tag/$_tag-x86_64.tar.gz" LICENSE)
+sha512sums=(
+    '047fe613ad000f6fac0b6795350680edc7dd78790ee1a588bb8ff2705317186acbe43736fc7a8dbf8dabc59ed64d8177a35c5f713d0104d25d40c08b318960de'
+    '321132cb0321fc1f8e322866383f9f53bdb0d7a775ef3012799192fe2634dbd9b0d7b1c8822c2fc288ac20767c0e34084eb1e90a58df555029ca838b1a440815'
+)
+
+package() {
+    local tools="$pkgdir/usr/share/steam/compatibilitytools.d"
+    install -dm755 "$tools" "$pkgdir/usr/share/licenses/$pkgname"
+    # the archive holds exactly one top-level directory
+    local -a dirs=("$srcdir"/GE-Proton*/)
+    [ "${#dirs[@]}" -eq 1 ] && [ -f "${dirs[0]}compatibilitytool.vdf" ] ||
+        { error "unexpected archive layout"; return 1; }
+    cp -a "${dirs[0]%/}" "$tools/$_tag"
+    local licence
+    for licence in "$tools/$_tag"/LICENSE*; do
+        install -m644 "$licence" "$pkgdir/usr/share/licenses/$pkgname/"
+    done
+    install -m644 "$srcdir/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE.packaging"
+}

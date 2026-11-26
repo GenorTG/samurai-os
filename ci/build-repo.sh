@@ -10,6 +10,7 @@
 #   GNUPGHOME                offline/CI keyring holding the signing subkey (default ~/samurai-keys/gnupg)
 #   SAMURAI_PKGREL_OVERRIDE  monotonic pkgrel for samurai-tools/samurai-release (CI testing channel)
 #   SAMURAI_PUBLISHED_URL    published channel whose files are reused for unchanged versions (default stable)
+#   SAMURAI_SRCDEST          upstream source download cache (default build/srcdest)
 #   SAMURAI_BUILD_IMAGE      build container image (default archlinux:base-devel; pin a digest to freeze it)
 #
 # Key handling: the signing subkey is exported per run into a 0600 temp file,
@@ -48,11 +49,14 @@ mkdir -p "$out_dir"
 # and resurrect removed packages. Always start the db from scratch.
 rm -rf "$out_dir/x86_64"
 mkdir -p "$out_dir/x86_64"
+srcdest="$(realpath -m "${SAMURAI_SRCDEST:-$repo_root/build/srcdest}")"   # upstream download cache
+mkdir -p "$srcdest"
 
 echo "==> building [samurai] packages in $container (image $image, primary $primary, subkey $subkey)"
 docker run --rm -i --name "$container" \
     -v "$repo_root":/src:ro \
     -v "$out_dir":/out \
+    -v "$srcdest":/srcdest \
     -v "$keyfile":/keys/subkey.asc:ro \
     -e SAMURAI_PRIMARY="$primary" \
     -e SAMURAI_SUBKEY="$subkey" \
@@ -63,10 +67,7 @@ docker run --rm -i --name "$container" \
 set -euo pipefail
 pacman-key --init >/dev/null 2>&1
 pacman -Syu --noconfirm >/dev/null      # stale-image guard (see ci/build-iso.sh)
-pacman -S --noconfirm --needed namcap rust >/dev/null
-
-# non-root builder, per spec 02 step 3
-useradd -m builder
+pacman -S --noconfirm --needed namcap >/dev/null
 
 # trust the signing key in a throwaway GNUPGHOME (ownertrust is keyed by the
 # PRIMARY fingerprint; the subkey inherits it)
@@ -87,48 +88,10 @@ grep -qx "$SAMURAI_SUBKEY" <<<"$ship_fprs" || { echo "error: samurai-keyring/bui
 /src/ci/check-no-shadowing /src/pkgbuilds
 /src/ci/check-no-epoch /src/pkgbuilds
 
-mkdir /build && chown builder /build
-mkdir -p /out/x86_64
 out64=/out/x86_64
-cd /build
-for src in /src/pkgbuilds/*/; do
-    pkg="$(basename "$src")"
-    cp -a "$src" "$pkg"
-    cp -a /src/LICENSE "$pkg/LICENSE"
-    if [ "$pkg" = samurai-tools ]; then
-        # the Rust CLI replaces the shell dispatcher (updates/samurai stays for the live ISO)
-        mkdir -p "$pkg/toolbox"
-        tar -C /src/toolbox --exclude=target -cf - . | tar -C "$pkg/toolbox" -xf -
-        for name in samurai-update samurai-snap samurai-rescue samurai-apps samurai-notifier validate-interventions.py \
-                    samurai-notifier.service samurai-notifier.timer \
-                    samurai-health.service samurai-health.timer \
-                    95-samurai-boot.hook; do
-            cp -a "/src/updates/$name" "$pkg/"
-        done
-        cp -a /src/updates/interventions/0001-update-mechanism-demo.toml "$pkg/"
-        cp -a /src/updates/interventions/0001-update-mechanism-demo.sh "$pkg/"
-        cp -a /src/catalog/garuda-setup-wizard.toml /src/catalog/samurai.toml "$pkg/"
-    fi
-    if [ -n "$SAMURAI_PKGREL_OVERRIDE" ] && \
-       { [ "$pkg" = samurai-tools ] || [ "$pkg" = samurai-release ]; }; then
-        sed -i "s/^pkgrel=.*/pkgrel=$SAMURAI_PKGREL_OVERRIDE/" "$pkg/PKGBUILD"
-    fi
-    chown -R builder "$pkg"
-    echo "==> makepkg $pkg"
-    # --nodeps: runtime depends on our own packages (samurai-release ->
-    # samurai-tools) cannot be installed from a repo this very run creates;
-    # none of these packages compile anything, so build deps are not needed
-    su builder -c "cd /build/$pkg && makepkg -df --noconfirm"
-    set -- /build/$pkg/*.pkg.tar.zst   # .sig files are created below, in the signing step
-    # spec 02 step 4: namcap lint (advisory; its exit code is not a verdict)
-    su builder -c "cd /build/$pkg && namcap PKGBUILD $* 2>&1 | sed 's/^/    namcap: /'" || true
-    # never change the bytes behind an already published file name (stable channel)
-    for built in "$@"; do
-        /src/ci/reuse-published "$built" "$SAMURAI_PUBLISHED_URL"
-        cp -v "$built" "$out64/"
-        if [ -f "$built.sig" ]; then cp -v "$built.sig" "$out64/"; fi
-    done
-done
+mkdir -p "$out64"
+# non-root builder, per spec 02 step 3 (shared with ci/build-pkgs.sh)
+/src/ci/build-packages.sh "$out64"
 
 echo "==> signing packages + building samurai.db (SignedBy $SAMURAI_SUBKEY)"
 cd "$out64"
@@ -169,6 +132,6 @@ ls -lh "$out_dir/x86_64"
 # ownership handback independent of the container's exit code: root-owned
 # bind-mount writes are invisible to pacman on the host otherwise
 # (learned: the in-container chown is skipped when set -e aborts first)
-docker run --rm -v "$out_dir":/o "$image" chown -R "$(id -u):$(id -g)" /o >/dev/null
+docker run --rm -v "$out_dir":/o -v "$srcdest":/s "$image" chown -R "$(id -u):$(id -g)" /o /s >/dev/null
 
 echo "==> repo built in $out_dir/x86_64"

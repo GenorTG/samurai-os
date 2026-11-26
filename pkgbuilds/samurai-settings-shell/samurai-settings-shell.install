@@ -1,0 +1,28 @@
+# shellcheck shell=bash
+# bash and zsh have no drop-in directory for interactive shells: add one marked
+# line to their system rc (idempotent) and remove it with the package.
+_bash_line='[ -r /usr/share/samurai/shell/samurai.bash ] && . /usr/share/samurai/shell/samurai.bash # samurai-settings-shell'
+_zsh_line='[ -r /usr/share/samurai/shell/samurai.zsh ] && . /usr/share/samurai/shell/samurai.zsh # samurai-settings-shell'
+
+_add_line() {   # $1 file, $2 line
+    grep -qs 'samurai-settings-shell$' "$1" && return 0
+    mkdir -p "$(dirname "$1")"
+    printf '%s\n' "$2" >> "$1"
+}
+
+post_install() {
+    _add_line etc/bash.bashrc "$_bash_line"
+    _add_line etc/zsh/zshenv "$_zsh_line"
+}
+
+post_upgrade() {
+    post_install
+}
+
+post_remove() {
+    local file
+    for file in etc/bash.bashrc etc/zsh/zshenv; do
+        [ -f "$file" ] && sed -i '/# samurai-settings-shell$/d' "$file"
+    done
+    return 0
+}

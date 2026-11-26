@@ -1,0 +1,5 @@
+# Samurai OS uv defaults (spec 13)
+# use the pacman-managed interpreters first
+python-preference = "system"
+# still allowed for versions we do not ship
+python-downloads = "automatic"

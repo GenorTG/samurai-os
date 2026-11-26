@@ -1,0 +1,194 @@
+#!/usr/bin/env python3
+"""samurai-kde-defaults: system-wide KDE starting values (spec 14).
+
+Writes the Samurai OS defaults into /etc/xdg (the system layer of KDE's cascading
+config), so a user's own settings always win. Only the keys listed here are
+touched; anything else in those files is preserved.
+
+  samurai-kde-defaults apply [--theme breeze] [--effects reduced|default]
+                             [--widgets on|off] [--root DIR]
+  samurai-kde-defaults status [--json] [--root DIR]
+
+The chosen options are stored in /etc/samurai/kde.toml; `apply` without options
+re-applies them (package upgrades do this).
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import pathlib
+import sys
+import tomllib
+
+STATE = "etc/samurai/kde.toml"
+THEMES = {"breeze": "org.kde.breezedark.desktop"}
+DEFAULT_STATE = {"theme": "breeze", "reduced_effects": True, "monitor_widgets": True}
+
+# KWin effects switched off by "reduced effects". Overview, Desktop Grid and
+# Present Windows stay: they cost nothing until opened.
+SLOW_EFFECTS = (
+    "blur", "contrast", "translucency", "wobblywindows", "magiclamp", "scale", "squash",
+    "maximize", "slidingpopups", "fadingpopups", "dimscreen", "login", "logout",
+)
+
+# file -> group -> key -> value (always applied)
+BASE_KEYS = {
+    "etc/xdg/kdeglobals": {
+        "General": {"fixed": "JetBrainsMono Nerd Font Mono,10,-1,5,400,0,0,0,0,0,0,0,0,0,0,1"},
+    },
+    "etc/xdg/baloofilerc": {
+        # file names only: content indexing causes I/O and CPU spikes
+        "General": {"only basic indexing": "true"},
+    },
+    "etc/xdg/konsolerc": {
+        "Desktop Entry": {"DefaultProfile": "Samurai.profile"},
+    },
+}
+
+
+def effect_keys(reduced: bool) -> dict:
+    """Keys of the reduced-effects set; value None removes the key (KDE default)."""
+    return {
+        "etc/xdg/kwinrc": {
+            "Plugins": {f"{name}Enabled": ("false" if reduced else None) for name in SLOW_EFFECTS},
+        },
+        "etc/xdg/kdeglobals": {
+            "KDE": {"AnimationDurationFactor": "0" if reduced else None},
+        },
+    }
+
+
+def edit_ini(text: str, changes: dict) -> str:
+    """Set (or, for None, remove) keys in KConfig-style text, preserving the rest."""
+    pending = {group: dict(keys) for group, keys in changes.items()}
+    out: list[str] = []
+    group = ""
+
+    def flush(name: str) -> None:
+        keys = pending.pop(name, None)
+        if not keys:
+            return
+        at = len(out)
+        while at > 0 and not out[at - 1].strip():
+            at -= 1
+        out[at:at] = [f"{k}={v}" for k, v in keys.items() if v is not None]
+
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            flush(group)
+            group = stripped[1:-1]
+            out.append(line)
+            continue
+        key = stripped.split("=", 1)[0].strip() if "=" in stripped else None
+        keys = pending.get(group)
+        if key is not None and keys is not None and key in keys:
+            value = keys.pop(key)
+            if value is not None:
+                out.append(f"{key}={value}")
+            continue
+        out.append(line)
+    flush(group)
+    for name, keys in pending.items():
+        lines = [f"{k}={v}" for k, v in keys.items() if v is not None]
+        if lines:
+            if out and out[-1].strip():
+                out.append("")
+            out.append(f"[{name}]")
+            out.extend(lines)
+    return "\n".join(out) + "\n" if out else ""
+
+
+def merge(*tables: dict) -> dict:
+    merged: dict = {}
+    for table in tables:
+        for path, groups in table.items():
+            for group, keys in groups.items():
+                merged.setdefault(path, {}).setdefault(group, {}).update(keys)
+    return merged
+
+
+def load_state(root: pathlib.Path) -> dict:
+    state = dict(DEFAULT_STATE)
+    path = root / STATE
+    if path.is_file():
+        try:
+            data = tomllib.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as e:
+            raise SystemExit(f"error: cannot read {path}: {e}")
+        for key, default in DEFAULT_STATE.items():
+            value = data.get(key, default)
+            if not isinstance(value, type(default)):
+                raise SystemExit(f"error: {path}: {key} has the wrong type")
+            state[key] = value
+    if state["theme"] not in THEMES:
+        raise SystemExit(f"error: unknown theme {state['theme']!r} (available: {', '.join(THEMES)})")
+    return state
+
+
+def write_file(path: pathlib.Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".samurai-new")
+    tmp.write_text(text, encoding="utf-8")
+    os.chmod(tmp, 0o644)
+    os.replace(tmp, path)
+
+
+def apply(root: pathlib.Path, state: dict) -> list[str]:
+    theme = {"etc/xdg/kdeglobals": {"KDE": {"LookAndFeelPackage": THEMES[state["theme"]]}}}
+    changes = merge(BASE_KEYS, theme, effect_keys(state["reduced_effects"]))
+    written = []
+    for rel, groups in changes.items():
+        path = root / rel
+        old = path.read_text(encoding="utf-8") if path.is_file() else ""
+        new = edit_ini(old, groups)
+        if new != old:
+            write_file(path, new)
+            written.append(rel)
+    lines = ["# written by samurai-kde-defaults",
+             f'theme = "{state["theme"]}"',
+             f"reduced_effects = {str(state['reduced_effects']).lower()}",
+             f"monitor_widgets = {str(state['monitor_widgets']).lower()}"]
+    write_file(root / STATE, "\n".join(lines) + "\n")
+    return written
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="samurai-kde-defaults", description=__doc__.split("\n")[0])
+    sub = parser.add_subparsers(dest="command", required=True)
+    p_apply = sub.add_parser("apply", help="write the system-wide KDE defaults")
+    p_apply.add_argument("--theme", choices=sorted(THEMES))
+    p_apply.add_argument("--effects", choices=("reduced", "default"))
+    p_apply.add_argument("--widgets", choices=("on", "off"))
+    p_status = sub.add_parser("status", help="show the chosen options")
+    p_status.add_argument("--json", action="store_true")
+    for p in (p_apply, p_status):
+        p.add_argument("--root", default="/", help="alternative system root (tests, chroots)")
+    args = parser.parse_args(argv)
+    root = pathlib.Path(args.root)
+    state = load_state(root)
+    if args.command == "status":
+        if args.json:
+            print(json.dumps(state))
+        else:
+            for key, value in state.items():
+                print(f"{key}: {value}")
+        return 0
+    if args.theme:
+        state["theme"] = args.theme
+    if args.effects:
+        state["reduced_effects"] = args.effects == "reduced"
+    if args.widgets:
+        state["monitor_widgets"] = args.widgets == "on"
+    try:
+        written = apply(root, state)
+    except PermissionError as e:
+        print(f"error: {e.filename}: permission denied (run with sudo)", file=sys.stderr)
+        return 1
+    print("KDE defaults applied" + (f": {', '.join(written)}" if written else " (no changes)"))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

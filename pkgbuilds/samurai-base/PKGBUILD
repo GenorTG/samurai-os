@@ -1,0 +1,28 @@
+# Maintainer: Samurai OS <build@smart-samurai.pl>
+# Spec: docs/specs/10-DEFAULTS-AND-SOFTWARE.md "Base" (CLI tools, firmware).
+# yay comes from [cachyos]/[chaotic-aur] (ADR-0007).
+pkgname=samurai-base
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Samurai OS base system: firmware, command-line tools, snapshots, AUR helper"
+arch=(any)
+url="https://github.com/GenorTG/samurai-os"
+license=('PolyForm-Noncommercial-1.0.0')
+depends=(
+    base linux-firmware amd-ucode intel-ucode sof-firmware fwupd
+    samurai-release samurai-keyring samurai-mirrorlist
+    archlinux-keyring cachyos-keyring chaotic-keyring chaotic-mirrorlist
+    sudo pacman-contrib snapper snap-pac btrfs-progs
+    networkmanager wpa_supplicant pciutils usbutils
+    git github-cli base-devel micro nano btop fastfetch eza bat ripgrep fd fzf
+    zoxide tldr rsync wget curl unzip zip 7zip man-db man-pages
+    yay
+)
+source=(LICENSE)
+sha256sums=(
+    '1be06492345bb03a60d13d23d744d979cc7cf1ce154da5227651f8dd78f25017'
+)
+
+package() {
+    install -Dm644 "$srcdir/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
