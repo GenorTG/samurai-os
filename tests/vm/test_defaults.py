@@ -185,7 +185,7 @@ def test_default_kde_system(mirror):
 
         # KDE system defaults (spec 14)
         c.run("kde-files", "samurai-kde-defaults status; cat /etc/xdg/kwinrc /etc/xdg/kdeglobals /etc/xdg/baloofilerc "
-              "/etc/xdg/konsolerc /etc/skel/.config/kdeglobals; ls /usr/lib/sddm/sddm.conf.d/",
+              "/etc/xdg/konsolerc; ls /usr/lib/sddm/sddm.conf.d/",
               ["blurEnabled=false", "AnimationDurationFactor=0", "org.kde.breezedark.desktop",
                "only basic indexing=true", "DefaultProfile=Samurai.profile", "10-samurai-kde.conf"])
 

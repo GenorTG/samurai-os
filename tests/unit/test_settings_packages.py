@@ -44,6 +44,14 @@ def test_apply_writes_spec_defaults(defaults, tmp_path):
     assert ini(tmp_path / "etc/xdg/konsolerc")["Desktop Entry"]["DefaultProfile"] == "Samurai.profile"
 
 
+def test_theme_has_one_source_in_the_system_layer():
+    """KDE reads LookAndFeelPackage from [KDE]; a copy under [General] is ignored
+    and the desktop came up light (2026-11-26). Only /etc/xdg carries the theme."""
+    assert "etc/skel/.config/kdeglobals" not in (KDE / "PKGBUILD").read_text()
+    postinstall = (REPO / "installer" / "samurai-postinstall").read_text()
+    assert "skel/.config/kdeglobals" not in postinstall
+
+
 def test_toggle_off_restores_kde_defaults_and_keeps_other_keys(defaults, tmp_path):
     kwinrc = tmp_path / "etc/xdg/kwinrc"
     kwinrc.parent.mkdir(parents=True)
