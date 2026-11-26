@@ -65,6 +65,8 @@ def test_graphical_install():
         vm.login_root(timeout=300)
         vm.ensure_qga().close()
         wait_guest(vm, "pgrep -u live -x plasmashell >/dev/null && echo SHELL-UP", "SHELL-UP", 240)
+        # the splash covers the desktop (and eats clicks) well after plasmashell has started
+        wait_guest(vm, "pgrep -u live -x ksplashqml >/dev/null || echo SPLASH-GONE", "SPLASH-GONE", 180)
         time.sleep(15)     # desktop icons and panel
         shot(vm, "00-live-desktop")
         live = guest(vm, "systemctl is-active sddm NetworkManager; ls /home/live/Desktop; "
