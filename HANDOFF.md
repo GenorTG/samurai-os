@@ -16,6 +16,9 @@ guided installer and CLI/toolbox. VM validation runs on genorbox1. Site: <https:
 - Website live (Genor OK 2026-11-26): <https://genortg.github.io/samurai-os/>, Pages from `pages.yml` on changes under
   `site/`. Keep its claims true (feature list, `samurai help`, VM test count, signing) whenever a release ships.
 
+- 2026-11-26: samurai-tools **0.4.0-15** (adds `boot get/set`) on testing (VM upgrade 14->15 passed) and stable;
+  base packages unchanged (published files reused). ISO release v0.0.1.75 still carries 0.4.0-14 live tools.
+
 ## State (2026-11-22)
 - Specs 00–14 and ADR-0001…0008 remain the product source of truth.
 - M0–M4 complete (ISO identity; LUKS2/btrfs installer; update/notifier; rescue rollback; guided installer).
