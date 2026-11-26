@@ -130,7 +130,8 @@ def test_attended_install(mirror):
         vm.send("samurai\n")
         vm.wait_for("Password:", timeout=30)
         vm.send(PASS + "\n")
-        acc = vm.wait_for_any(["~>", "> "], timeout=60)[1]
+        # fish with the starship prompt (samurai-settings-shell) ends in "❯"
+        acc = vm.wait_for_any(["❯", "~>", "> "], timeout=60)[1]
         assert "Login incorrect" not in acc, acc[-800:]
 
         # in-system asserts: fish shell, GRUB config, LUKS, hostname

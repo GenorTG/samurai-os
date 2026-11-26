@@ -161,7 +161,8 @@ def test_default_kde_system(mirror):
         # gaming (spec 10)
         c.run("proton", "ls /usr/share/steam/compatibilitytools.d/; "
               "ls /usr/share/steam/compatibilitytools.d/*/compatibilitytool.vdf", ["GE-Proton", "cachyos"])
-        c.run("wine", f"runuser -l {USER} -c 'WINEDEBUG=-all wine --version; printf MZ > /tmp/setup.exe; "
+        # sh, not the user's fish login shell: the command uses POSIX syntax
+        c.run("wine", f"runuser -u {USER} -- env HOME=/home/{USER} sh -c 'WINEDEBUG=-all wine --version; printf MZ > /tmp/setup.exe; "
               "t=$(xdg-mime query filetype /tmp/setup.exe); echo TYPE=$t; echo EXE=$(xdg-mime query default $t); "
               "echo MSI=$(xdg-mime query default application/x-msi)'",
               ["wine-", "EXE=samurai-wine.desktop", "MSI=samurai-wine.desktop"])
