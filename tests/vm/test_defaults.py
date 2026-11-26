@@ -161,11 +161,15 @@ def test_default_kde_system(mirror):
         # gaming (spec 10)
         c.run("proton", "ls /usr/share/steam/compatibilitytools.d/; "
               "ls /usr/share/steam/compatibilitytools.d/*/compatibilitytool.vdf", ["GE-Proton", "cachyos"])
-        # sh, not the user's fish login shell: the command uses POSIX syntax
-        c.run("wine", f"runuser -u {USER} -- env HOME=/home/{USER} sh -c 'WINEDEBUG=-all wine --version; printf MZ > /tmp/setup.exe; "
-              "t=$(xdg-mime query filetype /tmp/setup.exe); echo TYPE=$t; echo EXE=$(xdg-mime query default $t); "
+        # a real Windows program, typed the way the Plasma session types it
+        # (sh, not the user's fish login shell: the commands use POSIX syntax)
+        c.run("wine", f"cp /usr/lib/wine/x86_64-windows/notepad.exe /tmp/setup.exe; "
+              f"runuser -u {USER} -- env HOME=/home/{USER} XDG_CURRENT_DESKTOP=KDE KDE_SESSION_VERSION=6 sh -c '"
+              "WINEDEBUG=-all wine --version; t=$(xdg-mime query filetype /tmp/setup.exe); echo TYPE=$t; "
+              "echo EXE=$(xdg-mime query default $t); "
+              "echo PE=$(xdg-mime query default application/vnd.microsoft.portable-executable); "
               "echo MSI=$(xdg-mime query default application/x-msi)'",
-              ["wine-", "EXE=samurai-wine.desktop", "MSI=samurai-wine.desktop"])
+              ["wine-", "EXE=samurai-wine.desktop", "PE=samurai-wine.desktop", "MSI=samurai-wine.desktop"])
 
         # repositories (spec 02, ADR-0007)
         out = c.run("repos", "grep -E '^\\[' /etc/pacman.conf | tr '\\n' ' '; echo; "

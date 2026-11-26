@@ -20,8 +20,8 @@ depends=(
 backup=(etc/xdg/mimeapps.list)
 source=(samurai-wine.desktop mimeapps.list LICENSE)
 sha256sums=(
-    'f813293671bfe26357ae70fd9a15f7b959dee72377024eff5d6c08ec92481df1'
-    'd136ede8fa4be21707c4ae7903d3042746a2a25beef0fcdc302497cf52df3278'
+    'd9a1feb3b445ade2d1d9841e506765be3e1e84229e0b09673be1baabbacceef5'
+    'df075613cfd6fad412f5c9ab493df704f6c59c5d703e1dbcb9aa4be76bb3860a'
     '1be06492345bb03a60d13d23d744d979cc7cf1ce154da5227651f8dd78f25017'
 )
 
