@@ -14,7 +14,22 @@ ColumnLayout {
         const needle = search.text.trim().toLowerCase().replace(/ /g, "_")
         if (needle === "")
             return values
-        return values.filter(v => v.toLowerCase().indexOf(needle) >= 0)
+        // exact name first, then names that start with it, then the rest ("pl" before
+        // "apple-…")
+        const exact = [], prefix = [], other = []
+        for (const v of values) {
+            const low = v.toLowerCase()
+            const at = low.indexOf(needle)
+            if (at < 0)
+                continue
+            if (low === needle)
+                exact.push(v)
+            else if (at === 0 || low[at - 1] === "/")
+                prefix.push(v)
+            else
+                other.push(v)
+        }
+        return exact.concat(prefix, other)
     }
     function reveal() {
         const at = shown.indexOf(value)
@@ -24,7 +39,8 @@ ColumnLayout {
     function focusSearch() { search.forceActiveFocus() }
 
     spacing: 6
-    onShownChanged: Qt.callLater(reveal)
+    // a new search shows its best matches; without one the selection is centred
+    onShownChanged: Qt.callLater(search.text === "" ? reveal : list.positionViewAtBeginning)
 
     PlainLabel { text: picker.label; font.bold: true }
     TextField {
@@ -44,6 +60,11 @@ ColumnLayout {
             clip: true
             model: picker.shown
             ScrollBar.vertical: ScrollBar {}
+            Label {
+                anchors.centerIn: parent
+                visible: list.count === 0
+                text: "Nothing matches."
+            }
             delegate: ItemDelegate {
                 required property string modelData
                 width: list.width - 12

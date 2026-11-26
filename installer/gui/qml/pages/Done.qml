@@ -6,6 +6,7 @@ import "../components"
 PageBody {
     id: page
     property string message: ""
+    function activate() { restart.forceActiveFocus(Qt.TabFocusReason) }
     readonly property var steps: {
         installer.revision
         installer.state
@@ -38,7 +39,13 @@ PageBody {
     RowLayout {
         Layout.topMargin: 16
         spacing: 10
-        Button { text: "Restart now"; icon.name: "system-reboot"; highlighted: true; onClicked: installer.reboot() }
+        Button {
+            id: restart
+            text: "Restart now"
+            icon.name: "system-reboot"
+            highlighted: true
+            onClicked: installer.reboot()
+        }
         Button { text: "Save log"; icon.name: "document-save"; onClicked: page.message = installer.saveLog() }
         Button { text: "Close"; icon.name: "window-close"; onClicked: window.close() }
     }

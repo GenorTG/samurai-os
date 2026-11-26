@@ -23,6 +23,7 @@ file_permissions=(
   ["/etc/sudoers.d"]="0:0:750"
   ["/etc/sudoers.d/10-samurai-live"]="0:0:440"
   ["/usr/lib/samurai-installer/live-setup"]="0:0:755"
+  ["/usr/lib/samurai-installer/rescue-terminal"]="0:0:755"
   ["/usr/lib/samurai-installer/samurai-installer"]="0:0:755"
   ["/usr/lib/samurai-installer/samurai-installer-helper"]="0:0:755"
   ["/usr/local/bin/choose-mirror"]="0:0:755"

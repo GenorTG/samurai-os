@@ -109,7 +109,10 @@ class VM:
             cmd += ["-drive", f"file={self.iso},media=cdrom,read-only=on"]
         if self.graphical:
             cmd += ["-vga", "none", "-device", "virtio-vga,xres=1280,yres=800",
-                    "-device", "qemu-xhci", "-device", "usb-tablet"]
+                    "-device", "qemu-xhci", "-device", "usb-tablet",
+                    # a restart asked for inside the guest pauses the VM, so the test
+                    # can eject the medium before the firmware looks at it again
+                    "-action", "reboot=shutdown,shutdown=pause"]
         # pylint: disable=consider-using-with
         self.proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
 
@@ -286,6 +289,23 @@ class VM:
 
     def qmp_query_block(self) -> list:
         return self._qmp_call("query-block").get("return", [])
+
+    def wait_guest_restart(self, timeout: float = 180.0) -> None:
+        """Graphical VMs: wait until the guest itself asked to restart or power off."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            status = self._qmp_call("query-status").get("return", {}).get("status")
+            if status == "shutdown":
+                return
+            time.sleep(2)
+        raise TimeoutError("the guest never restarted")
+
+    def resume_after_restart(self) -> None:
+        """Reset and run a VM paused by its own restart request."""
+        self.reboot()
+        reply = self.qmp_command("cont")
+        if "error" in reply:
+            raise RuntimeError(f"cont failed: {reply['error']}")
 
     # --- keyboard and pointer (graphical tests) ---
     def key(self, *qcodes: str) -> None:

@@ -17,7 +17,7 @@ from vm import VM
 PASSPHRASE = "gui-disk-2026"
 PASSWORD = "gui-user-2026"
 USER = "alex"
-LIVE_RUN = "systemd-run --user -M live@ --collect --quiet"
+INSTALL_ICON = (58, 62)    # "Install Samurai OS (graphical)" on the 1280x800 desktop
 
 
 def guest(vm: VM, command: str, timeout: float = 120.0) -> str:
@@ -72,7 +72,7 @@ def test_graphical_install():
         assert "offline" in live, "this test needs the offline ISO"
         assert "samurai-2-install-terminal.desktop" in live, live
 
-        guest(vm, f"{LIVE_RUN} /usr/lib/samurai-installer/samurai-installer")
+        vm.click(*INSTALL_ICON, double=True)
         wait_guest(vm, "pgrep -u live -f '[s]amurai-installer/samurai-installer' >/dev/null "
                        "&& echo WIZARD-UP", "WIZARD-UP", 60)
         time.sleep(8)
@@ -120,9 +120,12 @@ def test_graphical_install():
             assert time.time() < deadline, log
             time.sleep(20)
         time.sleep(5)
-        shot(vm, "15-done")
+        shot(vm, "15-done")                # focus is on "Restart now"
         checks = guest(vm, "grep -c 'offline install: closure installed' /var/log/samurai/install.log; "
-                           f"grep -r -l {both} /var/log /run /tmp /home/live 2>/dev/null | wc -l; "
+                           # -D skip: a FIFO under /run would block grep for ever;
+                           # /run/archiso is the whole medium
+                           f"grep -r -l -s -D skip --exclude-dir=archiso {both} "
+                           "/var/log /run /tmp /home/live | wc -l; "
                            f"journalctl -b --no-pager | grep -c {both}; "
                            "ls -A /run/samurai-installer; findmnt -R /mnt | wc -l")
         print(checks)
@@ -132,8 +135,10 @@ def test_graphical_install():
         assert lines[2] == "0", "a secret reached the journal"
         assert "install-profile.toml" not in checks, "the root profile copy was left behind"
 
+        vm.key("spc")                      # restart through the wizard's own button
+        vm.wait_guest_restart()
         vm.eject_iso()
-        vm.reboot()
+        vm.resume_after_restart()
         unlock(vm)
         installed = guest(vm, "cat /etc/hostname; "
                               f"getent passwd {USER} | cut -d: -f7; "

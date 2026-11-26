@@ -61,6 +61,18 @@ guided installer and CLI/toolbox. VM validation runs on genorbox1. Site: <https:
 - smoke: PASS (2 passed, 8m12s) after the mirrorlist assertion fix. All r13 scenarios are now green.
 - archive (test_update_archive, Arch 2026/08/15 snapshot): PASS on re-run (14m16s). Earlier rc=1 did not reproduce (likely transient archive/mirror fetch); test now keeps /tmp/install.log and dumps its tail on failure.
 
+## Graphical installer (feat/installer-gui, 2026-11-26)
+- Live ISO boots Plasma (user `live`, SDDM autologin, NetworkManager+iwd; tty2/serial keep root autologin;
+  boot entry "terminal only"). Desktop icons: graphical install, terminal install, rescue.
+- `installer/gui` (PySide6/QML, ADR-0009, needs Genor's OK: replaces Calamares) writes only the profile;
+  root helper runs `samurai-install --profile --yes`, passphrase on stdin. Live files in
+  `/usr/lib/samurai-installer/` (copied by `ci/build-iso.sh`).
+- Backend changes: secrets read verbatim (`IFS= read`); desktop installs now set the login-screen/Plasma
+  keyboard layout from the console keymap.
+- Tests: `tests/unit/test_gui_installer.py`, `tests/gui/*.py` (Arch container), `tests/vm/test_installer_gui.py`.
+- Not done: Expert mode, geo-IP, size estimate, chwd/CUDA/gpu-unlock page, alongside/manual disk layouts,
+  UI translation, NVIDIA live boot entry, `sshd` toggle in a live menu.
+
 ## Next
 1. M5 (Rust CLI): `toolbox/` workspace (`samurai-core` lib, `samurai-cli` bin, std-only; 141 tests, clippy+fmt clean). samurai-tools **0.4.0-15** is `arch=x86_64`, `build()` runs cargo (build-repo.sh stages `toolbox/`, installs `rust`), `options=(!debug)`; `/usr/local/bin/samurai` is the Rust binary, executors stay shell. Native in Rust: dispatcher, `status`, `health`, `diag`, `clean`, `fix`, `mirrors`, `boot sync`, `kernel`. Shared `health::system::System` trait (read/exists/list_dir/run) + `Fake` for unit tests; all commands are fixed-argv (no shell).
    - `health` (spec 05): 25 checks in `health/checks.rs` (newest: pacman.mirrors, packages.outdated, packages.partial-upgrade, security.ssh, boot.esp-space); `--category --id --json --list --write --fix [--yes]`; exit 0/1/2. `--write` -> `/var/lib/samurai/health.json` via sandboxed `samurai-health.service` + daily timer (package `.install` enables it); notifier counts warning+ from it (field order severity/fix_risk/status is a contract). `--fix` (root): snapper snapshot first, safe fixes direct, needs-confirm prompt/`--yes`; fixes: firewall, time-sync, snapper cleanup timer (spec 06: timeline OFF), initramfs, btrfs timers.

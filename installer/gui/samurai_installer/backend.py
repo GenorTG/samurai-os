@@ -13,6 +13,7 @@ from .progress import Progress
 
 HELPER_COMMAND = ("sudo", "-n", "/usr/lib/samurai-installer/samurai-installer-helper")
 EXIT_MARKER = "samurai-installer-helper: exit "
+RESCUE_TERMINAL = "/usr/lib/samurai-installer/rescue-terminal"
 LOG_LINES_KEPT = 4000
 
 
@@ -171,12 +172,11 @@ class Backend(QObject):
         if layout is None or "live" not in self._facts:
             return
         xkb, variant = layout
-        base = ["kwriteconfig6", "--file", "kxkbrc", "--group", "Layout", "--key"]
-        system.run([*base, "Use", "--type", "bool", "true"])
+        # --notify: KWin watches kxkbrc through KConfig and reloads on the notification
+        base = ["kwriteconfig6", "--notify", "--file", "kxkbrc", "--group", "Layout", "--key"]
         system.run([*base, "LayoutList", xkb])
         system.run([*base, "VariantList", variant])
-        system.run(["dbus-send", "--session", "--type=signal", "/Layouts",
-                    "org.kde.keyboard.reloadConfig"])
+        system.run([*base, "Use", "--type", "bool", "true"])
 
     # ------------------------------------------------------------ secrets
     @Slot(str, str)
@@ -401,8 +401,7 @@ class Backend(QObject):
 
     @Slot()
     def openTerminal(self) -> None:
-        QProcess.startDetached("konsole", ["--hold", "-e", "sudo", "-n",
-                                           "/usr/local/bin/samurai-rescue"])
+        QProcess.startDetached("konsole", ["-e", RESCUE_TERMINAL])
 
     @Slot()
     def reboot(self) -> None:

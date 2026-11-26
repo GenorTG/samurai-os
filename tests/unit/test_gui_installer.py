@@ -270,11 +270,11 @@ def test_live_medium_ships_what_it_refers_to():
     sudoers = (airootfs / "etc/sudoers.d/10-samurai-live").read_text()
     rule = next(line for line in sudoers.splitlines() if line.startswith("live "))
     commands = [part.strip() for part in rule.split("NOPASSWD:")[1].split(",")]
-    # every sudo rule is a fixed command without arguments
-    assert all(c.endswith(' ""') for c in commands), commands
-    assert [c.split()[0] for c in commands] == [
-        "/usr/lib/samurai-installer/samurai-installer-helper",
-        "/usr/local/bin/samurai-install", "/usr/local/bin/samurai-rescue"]
+    # the installer rules are fixed commands without arguments; rescue has subcommands
+    assert commands == [
+        '/usr/lib/samurai-installer/samurai-installer-helper ""',
+        '/usr/local/bin/samurai-install ""', "/usr/local/bin/samurai-rescue"]
+    assert '["/usr/lib/samurai-installer/rescue-terminal"]="0:0:755"' in profiledef
     for name in ("samurai-installer", "samurai-installer-helper"):
         assert (GUI / name).stat().st_mode & 0o111
         assert f'["/usr/lib/samurai-installer/{name}"]="0:0:755"' in profiledef
