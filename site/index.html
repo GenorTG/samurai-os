@@ -131,7 +131,7 @@
             <div><dt>0</dt><dd>Arch packages rebuilt or patched</dd></div>
             <div><dt>2</dt><dd>kernels by default: linux-cachyos + linux-zen</dd></div>
             <div><dt>LUKS2</dt><dd>full-root encryption, on by default</dd></div>
-            <div><dt>9</dt><dd>VM test scenarios, from boot to a day of real use</dd></div>
+            <div><dt>20</dt><dd>VM tests, from boot to a day of real use</dd></div>
           </dl>
         </div>
 
@@ -166,7 +166,7 @@
               <li>Arch's repositories, unchanged. Kernels, Mesa, NVIDIA and KDE come straight from Arch mirrors.</li>
               <li>The CachyOS repository for <code>linux-cachyos</code> and its prebuilt NVIDIA modules, placed <em>after</em> Arch's repos, so it can add packages but never replace Arch's.</li>
               <li>Chaotic-AUR is planned the same way, below Arch (ADR-0007). It arrives with the app catalog and is off in today's installer.</li>
-              <li>One signed repository of our own, <code>[samurai]</code>, built by GitHub Actions and served from GitHub Releases with <code>SigLevel = Required DatabaseRequired</code>. It holds only our tools, configs and meta-packages.</li>
+              <li>One signed repository of our own, <code>[samurai]</code>, built and signed on the maintainer's machine and served from GitHub Releases with <code>SigLevel = Required DatabaseRequired</code>. It holds only our tools, configs and meta-packages.</li>
               <li>pacman is the updater. <code>samurai update</code> wraps one <code>pacman -Syu</code> that takes Arch packages and ours in the same transaction.</li>
             </ul>
           </article>
@@ -282,7 +282,7 @@
           </li>
           <li>
             <article class="w-card" aria-labelledby="f-vm">
-              <div class="card-head"><p class="kind">Process</p><span class="w-seal">9 scenarios</span></div>
+              <div class="card-head"><p class="kind">Process</p><span class="w-seal">20 tests</span></div>
               <h3 id="f-vm" class="w-display">Proven in a VM first</h3>
               <p class="w-muted">A headless QEMU/KVM + OVMF harness drives the ISO over serial and the guest
                 agent: ISO boot, default install, guided install, KDE, offline install, rollback, update from an
@@ -294,18 +294,24 @@
         <div class="grid grid-2 mt-l">
           <div>
             <h3 class="w-display h3-sub">One command, a few subcommands</h3>
-            <p class="w-muted mt-s">The <code>samurai</code> CLI is a small shell dispatcher today; the Rust CLI
-              replaces it behind the same interface (spec 04).</p>
+            <p class="w-muted mt-s">The <code>samurai</code> CLI is written in Rust: health checks with fixes, diagnostics with a redacted support bundle, cleanup, mirror refresh and kernel management, next to updates, snapshots, apps and rescue.</p>
           </div>
           <div class="code" data-copy>
 <pre><code><span class="prompt">$ </span>samurai help
 usage: samurai &lt;command&gt; [args]
 
-  update      staged system update
-  apps        optional apps: list/search/info/install/remove/bundles
-  snap        list/create/delete/diff/repair/rollback
-  rescue      mount/chroot/bootloader/initramfs/kernel/rollback
-  version     print the CLI version</code></pre>
+  update    staged system update
+  apps      optional apps from the catalog
+  snap      snapshot manager
+  rescue    recovery tool
+  status    last update check and report
+  health    health checks, with fixes
+  diag      diagnostics and a redacted support bundle
+  clean     free disk space (preview first)
+  fix       repair pacman lock, keyring, DKMS
+  mirrors   show or refresh the mirrorlist
+  boot      sync boot entries with kernels
+  kernel    list, install, remove, set default</code></pre>
           </div>
         </div>
       </div>
@@ -320,7 +326,7 @@ usage: samurai &lt;command&gt; [args]
           <p class="lead">Two installers, both x86_64 UEFI. Both are on the
             <a class="w-link" href="https://github.com/GenorTG/samurai-os/releases/latest" rel="noopener">latest GitHub release</a>,
             next to a <code>SHA256SUMS</code> file and its signature. Releases are tagged
-            <code>v&lt;major.minor.patch.build&gt;</code>, starting at <code>v0.1.0.0</code>; the ISO file names
+            <code>v&lt;major.minor.patch.build&gt;</code>, for example <code>v0.0.1.75</code>; the ISO file names
             carry the build date.</p>
         </div>
 
@@ -343,7 +349,7 @@ usage: samurai &lt;command&gt; [args]
           <article class="w-card w-card-accent dl-card" aria-labelledby="dl-offline">
             <div class="card-head"><p class="kind">Full desktop</p><span class="w-seal">no network needed</span></div>
             <h3 id="dl-offline" class="w-display">Offline ISO</h3>
-            <p class="size">About 4.6 GB, shipped in three parts.</p>
+            <p class="size">About 4.6 GB (4.4 GiB), shipped in three parts.</p>
             <ul class="w-dash">
               <li>KDE Plasma, <code>linux-cachyos</code> + <code>linux-zen</code> and the AMD, Intel, Nouveau and NVIDIA driver packages baked in.</li>
               <li>Installs with no network at all; run <code>samurai update</code> afterwards.</li>
@@ -524,7 +530,7 @@ gpg --verify SHA256SUMS.sig SHA256SUMS</code></pre>
               <li>Install profiles are checked against a strict allowlist: no free-form shell, every value quoted, passwords only as crypt hashes.</li>
               <li>firewalld on by default: zone <code>public</code>, inbound closed except DHCPv6; SSH opens only when you enable the SSH server. The guided wizard asks (default yes); profiles set <code>[security] firewall</code>.</li>
               <li>No SSH server unless you ask for one.</li>
-              <li>Signing subkey for publishing kept in a protected CI environment; the primary key stays offline.</li>
+              <li>Packages and release checksums are signed with a dedicated subkey on the maintainer's machine.</li>
             </ul>
           </article>
           <article class="w-card" aria-labelledby="sec-next">
@@ -676,8 +682,8 @@ gpg --verify SHA256SUMS.sig SHA256SUMS</code></pre>
           <p class="road-label">Ahead · not available yet</p>
           <ol class="road">
             <li>
-              <div class="meta"><h3 class="w-display">Toolbox CLI</h3><span class="w-seal quiet">next</span></div>
-              <p>The Rust <code>samurai</code> CLI with health checks and fixes, cleaning, diagnostics, firewall and Tailscale pages; a Qt toolbox on top of <code>samurai apps</code>.</p>
+              <div class="meta"><h3 class="w-display">Toolbox CLI</h3><span class="w-seal quiet">in progress</span></div>
+              <p>Available now: health checks and fixes, diagnostics, cleanup, repairs, mirrors, boot entries and kernel management. Still ahead: firewall and Tailscale commands, a task queue, a privileged helper and a Qt toolbox.</p>
             </li>
             <li>
               <div class="meta"><h3 class="w-display">Drivers and developer setup</h3><span class="w-seal quiet">planned</span></div>
