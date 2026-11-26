@@ -34,7 +34,7 @@ Status: done 35, gap 10, optional 7. `done` = installed/configured by default or
 | 10 Gaming | Steam, Heroic, GameMode, MangoHud, GOverlay, gamescope | steam `multilib`<br>heroic-games-launcher-bin `cachyos`<br>gamemode `extra`<br>lib32-gamemode `multilib`<br>mangohud `extra`<br>lib32-mangohud `multilib`<br>goverlay `extra`<br>gamescope `extra` | profile [gaming] (default on) | **done** |
 | 10 Gaming | GE-Proton system-wide | samurai-proton-ge `samurai` (pkgbuilds, 11.14) | new [samurai] package, pinned release | **done** |
 | 10 Gaming | Proton-CachyOS, umu-launcher, protontricks | proton-cachyos-slr `cachyos`<br>umu-launcher `multilib`<br>protontricks `extra` | profile [gaming] | **done** |
-| 10 Gaming | samurai-wine; .exe opens with Wine | samurai-wine `samurai` (pkgbuilds, 0.1.0)<br>wine-staging `extra`<br>winetricks `extra`<br>wine-mono `extra`<br>wine-gecko `extra` | new meta; handler is wine-staging's wine.desktop; Arch Wine is WoW64, no lib32 deps | **done** |
+| 10 Gaming | samurai-wine; .exe opens with Wine | samurai-wine `samurai` (pkgbuilds, 0.1.0)<br>wine-staging `extra`<br>winetricks `extra`<br>wine-mono `extra`<br>wine-gecko `extra` | new package with its own .exe/.msi handler; Arch Wine is WoW64, no lib32 deps | **done** |
 | 10 Gaming | lib32 GPU drivers | lib32-mesa `multilib`<br>lib32-vulkan-radeon `multilib`<br>lib32-vulkan-intel `multilib`<br>lib32-nvidia-utils `multilib` | with Steam (planner) | **done** |
 | 10 Gaming | Heroic picks up system-wide Proton (M7 check) | — | not verified: needs a Heroic account/UI | **gap** |
 | 10 Gaming | Bottles, Lutris as toolbox options | bottles `chaotic-aur`<br>lutris `extra` | samurai apps | **optional** |

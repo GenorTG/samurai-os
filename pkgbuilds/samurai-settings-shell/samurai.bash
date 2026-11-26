@@ -2,7 +2,7 @@
 [[ $- == *i* ]] || return 0
 [ -r /etc/profile.d/samurai-path.sh ] && . /etc/profile.d/samurai-path.sh
 if command -v eza >/dev/null 2>&1; then
-    alias ls='eza --group-directories-first'
+    # `ls` itself stays the user's: Arch's default ~/.bashrc aliases it after us
     alias ll='eza -l --group-directories-first --git'
     alias la='eza -la --group-directories-first --git'
 fi

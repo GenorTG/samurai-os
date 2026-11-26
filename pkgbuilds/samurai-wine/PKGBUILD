@@ -1,7 +1,8 @@
 # Maintainer: Samurai OS <build@smart-samurai.pl>
 # Spec: docs/specs/10-DEFAULTS-AND-SOFTWARE.md "Gaming". Arch builds Wine as pure
 # WoW64, so no lib32 libraries are needed (the spec's lib32 list predates that).
-# .exe files open through wine-staging's own wine.desktop handler.
+# .exe files open with Wine through our handler: wine-staging's wine.desktop does
+# not claim the type current shared-mime-info gives them.
 pkgname=samurai-wine
 pkgver=0.1.0
 pkgrel=1
@@ -16,11 +17,16 @@ depends=(
     libxcomposite libxinerama ocl-icd pcsclite samba sane sdl2-compat unixodbc v4l-utils
     vulkan-icd-loader
 )
-source=(LICENSE)
+backup=(etc/xdg/mimeapps.list)
+source=(samurai-wine.desktop mimeapps.list LICENSE)
 sha256sums=(
+    'f813293671bfe26357ae70fd9a15f7b959dee72377024eff5d6c08ec92481df1'
+    'd136ede8fa4be21707c4ae7903d3042746a2a25beef0fcdc302497cf52df3278'
     '1be06492345bb03a60d13d23d744d979cc7cf1ce154da5227651f8dd78f25017'
 )
 
 package() {
+    install -Dm644 "$srcdir/samurai-wine.desktop" "$pkgdir/usr/share/applications/samurai-wine.desktop"
+    install -Dm644 "$srcdir/mimeapps.list" "$pkgdir/etc/xdg/mimeapps.list"
     install -Dm644 "$srcdir/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }

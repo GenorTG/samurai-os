@@ -1,0 +1,10 @@
+# Samurai OS (spec 10): Windows programs open with Wine. A user's own choice
+# (~/.config/mimeapps.list) always wins.
+[Default Applications]
+application/vnd.microsoft.portable-executable=samurai-wine.desktop
+application/x-ms-ne-executable=samurai-wine.desktop
+application/x-msdownload=samurai-wine.desktop
+application/x-ms-dos-executable=samurai-wine.desktop
+application/x-msi=samurai-wine.desktop
+application/x-bat=samurai-wine.desktop
+application/x-ms-shortcut=samurai-wine.desktop

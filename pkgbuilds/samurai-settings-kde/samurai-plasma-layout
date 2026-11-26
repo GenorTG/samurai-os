@@ -38,15 +38,16 @@ def count_sockets(lscpu: str) -> int:
 def monitors(gpus: list[str], sockets: int) -> list[dict]:
     """One text-only widget per device. ksystemstats has no per-socket usage or
     clock sensor, so multi-socket machines get one all-CPU widget (spec 14 gap)."""
-    out = [{
-        "title": "CPU" if sockets == 1 else f"CPU x{sockets}",
-        "sensors": ["cpu/all/usage", "cpu/all/averageFrequency", "cpu/all/averageTemperature"],
-    }]
+    def widget(title: str, labelled: list[tuple[str, str]]) -> dict:
+        return {"title": title, "sensors": [sensor for sensor, _ in labelled],
+                "labels": dict(labelled)}   # short legend: the panel has little room
+
+    cpu = "CPU" if sockets == 1 else f"CPU x{sockets}"
+    out = [widget(cpu, [("cpu/all/usage", cpu), ("cpu/all/averageFrequency", "@"),
+                        ("cpu/all/averageTemperature", "T")])]
     for index, gpu in enumerate(gpus):
-        out.append({
-            "title": "GPU" if len(gpus) == 1 else f"GPU{index}",
-            "sensors": [f"gpu/{gpu}/usage", f"gpu/{gpu}/temperature"],
-        })
+        name = "GPU" if len(gpus) == 1 else f"GPU{index}"
+        out.append(widget(name, [(f"gpu/{gpu}/usage", name), (f"gpu/{gpu}/temperature", "T")]))
     return out
 
 
@@ -72,6 +73,8 @@ for (var m = 0; m < monitors.length; m++) {
     w.writeConfig("highPrioritySensorIds", JSON.stringify(monitors[m].sensors));
     w.writeConfig("totalSensors", "[]");
     w.writeConfig("lowPrioritySensorIds", "[]");
+    w.currentConfigGroup = ["SensorLabels"];
+    for (var id in monitors[m].labels) { w.writeConfig(id, monitors[m].labels[id]); }
 }
 top.addWidget("org.kde.plasma.systemtray");
 top.addWidget("org.kde.plasma.digitalclock");

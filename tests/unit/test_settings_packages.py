@@ -89,6 +89,7 @@ def test_widgets_one_per_device(layout):
     assert [w["title"] for w in widgets] == ["CPU", "GPU0", "GPU1"]
     assert widgets[0]["sensors"] == ["cpu/all/usage", "cpu/all/averageFrequency", "cpu/all/averageTemperature"]
     assert widgets[2]["sensors"] == ["gpu/gpu1/usage", "gpu/gpu1/temperature"]
+    assert widgets[2]["labels"] == {"gpu/gpu1/usage": "GPU1", "gpu/gpu1/temperature": "T"}
 
 
 def test_layout_script_matches_spec(layout):
@@ -103,6 +104,15 @@ def test_layout_script_matches_spec(layout):
     node = shutil.which("node")
     if node:   # syntax check of the generated JavaScript
         subprocess.run([node, "--check", "-"], input=script, text=True, check=True)
+
+
+def test_exe_files_open_with_wine():
+    wine = REPO / "pkgbuilds" / "samurai-wine"
+    claimed = set(re.search(r"(?m)^MimeType=(.*);$", (wine / "samurai-wine.desktop").read_text()).group(1).split(";"))
+    defaults = ini(wine / "mimeapps.list")["Default Applications"]
+    assert set(defaults) == claimed
+    assert "application/vnd.microsoft.portable-executable" in claimed   # what *.exe is typed as today
+    assert set(defaults.values()) == {"samurai-wine.desktop"}
 
 
 def test_local_source_checksums_are_current():

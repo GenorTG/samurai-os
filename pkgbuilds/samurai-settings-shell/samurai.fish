@@ -1,5 +1,5 @@
 # Samurai OS shell defaults for fish (spec 10). Override in ~/.config/fish/.
-if test -d $HOME/.local/bin; and not contains -- $HOME/.local/bin $PATH
+if not contains -- $HOME/.local/bin $PATH
     set -gx PATH $HOME/.local/bin $PATH
 end
 if status is-interactive

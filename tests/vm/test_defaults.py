@@ -7,10 +7,15 @@ configured: packages, services, performance settings, shells, developer tools,
 gaming set, repositories and the desktop layout.
 
 Every check prints its output; all failures are collected and reported together.
+SAMURAI_TEST_UPGRADE_PKGS=<dir> installs the package files in that directory after
+the first boot (verifies package fixes without rebuilding the ISO).
 """
 from __future__ import annotations
 
+import os
+import pathlib
 import re
+import shutil
 
 from conftest import INSTALL_TIMEOUT, REPO, find_iso, password_hash, with_test_autokey
 from vm import VM
@@ -102,6 +107,15 @@ def test_default_kde_system(mirror):
             vm.screendump("defaults-boot-failed")
             raise
         c = Checks(vm)
+        upgrade = os.environ.get("SAMURAI_TEST_UPGRADE_PKGS")
+        if upgrade:
+            files = sorted(pathlib.Path(upgrade).glob("*.pkg.tar.zst"))
+            assert files, f"no packages in {upgrade}"
+            for f in files:
+                shutil.copy(f, mirror.dir / f.name)
+            fetch = " && ".join(f"curl -fsS -o /tmp/{f.name} http://10.0.2.2:8966/{f.name}" for f in files)
+            c.run("upgrade", f"{fetch} && pacman -U --noconfirm "
+                  f"{' '.join('/tmp/' + f.name for f in files)} && echo UPGRADE-OK", ["UPGRADE-OK"], timeout=600)
 
         c.run("packages", f"pacman -Q {' '.join(PACKAGES)} >/tmp/q.txt; rc=$?; grep -c . /tmp/q.txt; "
               "grep error /tmp/q.txt; echo PKGS-RC=$rc", ["PKGS-RC=0"])
@@ -131,9 +145,10 @@ def test_default_kde_system(mirror):
         c.run("user", f"getent passwd {USER} | cut -d: -f7; echo GROUPS $(id -nG {USER})",
               ["/bin/fish", "docker", "gamemode", "realtime", "wheel"])
         c.run("fish", f"runuser -l {USER} -c \"fish -i -c 'type ls; type conda | head -1; echo PATH=\\$PATH; "
-              "echo AUTOUPDATER=\\$DISABLE_AUTOUPDATER'\"", ["eza", "conda", "AUTOUPDATER=1"])
+              "echo AUTOUPDATER=\\$DISABLE_AUTOUPDATER'\"",
+              ["eza", "conda", "AUTOUPDATER=1", f"/home/{USER}/.local/bin"])
         c.run("bash", f"runuser -u {USER} -- env HOME=/home/{USER} TERM=xterm bash -ic "
-              "'type ls; type conda | head -1; type pip | head -1; echo PY=$(command -v python)'",
+              "'type ll; type conda | head -1; type pip | head -1; echo PY=$(command -v python)'",
               ["eza", "conda is a function", "pip is a function", "PY=/usr/bin/python"])
         c.run("python-conda", "python --version; uv --version; grep -v '^#' /etc/uv/uv.toml; "
               "/opt/miniforge/bin/conda --version; /opt/miniforge/bin/conda config --show auto_activate_base envs_dirs",
@@ -146,14 +161,16 @@ def test_default_kde_system(mirror):
         # gaming (spec 10)
         c.run("proton", "ls /usr/share/steam/compatibilitytools.d/; "
               "ls /usr/share/steam/compatibilitytools.d/*/compatibilitytool.vdf", ["GE-Proton", "cachyos"])
-        c.run("wine", f"runuser -l {USER} -c 'WINEDEBUG=-all wine --version; xdg-mime query default application/x-ms-dos-executable'",
-              ["wine-", "wine.desktop"])
+        c.run("wine", f"runuser -l {USER} -c 'WINEDEBUG=-all wine --version; printf MZ > /tmp/setup.exe; "
+              "t=$(xdg-mime query filetype /tmp/setup.exe); echo TYPE=$t; echo EXE=$(xdg-mime query default $t); "
+              "echo MSI=$(xdg-mime query default application/x-msi)'",
+              ["wine-", "EXE=samurai-wine.desktop", "MSI=samurai-wine.desktop"])
 
         # repositories (spec 02, ADR-0007)
         out = c.run("repos", "grep -E '^\\[' /etc/pacman.conf | tr '\\n' ' '; echo; "
                     "pacman-conf --repo=chaotic-aur SigLevel; "
                     "pacman-key --list-keys EF925EA60F33D0CB85C44AD13056513887B78AEB | head -4",
-                    ["PackageRequired", "[ full"])
+                    ["PackageRequired", "full"])
         order = re.findall(r"\[([a-z-]+)\]", out.splitlines()[0])
         if order != ["options", "core", "extra", "multilib", "cachyos", "chaotic-aur", "samurai"]:
             c.failures.append(f"repos: unexpected order {order}")
@@ -213,8 +230,8 @@ def test_default_kde_system(mirror):
               "wpctl --version >/dev/null; echo", ["KWIN-OK"])
         c.ga.exec("sleep 10", timeout=40)
         vm.screendump("defaults-01-desktop")
-        c.run("terminal", env + " sh -c 'WAYLAND_DISPLAY=$(ls /run/user/1000 | grep -E \"^wayland-[0-9]$\" | head -1) "
-              "QT_QPA_PLATFORM=wayland setsid konsole >/dev/null 2>&1 < /dev/null &'; sleep 10; "
+        # started by the user's systemd manager: the real session environment
+        c.run("terminal", env + " systemd-run --user --collect --quiet konsole; sleep 10; "
               f"pgrep -u {USER} -x konsole >/dev/null && echo KONSOLE-OK", ["KONSOLE-OK"], timeout=60)
         vm.screendump("defaults-02-konsole")
         c.run("disk-use", "df -h / | tail -1; du -sh /var/cache/pacman/pkg 2>/dev/null")

@@ -13,9 +13,9 @@ optdepends=('zsh: zsh defaults')
 install=samurai-settings-shell.install
 source=(samurai.fish samurai-path.sh samurai.bash samurai.zsh LICENSE)
 sha256sums=(
-    '35db88feecd0a997ca45863dcb882aa3cc109102a48d762fc32bed3759f3b701'
+    'e5212ddf20a937e13e4d3e9ca3a8334c0740456dda479a02dc0ad97c6a89d094'
     'c3261236ef3d99a2c4da473d1082af3350e7a14e20c91528f3923526f447edd6'
-    '618a3b32e408bebca24d27625ef3aba81164d58c8b20b4765767a7008fa0d065'
+    '164917da09a4a265b865b76c137743459a0c135435f8201e527aa1edc7616ea0'
     '5e9be19815bc522a314ff05ec91f3e321e1f91fb575e8cb4c7711103b10a6313'
     '1be06492345bb03a60d13d23d744d979cc7cf1ce154da5227651f8dd78f25017'
 )

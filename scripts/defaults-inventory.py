@@ -65,7 +65,7 @@ ITEMS = [
     ("10 Gaming", "Proton-CachyOS, umu-launcher, protontricks", "proton-cachyos-slr umu-launcher protontricks",
      "profile [gaming]", "done"),
     ("10 Gaming", "samurai-wine; .exe opens with Wine", "samurai-wine wine-staging winetricks wine-mono wine-gecko",
-     "new meta; handler is wine-staging's wine.desktop; Arch Wine is WoW64, no lib32 deps", "done"),
+     "new package with its own .exe/.msi handler; Arch Wine is WoW64, no lib32 deps", "done"),
     ("10 Gaming", "lib32 GPU drivers", "lib32-mesa lib32-vulkan-radeon lib32-vulkan-intel lib32-nvidia-utils",
      "with Steam (planner)", "done"),
     ("10 Gaming", "Heroic picks up system-wide Proton (M7 check)", "", "not verified: needs a Heroic account/UI", "gap"),

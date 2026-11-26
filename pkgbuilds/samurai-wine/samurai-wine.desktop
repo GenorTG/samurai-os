@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Run with Wine
+Comment=Open a Windows program or installer with Wine
+Exec=wine start /unix %f
+Icon=wine
+NoDisplay=true
+StartupNotify=true
+MimeType=application/vnd.microsoft.portable-executable;application/x-ms-ne-executable;application/x-msdownload;application/x-ms-dos-executable;application/x-msi;application/x-bat;application/x-ms-shortcut;
