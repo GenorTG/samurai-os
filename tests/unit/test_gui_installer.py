@@ -276,3 +276,6 @@ def test_live_medium_ships_what_it_refers_to():
     assert "installer/gui" in (REPO / "ci" / "build-iso.sh").read_text()
     for entry in (airootfs / "usr/share/samurai-installer/live-skel/Desktop").iterdir():
         assert "Exec=" in entry.read_text()
+    polkit = (airootfs / "etc/polkit-1/rules.d/50-samurai-live.rules").read_text()
+    granted = polkit.split("var allowed = [")[1].split("]")[0]
+    assert "ignore-inhibit" not in granted and 'subject.user === "live"' in polkit

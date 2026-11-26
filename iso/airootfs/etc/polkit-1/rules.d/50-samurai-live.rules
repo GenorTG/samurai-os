@@ -1,0 +1,15 @@
+// Live medium only: the desktop user may restart or shut down although the root consoles
+// (tty2, serial) are also logged in. Overriding the installer's shutdown inhibitor still
+// needs authentication (no "-ignore-inhibit" action is listed).
+polkit.addRule(function (action, subject) {
+    var allowed = [
+        "org.freedesktop.login1.reboot",
+        "org.freedesktop.login1.reboot-multiple-sessions",
+        "org.freedesktop.login1.power-off",
+        "org.freedesktop.login1.power-off-multiple-sessions"
+    ];
+    if (subject.user === "live" && subject.local && subject.active &&
+            allowed.indexOf(action.id) >= 0) {
+        return polkit.Result.YES;
+    }
+});
