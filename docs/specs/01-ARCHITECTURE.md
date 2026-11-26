@@ -32,7 +32,7 @@ samurai-os/
     gui/                        Qt6/QML toolbox and welcome app (ADR-0004)
   catalog/                      install catalog: Garuda import + our choices (spec 08)
   settings/                     source trees for samurai-*-settings packages
-  iso/                          archiso profile (releng-derived) + Calamares config
+  iso/                          archiso profile (releng-derived) + Plasma live session
   tests/vm/                     QEMU/libvirt harness and scenarios (spec 11)
   ci/                           build container, repo publish, ISO build scripts
   .github/workflows/            CI (spec 02)
@@ -66,7 +66,7 @@ published package repository lives in a second, data-only repo (spec 02).
 | `samurai-theme-otto`, `samurai-theme-scratchy` | assets | KDE themes (spec 14, licence check first) |
 | `samurai-gpu-unlock` | builder | pinned upstream source + local build script; never ships firmware (ADR-0008) |
 | `samurai-proton-ge`, `samurai-python310…313`, `samurai-miniforge`, `samurai-miniconda` | repackaged binaries | auto-bumped from upstream releases (spec 02) |
-| `samurai-install` | tool | terminal guided installer + unattended mode; shares `samurai-postinstall` with Calamares (spec 08) |
+| `samurai-install` | tool | terminal guided installer + unattended mode; the graphical installer (`installer/gui`) runs it (spec 08) |
 | `samurai-iso-live`, `samurai-calamares-config` | ISO only | live session and installer config, removed at the end of install |
 
 Target size of `[samurai]`: about 20–30 packages. A new package needs a reason in its PKGBUILD header.
@@ -96,5 +96,5 @@ Target size of `[samurai]`: about 20–30 packages. A new package needs a reason
 | drivers | chwd | CachyOS's maintained detector (spec 07) |
 | hardware info | inxi, lspci, lsusb, hwinfo, smartmontools, fwupd | diagnostics |
 | boot | bootloader per ADR-0003; sbctl for Secure Boot | spec 06, 09 |
-| installer | Calamares (graphical) + our `samurai-install` (terminal) | Calamares is used by both Garuda and CachyOS |
+| installer | `installer/gui` (Qt Quick wizard) + our `samurai-install` (terminal) | one engine for both (ADR-0009) |
 | ISO | archiso | official Arch ISO builder |

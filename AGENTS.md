@@ -64,3 +64,13 @@ See `docs/specs/01-ARCHITECTURE.md` "Source layout". Today only `docs/`, `script
 - Arch builds Wine as pure WoW64 (2026-11-26): most `lib32-*` Wine libraries no longer exist.
 - Hold `/tmp/samurai-vm.lock` only while a VM test runs: an interactive VM session under the lock
   blocks every other lane (2026-11-26).
+- Graphical installer (`installer/gui`, ADR-0009) is a front-end only: new choices go to the planner and
+  schema first, then `model.py` + a QML page. Layout check without a VM, in an Arch container:
+  `tests/gui/render_pages.py OUT` and `tests/gui/drive_keyboard.py` (`QT_QPA_PLATFORM=offscreen`).
+- The Plasma controls style gives every button an automatic Alt+letter mnemonic: a letter `Shortcut`
+  becomes ambiguous and silently never fires. Use arrows / Ctrl combinations.
+- A root helper that sets a private umask passes it to `samurai-install`, which `mkdir`s directories of
+  the new system: spawn the engine with `umask=0o022` and create secret files with explicit modes.
+- Live-only files live in `/usr/lib/samurai-installer/`: `samurai-install` copies every
+  `/usr/local/bin/samurai-*` into the installed system.
+
