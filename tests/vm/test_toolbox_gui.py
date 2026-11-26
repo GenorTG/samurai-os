@@ -171,6 +171,10 @@ def test_update_streams_and_the_window_stays_usable(desktop):
     finished(desktop, "update", 2400)
     desktop.wait_text("Finished", 60)
     desktop.shot("update-finished")
+    # what the update changed, for the test log (a removal on a fresh install is worth reading)
+    print(run(desktop.ga, "awk '/starting full system upgrade/ {n = NR} {line[NR] = $0} "
+                          "END {for (i = n; i <= NR; i++) if (line[i] ~ /(installed|removed|upgraded|replac)/) "
+                          "print line[i]}' /var/log/pacman.log", check=False))
     out = run(desktop.ga, "cat /var/lib/samurai/update-report.json")
     assert '"ok": true' in out, out
 

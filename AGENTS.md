@@ -81,6 +81,13 @@ See `docs/specs/01-ARCHITECTURE.md` "Source layout". Today only `docs/`, `script
   becomes ambiguous and silently never fires. Use arrows / Ctrl combinations.
 - A root helper that sets a private umask passes it to `samurai-install`, which `mkdir`s directories of
   the new system: spawn the engine with `umask=0o022` and create secret files with explicit modes.
+- Anything that writes the ESP and then says "reboot" must leave no second mount of it and `sync`:
+  `rescue rollback` left `/esp` mounted (keyfile lookup), and a power-off gave a 0-byte `vmlinuz`
+  (Limine "Kernel file too small", 2026-11-26). VM tests must not add the `sync` for the tool.
+- GUI VM tests: the Plasma splash stays up after `plasmashell` starts and eats clicks (wait for
+  `ksplashqml` to exit); the pointer hides the label it clicked from tesseract, which also misses large
+  page headers (assert on page content).
+- A fresh offline install has no sync databases: VM tests that install packages run `pacman -Syu` first.
 - Live-only files live in `/usr/lib/samurai-installer/`: `samurai-install` copies every
   `/usr/local/bin/samurai-*` into the installed system.
 - VM tests must keep draining the serial socket: with nobody reading, the guest blocks on the serial
