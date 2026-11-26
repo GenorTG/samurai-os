@@ -121,9 +121,10 @@ class VM:
         while time.time() < deadline:
             if os.path.exists(path):
                 try:
-                    socket.socket(socket.AF_UNIX).connect(path)  # probe
+                    with socket.socket(socket.AF_UNIX) as probe:
+                        probe.connect(path)
                     return
-                except (ConnectionRefusedError, FileNotFoundError):
+                except (ConnectionRefusedError, FileNotFoundError, BlockingIOError):
                     pass
             time.sleep(0.3)
         raise TimeoutError(f"socket never appeared: {path}")
@@ -240,6 +241,13 @@ class VM:
     def qga(self, timeout: float = 120.0):
         from qga import GuestAgent  # noqa: local import for sys.path simplicity
         self.wait_socket(self.qga_sock, timeout=60)
+        # the chardev takes one client: while QEMU is still dropping the previous one a
+        # connect fails with EAGAIN
+        for _ in range(40):
+            try:
+                return GuestAgent(self.qga_sock, timeout=timeout)
+            except BlockingIOError:
+                time.sleep(0.25)
         return GuestAgent(self.qga_sock, timeout=timeout)
 
     def ensure_qga(self) -> "GuestAgent":
