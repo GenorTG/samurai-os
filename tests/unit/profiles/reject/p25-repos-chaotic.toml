@@ -13,4 +13,4 @@ groups = ["wheel"]
 [packages]
 install = ["samurai-release"]
 [repos]
-chaotic_aur = true
+chaotic_aur = false

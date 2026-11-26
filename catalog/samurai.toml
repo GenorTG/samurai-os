@@ -116,13 +116,9 @@ mode = "single"
 default = "kde"
 options = [
   { id = "kde", name = "KDE Plasma (Wayland)", meta = "samurai-desktop-kde", tested = true },
-  { id = "gnome", name = "GNOME", meta = "samurai-desktop-gnome", tested = false },
-  { id = "hyprland", name = "Hyprland", meta = "samurai-desktop-hyprland", tested = false },
-  { id = "cosmic", name = "COSMIC", meta = "samurai-desktop-cosmic", tested = false },
-  { id = "xfce", name = "Xfce", meta = "samurai-desktop-xfce", tested = false },
-  { id = "cinnamon", name = "Cinnamon", meta = "samurai-desktop-cinnamon", tested = false },
-  { id = "sway", name = "Sway", meta = "samurai-desktop-sway", tested = false },
-  { id = "i3", name = "i3 (X11)", meta = "samurai-desktop-i3", tested = false },
+  { id = "gnome", name = "GNOME", meta = "", tested = false },
+  { id = "xfce", name = "Xfce", meta = "", tested = false },
+  { id = "lxqt", name = "LXQt", meta = "", tested = false },
   { id = "none", name = "No desktop (server / build your own)", meta = "", tested = true },
 ]
 
@@ -148,11 +144,9 @@ default = ["firefox"]
 [[choice]]
 id = "kde-theme"
 mode = "single"
-default = "breeze"   # Otto/Scratchy stay opt-in until their KDE Store licences are confirmed (spec 14)
+default = "breeze"   # Otto/Scratchy are not offered until their KDE Store licences are confirmed (spec 14)
 when = "desktop == kde"
 options = [
-  { id = "otto", name = "Otto (dark, orange/yellow)", meta = "samurai-theme-otto" },
-  { id = "scratchy", name = "Scratchy (dark, Catppuccin Macchiato)", meta = "samurai-theme-scratchy" },
   { id = "breeze", name = "Breeze Dark (KDE default)", meta = "" },
 ]
 
@@ -162,7 +156,6 @@ mode = "single"
 default = "miniforge"
 options = [
   { id = "miniforge", name = "Miniforge (conda + mamba, conda-forge channel)", packages = ["samurai-miniforge"], source = "samurai" },
-  { id = "miniconda", name = "Miniconda (Anaconda defaults channel)", packages = ["samurai-miniconda"], source = "samurai" },
   { id = "none", name = "None (uv only)" },
 ]
 
@@ -226,7 +219,7 @@ when = "desktop == kde"
 
 [[toggle]]
 id = "python-versions"
-default = true
+default = false   # Genor 2026-11-17: every extra version is unticked; uv fetches missing ones
 packages = ["uv", "samurai-python310", "samurai-python311", "samurai-python312", "samurai-python313"]
 note = "python (3.14) from Arch core stays the system python"
 
@@ -235,7 +228,8 @@ id = "gaming"
 default = true
 packages = [
   "steam", "heroic-games-launcher-bin", "gamemode", "lib32-gamemode", "mangohud", "lib32-mangohud",
-  "gamescope", "protontricks", "umu-launcher", "samurai-proton-ge", "proton-cachyos-slr", "samurai-wine",
+  "goverlay", "gamescope", "protontricks", "umu-launcher", "samurai-proton-ge", "proton-cachyos-slr",
+  "samurai-wine",
   # proton-cachyos-slr: CachyOS split proton-cachyos into -native/-slr (checked 2026-11-21);
   # the Steam Linux Runtime build is the one Steam lists as a compatibility tool.
 ]
@@ -246,7 +240,7 @@ category = "craft"
 id = "craft-launcher"
 name = "Craft Launcher (installs and updates every ArtCraft app)"
 packages = ["artcraft-launcher-appimage"]
-source = "samurai"   # AUR only today; repackaged in [samurai]
+source = "samurai"   # AUR only; not packaged yet (brand licence unconfirmed)
 
 [[app]]
 category = "craft"
@@ -259,8 +253,8 @@ source = "chaotic"
 category = "craft"
 id = "vectorcraft"
 name = "VectorCraft (Illustrator-style)"
-packages = ["vectorcraft-bin"]
-source = "samurai"   # not in Chaotic-AUR on 2026-10-27
+packages = ["vectorcraft"]
+source = "chaotic"
 
 [[app]]
 category = "craft"
@@ -301,8 +295,8 @@ source = "chaotic"
 category = "craft"
 id = "craft-office"
 name = "WordCraft, GridCraft, DeckCraft (Office-style)"
-packages = ["gridcraft", "deckcraft"]
-source = "chaotic"   # WordCraft: add when packaged
+packages = ["wordcraft", "gridcraft", "deckcraft"]
+source = "chaotic"
 
 [[app]]
 category = "craft"
@@ -324,8 +318,8 @@ env = { DISABLE_AUTOUPDATER = "1" }     # pacman updates it
 category = "ai-cli"
 id = "codex"
 name = "Codex CLI (OpenAI)"
-packages = ["openai-codex-bin"]
-source = "samurai"
+packages = ["openai-codex"]
+source = "arch"
 
 [[app]]
 category = "ai-cli"
@@ -345,8 +339,8 @@ source = "chaotic"
 category = "ai-cli"
 id = "opencode"
 name = "OpenCode"
-packages = ["opencode-bin"]
-source = "samurai"
+packages = ["opencode"]
+source = "arch"
 
 [[app]]
 category = "ai-cli"

@@ -1,0 +1,33 @@
+version = 1
+[system]
+hostname = "h"
+timezone = "UTC"
+[disk]
+device = "/dev/vda"
+encryption = true
+[boot]
+kernels = ["linux"]
+[user]
+name = "u"
+groups = ["wheel"]
+[packages]
+desktop = "kde"
+browsers = ["firefox"]
+[kde]
+theme = "breeze"
+monitor_widgets = false
+reduced_effects = false
+[gaming]
+enabled = true
+heroic = false
+[development]
+python = ["3.10", "3.13"]
+conda = "miniforge"
+docker = "rootless"
+ai_clis = ["codex", "claude-code", "aider"]
+ollama = true
+[network]
+tailscale = true
+reverse_proxy = "nginx"
+[repos]
+chaotic_aur = true
