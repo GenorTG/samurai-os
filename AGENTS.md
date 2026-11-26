@@ -52,3 +52,15 @@ See `docs/specs/01-ARCHITECTURE.md` "Source layout". Today only `docs/`, `script
 - Limine boots the FIRST entry in `limine.conf`. Any code editing the menu must decide who is first (2026-11-25: removing the default kernel entry made a foreign entry the default; VM screendump showed the panic). When a VM reboot test hangs, take a QMP `screendump` before the timeout kills the VM: bootloader errors never reach the serial log.
 - Never `pkill -f <pattern>` from an exec command that contains the pattern: it kills its own shell. Stop the systemd unit instead.
 - A published package file name never changes bytes: pacman caches by name and verifies the db checksum; makepkg is not reproducible. `ci/build-repo.sh` reuses the stable file when contents match and fails with "bump pkgrel" when they differ (2026-11-26: a release nearly overwrote three unchanged base packages).
+- Package selection for an install lives only in `installer/samurai-profile-plan` (postinstall, the
+  wizard's lists and the offline ISO closure read it). A new choice = planner + `validate-profile.py`
+  + `docs/plans/profile-schema.md` + unit test; offline-carried choices go into
+  `everything_offline_profiles()`.
+- Local PKGBUILD sources: run `ci/update-pkg-sums.py` after editing one. `iso/airootfs` holds
+  committed copies of installer files (unit tests fail on drift; copies in `usr/local/bin` are 755).
+- A branch whose `[samurai]` packages are unpublished is tested with `ci/build-pkgs.sh` +
+  `SAMURAI_LOCAL_PKGS=<dir> ci/build-iso.sh` (offline flavor only). Online installs of such a branch
+  fail until the packages are published; release order is repo first, ISO second.
+- Arch builds Wine as pure WoW64 (2026-11-26): most `lib32-*` Wine libraries no longer exist.
+- Hold `/tmp/samurai-vm.lock` only while a VM test runs: an interactive VM session under the lock
+  blocks every other lane (2026-11-26).
