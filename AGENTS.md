@@ -77,4 +77,5 @@ See `docs/specs/01-ARCHITECTURE.md` "Source layout". Today only `docs/`, `script
   the new system: spawn the engine with `umask=0o022` and create secret files with explicit modes.
 - Live-only files live in `/usr/lib/samurai-installer/`: `samurai-install` copies every
   `/usr/local/bin/samurai-*` into the installed system.
-
+- VM tests must keep draining the serial socket: with nobody reading, the guest blocks on the serial
+  console (PID 1 hung in `tty_wait_until_sent` mid-reboot, `systemctl` timing out).

@@ -22,6 +22,7 @@ INSTALL_ICON = (58, 62)    # "Install Samurai OS (graphical)" on the 1280x800 de
 
 def guest(vm: VM, command: str, timeout: float = 120.0) -> str:
     """One command over a fresh guest-agent connection (the chardev takes one client)."""
+    vm.serial_read(max_wait=0.3)    # keep the live console drained (see wait_guest_restart)
     agent = vm.qga(timeout=timeout)
     try:
         return agent.exec(command, timeout=timeout, check=False)[1]

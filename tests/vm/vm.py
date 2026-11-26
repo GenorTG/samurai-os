@@ -302,10 +302,13 @@ class VM:
         """Graphical VMs: wait until the guest itself asked to restart or power off."""
         deadline = time.time() + timeout
         while time.time() < deadline:
+            # drain the console: with nobody reading it the guest's PID 1 blocks on the
+            # serial tty in the middle of shutting down
+            self.serial_read(max_wait=1.0)
             status = self._qmp_call("query-status").get("return", {}).get("status")
             if status == "shutdown":
                 return
-            time.sleep(2)
+            time.sleep(1)
         raise TimeoutError("the guest never restarted")
 
     def resume_after_restart(self) -> None:
