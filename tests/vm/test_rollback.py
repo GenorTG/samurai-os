@@ -96,15 +96,13 @@ def test_rollback_after_bad_update(mirror):
             timeout=600, check=False)
         print("ROLLBACK-OUT:", out[-1200:])
         assert "Rollback staged" in out, out[-800:]
-        # post-rollback forensics: the regen must have rewritten the ESP
-        # initramfs (the corrupted one is exactly 48 MiB of zeros)
-        code, out3 = ga2.exec(
-            "samurai rescue mount >/dev/null 2>&1; "
-            "mount /dev/vda1 /esp 2>/dev/null; "
-            "ls -l /esp/initramfs-linux.img 2>&1 | awk '{print \"size:\", $5}'; "
-            "md5sum /esp/initramfs-linux.img 2>&1 | cut -c1-12",
-            timeout=180, check=False)
-        print("ESP-AFTER-ROLLBACK:", out3[-300:])
+        assert "magic unexpected" not in out, out[-800:]
+        # nothing of the install stays mounted: a still-mounted ESP is never flushed, and
+        # the power-off below would leave an empty kernel on it. Do not add a sync here:
+        # "Reboot now" has to be safe as printed.
+        code, mounts = ga2.exec("findmnt -rn -S /dev/vda1; findmnt -rn -S /dev/mapper/samurai-root; echo END",
+                                timeout=60, check=False)
+        assert mounts.strip() == "END", f"rollback left the install mounted: {mounts}"
     finally:
         rescue.stop()
 
@@ -112,7 +110,12 @@ def test_rollback_after_bad_update(mirror):
     restored = VM("rollback-verify", disk=vm.disk_path)
     restored.start()
     try:
-        restored.wait_for("login:", timeout=300)
+        try:
+            restored.wait_for("login:", timeout=300)
+        except TimeoutError:
+            # bootloader errors never reach the serial log
+            print("screenshot:", restored.screendump("rollback-boot-failed"))
+            raise
         ga3 = restored.qga(timeout=60)
         _, out = ga3.exec("cat /etc/hostname")
         assert out.strip() == "samurai-vm", out

@@ -177,6 +177,7 @@ print(json.dumps({"schema": 1, "config": config, "snapshots": [
         if ! chroot "$new" /bin/sh -euc "$RESTORE_BOOT"; then
             die "root restored, but rebuilding the boot files failed: do NOT reboot yet; fix it or run 'samurai rescue rollback' from the live ISO"
         fi
+        sync   # new kernels on the ESP and the swapped root: durable before "Reboot now"
         log "rollback complete. previous system kept as subvolume @-broken-$ts (delete it when satisfied)"
         echo "Rollback complete. Reboot now: systemctl reboot"
         ;;

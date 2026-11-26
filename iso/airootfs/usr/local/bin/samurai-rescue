@@ -14,6 +14,15 @@ die() { printf 'FATAL: %s\n' "$*" >&2; exit "${2:-1}"; }
 
 cmd="${1:-mount}"; shift 2>/dev/null || true
 
+# The ESP is mounted at /esp only to read the unlock key. Left mounted, the same vfat
+# stays active after /mnt is unmounted, so nothing written to it later is flushed: a
+# power-off right after `rollback` left a 0-byte kernel on the ESP (2026-11-26).
+release_keyfile_mount() {
+    if mountpoint -q /esp 2>/dev/null; then
+        umount /esp 2>/dev/null || log "WARNING: /esp is busy and stays mounted"
+    fi
+}
+
 find_install() {
     # find the Samurai root: btrfs with a /@ subvolume, LUKS container optional.
     # An encrypted install hides its btrfs until unlocked — so when we find a
@@ -51,6 +60,7 @@ find_install() {
             else
                 cryptsetup open "$CRYPT_DEV" samurai-root || die "LUKS unlock failed"
             fi
+            release_keyfile_mount
             BTRFS_DEV=/dev/mapper/samurai-root
         fi
     fi
@@ -104,6 +114,7 @@ mount_install() {
             else
                 cryptsetup open "$CRYPT_DEV" samurai-root || die "LUKS unlock failed"
             fi
+            release_keyfile_mount
         fi
         ROOTDEV=/dev/mapper/samurai-root
     else
@@ -172,11 +183,13 @@ case "$cmd" in
         else
             die "no recognizable bootloader on the ESP (limine.conf/grub/loader/entries/refind) — install manually"
         fi
+        sync
         ;;
     initramfs)
         mount_install
         log "rescue: regenerating initramfs for every kernel in the target"
         arch-chroot "$MOUNT_DIR" bash -c 'for p in /etc/mkinitcpio.d/*.preset; do mkinitcpio --preset "$(basename "${p%.preset}")" || true; done'
+        sync
         ;;
     kernel)
         mount_install
@@ -188,6 +201,7 @@ case "$cmd" in
                 [ -n "$pkgs" ] && pacman --noconfirm -U "$pkgs" || true
             done
         ' || log "kernel reinstall from cache failed; run 'samurai rescue chroot' for manual repair"
+        sync
         ;;
     rollback)
         mount_install
@@ -237,7 +251,7 @@ case "$cmd" in
         # the initramfs for the restored root so the boot matches it (spec 06
         # step 3). stderr stays visible: its progress/errors land in the
         # caller's capture (the pytest ROLLBACK-OUT forensics).
-        arch-chroot "$MOUNT_DIR" bash -c 'for d in /usr/lib/modules/*; do
+        arch-chroot "$MOUNT_DIR" bash -ec 'for d in /usr/lib/modules/*; do
                 [ -f "$d/pkgbase" ] && [ -f "$d/vmlinuz" ] || continue
                 install -m644 "$d/vmlinuz" "/boot/vmlinuz-$(cat "$d/pkgbase")"
             done
@@ -256,12 +270,16 @@ case "$cmd" in
         for img in "$MOUNT_DIR"/boot/initramfs-*.img; do
             magic=$(head -c 4 "$img" 2>/dev/null | od -An -tx1 | tr -d ' \n')
             case "$magic" in
-                *28b52ffd*|*fd2fb528*) log "rollback: $(basename "$img") OK" ;;
+                # zstd, or the uncompressed early cpio (microcode) in front of it
+                *28b52ffd*|*fd2fb528*|30373037) log "rollback: $(basename "$img") OK" ;;
                 *) log "WARNING: rollback: $(basename "$img") magic unexpected: ${magic:-none} — run 'samurai rescue initramfs' from the live ISO" ;;
             esac
         done
+        # everything must be on disk before "Reboot now": the next step may be the power button
+        sync
         log "rescue: rollback staged (@-broken-$ts kept). Unmount and reboot."
-        umount -R "$MOUNT_DIR" 2>/dev/null || true
+        umount -R "$MOUNT_DIR" 2>/dev/null \
+            || log "WARNING: rollback: $MOUNT_DIR is busy and stays mounted (data is synced; reboot normally)"
         cryptsetup close samurai-root 2>/dev/null || true
         echo "Rollback staged. Reboot now."
         ;;
