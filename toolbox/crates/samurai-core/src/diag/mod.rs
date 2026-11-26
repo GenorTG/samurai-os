@@ -339,6 +339,10 @@ pub fn confined(base: &std::path::Path, candidate: &std::path::Path) -> bool {
     candidate.file_name().is_some() && parent.starts_with(&base)
 }
 
+/// `--out` value that prints the bundle instead of creating a file. A privileged caller (the
+/// GUI helper) uses it so that root never writes to a path chosen by a user.
+pub const STDOUT: &str = "-";
+
 pub fn redactor(sys: &dyn System, extra_users: &[String]) -> Redactor {
     Redactor::new(user_names(sys, extra_users), sys.read("/etc/hostname"))
 }
@@ -350,7 +354,11 @@ pub enum Cmd {
     Logs(LogOpts),
     Disks,
     Gpu,
-    Bundle { redact: bool, out: Option<String> },
+    /// `out` of `-` means standard output.
+    Bundle {
+        redact: bool,
+        out: Option<String>,
+    },
     Help,
 }
 
@@ -400,6 +408,10 @@ pub fn parse_args(args: &[String]) -> Result<Cmd, String> {
                     other => return Err(format!("unknown option: {other}")),
                 }
             }
+            // an unredacted bundle only ever goes into a private file
+            if !redact && out.as_deref() == Some(STDOUT) {
+                return Err("--no-redact cannot write to standard output".into());
+            }
             Ok(Cmd::Bundle { redact, out })
         }
         other => Err(format!("unknown command: {other}")),
@@ -427,7 +439,7 @@ Read-only diagnostics.
                        the last `samurai update` log
   disks                mounts, usage, btrfs usage + device errors, SMART health
   gpu                  adapters, loaded modules, kernel command line, Vulkan/GL
-  bundle [--no-redact] [--out FILE]
+  bundle [--no-redact] [--out FILE|-]
                        all of the above + `samurai health --json`, package lists, pacman.conf
                        and boot config in one text file (default ~/samurai-diag-<time>.txt,
                        mode 0600). Redacted by default: user names, hostname, MACs, IPs,

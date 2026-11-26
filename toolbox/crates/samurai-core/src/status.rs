@@ -17,7 +17,12 @@ pub fn state_dir(xdg_state_home: Option<&str>, home: Option<&str>) -> Option<Pat
 
 /// Which arguments the native implementation accepts.
 pub fn is_native(args: &[String]) -> bool {
-    args.is_empty() || (args.len() == 1 && args[0] == "--json")
+    args.is_empty() || (args.len() == 1 && (args[0] == "--json" || args[0] == "--report"))
+}
+
+/// The last `samurai update` report (JSON, schema 1), or an error object when there is none.
+pub fn render_report(report: &Path) -> String {
+    fs::read_to_string(report).unwrap_or_else(|_| "{\"schema\": 1, \"error\": 1}\n".to_string())
 }
 
 pub fn render(state_dir: Option<&Path>, report: &Path, json: bool) -> String {
@@ -64,6 +69,7 @@ mod tests {
     fn native_args() {
         assert!(is_native(&[]));
         assert!(is_native(&["--json".to_string()]));
+        assert!(is_native(&["--report".to_string()]));
         assert!(!is_native(&["--check".to_string()]));
         assert!(!is_native(&["--json".to_string(), "x".to_string()]));
     }
@@ -77,6 +83,15 @@ mod tests {
             render(None, &missing, true),
             "{\"schema\": 1, \"error\": 1}\n"
         );
+    }
+
+    #[test]
+    fn report_is_the_file_or_an_error_object() {
+        let d = tmp("report");
+        let f = d.join("report.json");
+        assert_eq!(render_report(&f), "{\"schema\": 1, \"error\": 1}\n");
+        fs::write(&f, "{\"ok\": true}\n").unwrap();
+        assert_eq!(render_report(&f), "{\"ok\": true}\n");
     }
 
     #[test]

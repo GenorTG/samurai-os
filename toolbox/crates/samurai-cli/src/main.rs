@@ -161,6 +161,17 @@ fn sudo_target(sys: &RealSystem) -> Option<String> {
     user.filter(|_| is_root)
 }
 
+/// The user who asked through pkexec (the GUI): their name must be redacted too.
+fn pkexec_user(sys: &RealSystem) -> Option<String> {
+    use health::system::System;
+    let uid: u32 = std::env::var("PKEXEC_UID").ok()?.parse().ok()?;
+    sys.read("/etc/passwd")?.lines().find_map(|l| {
+        let f: Vec<&str> = l.split(':').collect();
+        let name = f.first()?;
+        (f.get(2)?.parse::<u32>().ok()? == uid).then(|| (*name).to_string())
+    })
+}
+
 fn run_kernel(args: &[String]) -> ExitCode {
     use health::system::System;
     let cmd = match kernel::parse_args(args) {
@@ -176,7 +187,7 @@ fn run_kernel(args: &[String]) -> ExitCode {
         print!("{}", kernel::USAGE);
         return ExitCode::SUCCESS;
     }
-    if cmd != kernel::Cmd::List
+    if !matches!(cmd, kernel::Cmd::List { .. })
         && sys
             .run("id", &["-u"])
             .is_none_or(|o| o.stdout.trim() != "0")
@@ -186,7 +197,8 @@ fn run_kernel(args: &[String]) -> ExitCode {
     }
     let result: Result<(), String> = match cmd {
         kernel::Cmd::Help => Ok(()),
-        kernel::Cmd::List => kernel::list(&sys).map(|t| print!("{t}")),
+        kernel::Cmd::List { json: false } => kernel::list(&sys).map(|t| print!("{t}")),
+        kernel::Cmd::List { json: true } => kernel::list_json(&sys).map(|t| print!("{t}")),
         kernel::Cmd::Install { name, yes } => kernel::plan_install(&sys, &name).and_then(|plan| {
             for w in &plan.warnings {
                 eprintln!("warning: {w}");
@@ -239,7 +251,8 @@ fn run_boot(args: &[String]) -> ExitCode {
             print!("{}", boot::USAGE);
             return ExitCode::SUCCESS;
         }
-        boot::Cmd::Get => return report(boot::settings::get(&RealSystem)),
+        boot::Cmd::Get { json: false } => return report(boot::settings::get(&RealSystem)),
+        boot::Cmd::Get { json: true } => return report(boot::settings::get_json(&RealSystem)),
         boot::Cmd::Set(change) => {
             if RealSystem
                 .run("id", &["-u"])
@@ -290,7 +303,8 @@ fn run_mirrors(args: &[String]) -> ExitCode {
             print!("{}", mirrors::USAGE);
             return ExitCode::SUCCESS;
         }
-        mirrors::Cmd::Status => mirrors::status(&sys),
+        mirrors::Cmd::Status { json: false } => mirrors::status(&sys),
+        mirrors::Cmd::Status { json: true } => mirrors::status_json(&sys),
         mirrors::Cmd::Refresh => {
             if sys
                 .run("id", &["-u"])
@@ -488,6 +502,16 @@ fn run_diag_bundle(sys: &RealSystem, redact: bool, out: Option<String>) -> ExitC
         Some(u) => diag::home_of(sys, u),
         None => std::env::var("HOME").ok(),
     };
+    let to_stdout = out.as_deref() == Some(diag::STDOUT);
+    if to_stdout {
+        // printed, never written: always redacted (parse_args refuses --no-redact with `-`)
+        let mut extra: Vec<String> = user.iter().cloned().collect();
+        extra.extend(std::env::var("USER").ok());
+        extra.extend(pkexec_user(sys));
+        let text = diag::render(&diag::bundle(sys, epoch));
+        print!("{}", diag::redactor(sys, &extra).redact(&text));
+        return ExitCode::SUCCESS;
+    }
     let path = match (out, home.clone()) {
         (Some(p), _) => std::path::PathBuf::from(p),
         (None, Some(h)) => Path::new(&h).join(format!("samurai-diag-{epoch}.txt")),
@@ -587,6 +611,10 @@ fn main() -> ExitCode {
     match parse(&cmd) {
         Action::Help => {
             print!("{USAGE}");
+            ExitCode::SUCCESS
+        }
+        Action::Status if rest == ["--report"] => {
+            print!("{}", status::render_report(Path::new(status::REPORT_PATH)));
             ExitCode::SUCCESS
         }
         Action::Status if status::is_native(&rest) => {

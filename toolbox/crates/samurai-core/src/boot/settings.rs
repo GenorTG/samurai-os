@@ -7,6 +7,7 @@ use super::{
     boot_readable, default_kernel, join_blocks, managed, split_blocks, GRUB_CFG, LIMINE_CONF,
     SD_ENTRIES, SD_LOADER,
 };
+use crate::health::json_escape;
 use crate::health::system::System;
 
 const MAX_TIMEOUT: u32 = 60;
@@ -196,7 +197,16 @@ pub fn set(sys: &dyn System, change: &Change) -> Result<String, String> {
     ))
 }
 
-pub fn get(sys: &dyn System) -> Result<String, String> {
+/// What the boot menu currently says; `None` fields are not set (or not managed, for GRUB).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct State {
+    pub loader: &'static str,
+    pub timeout: Option<String>,
+    pub default_kernel: Option<String>,
+    pub params: Option<String>,
+}
+
+pub fn state(sys: &dyn System) -> Result<State, String> {
     if !boot_readable(sys) {
         return Err("/boot cannot be read (run as root, and check that the ESP is mounted)".into());
     }
@@ -239,12 +249,58 @@ pub fn get(sys: &dyn System) -> Result<String, String> {
     } else {
         return Err("no Limine, systemd-boot or GRUB configuration found".into());
     };
+    Ok(State {
+        loader,
+        timeout,
+        default_kernel: default_kernel(sys),
+        params,
+    })
+}
+
+pub fn get(sys: &dyn System) -> Result<String, String> {
+    let s = state(sys)?;
     let or = |v: Option<String>| v.unwrap_or_else(|| "-".into());
     Ok(format!(
-        "bootloader: {loader}\ntimeout: {}\ndefault kernel: {}\nkernel parameters: {}\n",
-        or(timeout),
-        or(default_kernel(sys)),
-        or(params)
+        "bootloader: {}\ntimeout: {}\ndefault kernel: {}\nkernel parameters: {}\n",
+        s.loader,
+        or(s.timeout),
+        or(s.default_kernel),
+        or(s.params)
+    ))
+}
+
+/// `get` for machines. `parameters` carry `protected` so a client never offers to remove the ones
+/// `set` refuses; `editable` is false for GRUB, which `set` does not manage.
+pub fn get_json(sys: &dyn System) -> Result<String, String> {
+    let s = state(sys)?;
+    let text = |v: &Option<String>| {
+        v.as_deref()
+            .map_or("null".to_string(), |v| format!("\"{}\"", json_escape(v)))
+    };
+    let timeout = s
+        .timeout
+        .as_deref()
+        .and_then(|t| t.parse::<u32>().ok())
+        .map_or("null".to_string(), |t| t.to_string());
+    let params: Vec<String> = s
+        .params
+        .as_deref()
+        .unwrap_or("")
+        .split_whitespace()
+        .map(|p| {
+            format!(
+                "{{\"value\":\"{}\",\"protected\":{}}}",
+                json_escape(p),
+                check_param(p).is_err()
+            )
+        })
+        .collect();
+    Ok(format!(
+        "{{\"schema\":1,\"bootloader\":\"{}\",\"editable\":{},\"timeout\":{timeout},\"max_timeout\":{MAX_TIMEOUT},\"default_kernel\":{},\"parameters\":[{}]}}\n",
+        s.loader,
+        s.loader != "GRUB",
+        text(&s.default_kernel),
+        params.join(",")
     ))
 }
 
@@ -377,6 +433,40 @@ mod tests {
             &(entry, "title x\noptions root=a quiet splash\n".to_string())
         );
         assert!(get(&sys).unwrap().contains("bootloader: systemd-boot\ntimeout: -\ndefault kernel: linux\nkernel parameters: root=a quiet\n"));
+    }
+
+    #[test]
+    fn get_json_marks_protected_parameters() {
+        let sys = Fake::default()
+            .dir("/boot", &["limine"])
+            .file(LIMINE_CONF, CONF);
+        let out = get_json(&sys).unwrap();
+        assert!(
+            out.starts_with(
+                "{\"schema\":1,\"bootloader\":\"Limine\",\"editable\":true,\"timeout\":3,"
+            ),
+            "{out}"
+        );
+        assert!(out.contains("\"default_kernel\":\"linux\""), "{out}");
+        assert!(
+            out.contains("{\"value\":\"root=UUID=a\",\"protected\":true}"),
+            "{out}"
+        );
+        assert!(
+            out.contains("{\"value\":\"rd.luks.uuid=b\",\"protected\":true}"),
+            "{out}"
+        );
+        assert!(
+            out.contains("{\"value\":\"quiet\",\"protected\":false}"),
+            "{out}"
+        );
+        let grub = Fake::default().dir("/boot", &["grub"]).path(GRUB_CFG);
+        let out = get_json(&grub).unwrap();
+        assert!(out.contains("\"editable\":false,\"timeout\":null"), "{out}");
+        assert!(
+            out.contains("\"default_kernel\":null,\"parameters\":[]"),
+            "{out}"
+        );
     }
 
     #[test]

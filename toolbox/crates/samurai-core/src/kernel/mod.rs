@@ -5,6 +5,7 @@
 //! and never silently add a kernel that would have no NVIDIA module.
 
 use crate::boot;
+use crate::health::json_escape;
 use crate::health::system::System;
 
 /// Kernels this tool manages: package name, one-line description.
@@ -47,6 +48,56 @@ pub fn running(sys: &dyn System) -> Option<String> {
     let release = sys.read("/proc/sys/kernel/osrelease")?;
     let base = sys.read(&format!("/usr/lib/modules/{}/pkgbase", release.trim()))?;
     Some(base.trim().to_string())
+}
+
+/// `list` for machines. For each kernel: what `install` would warn about, and why `remove` or
+/// `default` would be refused, so a client can explain before anything runs. `bootable` is null
+/// when `/boot` cannot be read (not root).
+pub fn list_json(sys: &dyn System) -> Result<String, String> {
+    let have = installed(sys)?;
+    let run = running(sys);
+    let default = boot::default_kernel(sys);
+    let readable = boot::boot_readable(sys);
+    let bootable: Vec<String> = boot::bootable_kernels(sys)
+        .into_iter()
+        .map(|k| k.name)
+        .collect();
+    let text =
+        |v: Option<&str>| v.map_or("null".to_string(), |v| format!("\"{}\"", json_escape(v)));
+    let mut rows = Vec::new();
+    for (name, what) in KNOWN {
+        let is_installed = have.iter().any(|h| h == name);
+        let boots = readable.then(|| bootable.iter().any(|b| b == name));
+        let warnings: Vec<String> = if is_installed {
+            Vec::new()
+        } else {
+            plan_install(sys, name)?
+                .warnings
+                .iter()
+                .map(|w| format!("\"{}\"", json_escape(w)))
+                .collect()
+        };
+        let blocker = if is_installed {
+            plan_remove(sys, name).err()
+        } else {
+            Some(format!("{name} is not installed"))
+        };
+        rows.push(format!(
+            "{{\"name\":\"{name}\",\"description\":\"{}\",\"installed\":{is_installed},\"running\":{},\"default\":{},\"bootable\":{},\"install_warnings\":[{}],\"remove_blocker\":{}}}",
+            json_escape(what),
+            run.as_deref() == Some(name),
+            default.as_deref() == Some(name),
+            boots.map_or("null".to_string(), |b| b.to_string()),
+            warnings.join(","),
+            text(blocker.as_deref())
+        ));
+    }
+    Ok(format!(
+        "{{\"schema\":1,\"boot_readable\":{readable},\"running\":{},\"default\":{},\"kernels\":[{}]}}\n",
+        text(run.as_deref()),
+        text(default.as_deref()),
+        rows.join(",")
+    ))
 }
 
 pub fn list(sys: &dyn System) -> Result<String, String> {
@@ -179,7 +230,7 @@ pub fn remove(sys: &dyn System, packages: &[String]) -> Result<(), String> {
 
 pub const USAGE: &str = "usage: samurai kernel <list|install|remove|default> [kernel] [--yes]
 
-  list                what is available, installed, running and booted by default
+  list [--json]       what is available, installed, running and booted by default
   install <kernel>    install it (with headers when DKMS is used) and add boot entries
   remove <kernel>     remove it and its entries; never the running or last bootable kernel
   default <kernel>    boot this kernel by default (Limine, systemd-boot)
@@ -191,7 +242,7 @@ All but `list` need root. Exit codes: 0 ok, 1 failed or refused, 2 usage error.
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Cmd {
-    List,
+    List { json: bool },
     Install { name: String, yes: bool },
     Remove { name: String },
     Default { name: String },
@@ -207,7 +258,8 @@ pub fn parse_args(args: &[String]) -> Result<Cmd, String> {
         .collect();
     let cmd = match words.as_slice() {
         ["-h" | "--help"] => Cmd::Help,
-        ["list"] => Cmd::List,
+        ["list"] => Cmd::List { json: false },
+        ["list", "--json"] => Cmd::List { json: true },
         ["install", n] if !n.starts_with('-') => Cmd::Install {
             name: (*n).into(),
             yes,
@@ -263,6 +315,39 @@ mod tests {
         assert!(line("linux-zen").ends_with("installed, NOT bootable"));
         assert!(!line("linux-hardened").contains("installed"));
         assert!(list(&Fake::default()).is_err());
+    }
+
+    #[test]
+    fn list_json_carries_warnings_and_blockers() {
+        let f = machine(
+            "linux\nlinux-lts\nnvidia-open\n",
+            &["linux", "linux-lts"],
+            "linux",
+        );
+        let out = list_json(&f).unwrap();
+        assert!(
+            out.starts_with("{\"schema\":1,\"boot_readable\":true,\"running\":\"linux\","),
+            "{out}"
+        );
+        let row = |n: &str| {
+            let at = out.find(&format!("{{\"name\":\"{n}\",")).unwrap();
+            let end = out[at..].find('}').unwrap();
+            out[at..at + end].to_string()
+        };
+        assert!(row("linux").contains("\"running\":true"), "{out}");
+        assert!(row("linux").contains("is the running kernel"), "{out}");
+        assert!(
+            row("linux-lts").ends_with("\"remove_blocker\":null"),
+            "{out}"
+        );
+        assert!(row("linux-zen").contains("\"installed\":false"), "{out}");
+        assert!(row("linux-zen").contains("nvidia-open-dkms"), "{out}");
+        // without a readable /boot nothing is claimed about bootability
+        let blind = Fake::default().cmd("pacman -Qq", 0, "linux\n");
+        let out = list_json(&blind).unwrap();
+        assert!(out.contains("\"boot_readable\":false"), "{out}");
+        assert!(out.contains("\"bootable\":null"), "{out}");
+        assert!(!out.contains("\"bootable\":false"), "{out}");
     }
 
     #[test]
@@ -356,7 +441,11 @@ mod tests {
     #[test]
     fn argument_parsing() {
         let a = |v: &[&str]| v.iter().map(|x| (*x).to_string()).collect::<Vec<_>>();
-        assert_eq!(parse_args(&a(&["list"])), Ok(Cmd::List));
+        assert_eq!(parse_args(&a(&["list"])), Ok(Cmd::List { json: false }));
+        assert_eq!(
+            parse_args(&a(&["list", "--json"])),
+            Ok(Cmd::List { json: true })
+        );
         assert_eq!(
             parse_args(&a(&["install", "linux-lts", "--yes"])),
             Ok(Cmd::Install {
