@@ -313,6 +313,10 @@ class VM:
 
     def resume_after_restart(self) -> None:
         """Reset and run a VM paused by its own restart request."""
+        # back to normal actions first: "reboot=shutdown" also turns our reset into a stop
+        reply = self.qmp_command("set-action", reboot="reset", shutdown="poweroff")
+        if "error" in reply:
+            raise RuntimeError(f"set-action failed: {reply['error']}")
         self.reboot()
         # the reset is processed after the command returns; until then QEMU refuses cont
         for _ in range(40):
