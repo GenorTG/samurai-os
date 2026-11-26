@@ -58,8 +58,12 @@ Kirigami.ScrollablePage {
                     Layout.fillWidth: true
                     placeholderText: "Description, for example: before changing drivers"
                     maximumLength: 60
+                    onAccepted: if (create.enabled) {
+                        create.clicked()
+                    }
                 }
                 QQC2.Button {
+                    id: create
                     text: "Create"
                     icon.name: "document-save"
                     enabled: label.text.trim() !== "" && !label.text.trim().startsWith("-")

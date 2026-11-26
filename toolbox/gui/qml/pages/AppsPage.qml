@@ -58,6 +58,8 @@ Kirigami.ScrollablePage {
         Backend.query(["apps", "bundles", "--json"], (code, out) => {
             const data = win.parse(out)
             bundles = data ? data.bundles : []
+            // the list header grows when they arrive: stay at the top
+            Qt.callLater(list.positionViewAtBeginning)
         })
     }
 
@@ -149,29 +151,57 @@ Kirigami.ScrollablePage {
         onTriggered: page.reload()
     }
 
-    header: QQC2.ToolBar {
-        contentItem: RowLayout {
-            spacing: Kirigami.Units.largeSpacing
+    // messages live here, not in the list's header: a list header that grows after the data
+    // arrived ends up above the visible area
+    header: ColumnLayout {
+        spacing: 0
 
-            Kirigami.SearchField {
-                id: search
-                Layout.fillWidth: true
-                onTextChanged: debounce.restart()
+        QQC2.ToolBar {
+            Layout.fillWidth: true
+            contentItem: RowLayout {
+                spacing: Kirigami.Units.largeSpacing
+
+                Kirigami.SearchField {
+                    id: search
+                    Layout.fillWidth: true
+                    onTextChanged: debounce.restart()
+                }
+                QQC2.ComboBox {
+                    Layout.preferredWidth: Kirigami.Units.gridUnit * 12
+                    model: ["All categories"].concat(page.categories)
+                    onActivated: index => page.category = index === 0 ? "" : page.categories[index - 1]
+                }
+                QQC2.CheckBox {
+                    text: "Installed only"
+                    onToggled: page.installedOnly = checked
+                }
+                QQC2.BusyIndicator {
+                    running: visible
+                    visible: page.loading || page.planning
+                    Layout.preferredWidth: Kirigami.Units.iconSizes.medium
+                    Layout.preferredHeight: Kirigami.Units.iconSizes.medium
+                }
             }
-            QQC2.ComboBox {
-                Layout.preferredWidth: Kirigami.Units.gridUnit * 12
-                model: ["All categories"].concat(page.categories)
-                onActivated: index => page.category = index === 0 ? "" : page.categories[index - 1]
-            }
-            QQC2.CheckBox {
-                text: "Installed only"
-                onToggled: page.installedOnly = checked
-            }
-            QQC2.BusyIndicator {
-                running: visible
-                visible: page.loading || page.planning
-                Layout.preferredWidth: Kirigami.Units.iconSizes.medium
-                Layout.preferredHeight: Kirigami.Units.iconSizes.medium
+        }
+
+        Kirigami.InlineMessage {
+            Layout.fillWidth: true
+            Layout.margins: Kirigami.Units.smallSpacing
+            type: Kirigami.MessageType.Error
+            text: page.win.escapeHtml(page.errorText)
+            visible: page.errorText !== ""
+        }
+        Kirigami.InlineMessage {
+            Layout.fillWidth: true
+            Layout.margins: Kirigami.Units.smallSpacing
+            type: Kirigami.MessageType.Warning
+            text: "There are no package databases yet, so applications show as unavailable. "
+                + "Run a system update first."
+            visible: page.noDatabases
+            actions: Kirigami.Action {
+                text: "Open Updates"
+                icon.name: "system-software-update"
+                onTriggered: page.win.currentPage = "updates"
             }
         }
     }
@@ -186,26 +216,6 @@ Kirigami.ScrollablePage {
             width: list.width
             spacing: Kirigami.Units.smallSpacing
 
-            Kirigami.InlineMessage {
-                Layout.fillWidth: true
-                Layout.margins: Kirigami.Units.smallSpacing
-                type: Kirigami.MessageType.Error
-                text: page.win.escapeHtml(page.errorText)
-                visible: page.errorText !== ""
-            }
-            Kirigami.InlineMessage {
-                Layout.fillWidth: true
-                Layout.margins: Kirigami.Units.smallSpacing
-                type: Kirigami.MessageType.Warning
-                text: "There are no package databases yet, so applications show as unavailable. "
-                    + "Run a system update first."
-                visible: page.noDatabases
-                actions: Kirigami.Action {
-                    text: "Open Updates"
-                    icon.name: "system-software-update"
-                    onTriggered: page.win.currentPage = "updates"
-                }
-            }
             Kirigami.Heading {
                 level: 3
                 text: "Bundles"

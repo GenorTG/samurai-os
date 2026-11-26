@@ -238,8 +238,12 @@ Kirigami.ScrollablePage {
                     validator: RegularExpressionValidator {
                         regularExpression: /[A-Za-z0-9._=,:\/+@][A-Za-z0-9._\-=,:\/+@]*/
                     }
+                    onAccepted: if (add.enabled) {
+                        add.clicked()
+                    }
                 }
                 QQC2.Button {
+                    id: add
                     text: "Add…"
                     icon.name: "list-add"
                     enabled: parameter.text !== "" && !Backend.busy

@@ -128,7 +128,8 @@ elif a[:1] == ["apps"]:
         walk(tomllib.loads((REPO / "catalog" / f).read_text()))
     index.write_text(json.dumps({"sync": {n: "extra" for n in names}, "groups": {},
                                  "repos": ["core", "extra", "multilib"],
-                                 "installed": ["firefox", "htop", "gimp"], "db_age_days": 0.1,
+                                 "installed": ["firefox", "htop", "gimp"],
+                                 "db_age_days": None if os.environ.get("FAKE_SAMURAI_NO_DB") else 0.1,
                                  "pending_upgrades": []}))
     env = dict(os.environ, SAMURAI_APPS_FAKE_INDEX=str(index), SAMURAI_CATALOG_DIR=str(REPO / "catalog"))
     sys.exit(subprocess.run([sys.executable, str(REPO / "updates" / "samurai-apps"), *a[1:]], env=env).returncode)

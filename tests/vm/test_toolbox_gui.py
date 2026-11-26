@@ -94,6 +94,14 @@ def test_package_installs_policy_helper_and_launcher(desktop):
         assert must in out, out
 
 
+def test_fresh_offline_install_says_why_apps_are_unavailable(desktop):
+    if "none" not in run(desktop.ga, "ls /var/lib/pacman/sync/*.db >/dev/null 2>&1 && echo some || echo none"):
+        pytest.skip("this install has package databases (online ISO)")
+    desktop.open_toolbox("apps")
+    desktop.wait_text("package databases", 90)
+    desktop.shot("apps-no-databases")
+
+
 def test_every_page_opens_without_qml_errors(desktop):
     for page, text in PAGES.items():
         desktop.open_toolbox(page)
@@ -131,14 +139,15 @@ def test_cancelled_password_changes_nothing_then_snapshot_create_and_delete(desk
     desktop.click("Description")
     desktop.vm.type_text("made in the toolbox")
     before = snapshots(desktop)
-    desktop.click("Create", -1)
+    desktop.vm.key("ret")
     desktop.wait_text("Authentication is required")
     desktop.vm.key("esc")
     desktop.wait_text("nothing was changed")
     desktop.shot("auth-cancelled")
     assert snapshots(desktop) == before
 
-    desktop.click("Create", -1)
+    desktop.click("made in the toolbox", 0)   # the field, above the log console
+    desktop.vm.key("ret")
     desktop.authenticate()
     finished(desktop, "snap-create")
     assert "made in the toolbox" in snapshots(desktop)
@@ -256,7 +265,7 @@ def test_policy_cannot_be_walked_around(desktop):
     desktop.wait_text("Boot settings", 90)
     desktop.click("New parameter")
     desktop.vm.type_text("init=/bin/sh")
-    desktop.click("Add", -1)
+    desktop.vm.key("ret")
     desktop.wait_text("Not possible from the toolbox")
     desktop.shot("parameter-refused")
     assert "init=/bin/sh" not in run(desktop.ga, "cat /boot/limine/limine.conf")
