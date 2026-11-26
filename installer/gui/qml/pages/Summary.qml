@@ -30,7 +30,7 @@ PageBody {
             ["Applications", on(c.apps)],
             ["Network", "Firewall: " + c.firewall + "  ·  Tailscale " + (c.tailscale ? "on" : "off")
                         + "  ·  SSH " + (c.ssh_server ? "on" : "off") + "  ·  proxy " + c.reverse_proxy],
-        ]
+        ].concat(c.arch_mirror === "auto" ? [] : [["Package mirror", c.arch_mirror + "  (from the loaded profile)"]])
     }
 
     Notice {

@@ -130,6 +130,10 @@ class Choices:
     reverse_proxy: str = "none"
     ssh_server: bool = False
 
+    # no page edits these; a loaded profile keeps its own values
+    install: list[str] = field(default_factory=lambda: list(PROFILE_PACKAGES))
+    arch_mirror: str = "auto"
+
     def ordered_kernels(self) -> list[str]:
         """Selected kernels, the default boot kernel first."""
         chosen = [k for k, _, _ in KERNELS if k in self.kernels]
@@ -174,7 +178,7 @@ def profile_tables(c: Choices, password_hash: str = "") -> dict[str, dict]:
         "boot": {"kernels": c.ordered_kernels(), "bootloader": c.bootloader},
         "user": user,
         "packages": {"desktop": c.desktop, "browsers": c.browsers if desktop else [],
-                     "apps": c.apps, "install": list(PROFILE_PACKAGES)},
+                     "apps": c.apps, "install": c.install},
     }
     if c.desktop == "kde":
         tables["kde"] = {"theme": "breeze", "monitor_widgets": c.monitor_widgets,
@@ -188,7 +192,8 @@ def profile_tables(c: Choices, password_hash: str = "") -> dict[str, dict]:
     tables["network"] = {"tailscale": c.tailscale, "reverse_proxy": c.reverse_proxy}
     tables["security"] = {"firewall": c.firewall, "ssh_server": c.ssh_server}
     tables["hardware"] = {"nvidia": c.nvidia}
-    tables["repos"] = {"samurai": True, "cachyos": True, "chaotic_aur": True, "arch_mirror": "auto"}
+    tables["repos"] = {"samurai": True, "cachyos": True, "chaotic_aur": True,
+                       "arch_mirror": c.arch_mirror}
     return tables
 
 
@@ -229,6 +234,8 @@ def from_toml(text: str, base: Choices | None = None) -> Choices:
     take(user, "shell", "shell")
     packages = table("packages")
     take(packages, "desktop", "desktop")
+    c.install = list(packages.get("install", []))
+    c.arch_mirror = table("repos").get("arch_mirror", "auto")
     c.browsers = list(packages.get("browsers", ["firefox"] if c.desktop != "none" else []))
     c.apps = list(packages.get("apps", []))
     kde = table("kde")

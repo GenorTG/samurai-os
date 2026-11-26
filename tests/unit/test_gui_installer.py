@@ -95,6 +95,14 @@ def test_saved_profile_loads_back_without_the_disk():
         **{**original.as_dict(), "disk": ""}))
 
 
+def test_loading_keeps_what_no_page_edits():
+    original = choices(install=["samurai-keyring", "htop"],
+                       arch_mirror="https://archive.archlinux.org/repos/2026/08/15")
+    loaded = tomllib.loads(model.to_toml(model.from_toml(model.to_toml(original))))
+    assert loaded["packages"]["install"] == ["samurai-keyring", "htop"]
+    assert loaded["repos"]["arch_mirror"] == original.arch_mirror
+
+
 def test_password_is_hashed_on_stdin():
     value = engine.hash_password(TOOLS, "correct horse")
     assert value.startswith("$6$") and "correct" not in value
