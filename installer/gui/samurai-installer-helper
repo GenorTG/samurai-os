@@ -82,6 +82,14 @@ def parse_request(raw: str) -> tuple[str, str]:
     return profile, passphrase
 
 
+def write_private(path: pathlib.Path, text: str) -> None:
+    """A new file only root can read (the profile carries the password hash)."""
+    path.unlink(missing_ok=True)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(text)
+
+
 def follow(path: pathlib.Path, start: int, done: threading.Event, out: Output) -> None:
     """Forward lines appended to the install log after byte ``start``."""
     position, pending = start, b""
@@ -112,8 +120,9 @@ def run_backend(profile_path: pathlib.Path, passphrase: str, out: Output,
     process = subprocess.Popen(
         [*wrapper, backend, "--profile", str(profile_path), "--yes"], stdin=subprocess.PIPE,
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=ENVIRONMENT,
-        # its own session: a signal to the wizard's session never kills a half install
-        start_new_session=True)
+        # its own session: a signal to the wizard's session never kills a half install.
+        # umask 022 like a root shell: the backend creates directories of the new system
+        start_new_session=True, umask=0o022)
     follower = threading.Thread(target=follow, args=(log, start, done, out))
     follower.start()
     assert process.stdin is not None and process.stdout is not None
@@ -141,7 +150,6 @@ def main() -> int:
         profile, passphrase = parse_request(sys.stdin.read(MAX_REQUEST + 1))
     except (ValueError, tomllib.TOMLDecodeError) as e:
         return refuse(f"bad request: {e}")
-    os.umask(0o077)
     RUNDIR.mkdir(mode=0o700, exist_ok=True)
     with open(RUNDIR / "lock", "w", encoding="utf-8") as lock:
         try:
@@ -149,8 +157,7 @@ def main() -> int:
         except OSError:
             return refuse("an installation is already running")
         path = RUNDIR / "install-profile.toml"
-        path.write_text(profile, encoding="utf-8")
-        path.chmod(0o600)
+        write_private(path, profile)
         try:
             check = subprocess.run([VALIDATOR, str(path)], capture_output=True, text=True,
                                    env=ENVIRONMENT, check=False)

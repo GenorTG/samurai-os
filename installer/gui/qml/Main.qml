@@ -117,9 +117,11 @@ ApplicationWindow {
         }
     }
 
-    Shortcut { sequence: "Alt+N"; onActivated: window.next() }
-    Shortcut { sequence: "Alt+B"; onActivated: window.back() }
-    Shortcut { sequence: "Alt+I"; onActivated: window.install() }
+    // arrows and Ctrl+Return: letter shortcuts collide with the style's automatic
+    // button mnemonics and then neither fires
+    Shortcut { sequence: "Alt+Right"; onActivated: window.next() }
+    Shortcut { sequence: "Alt+Left"; onActivated: window.back() }
+    Shortcut { sequences: ["Ctrl+Return", "Ctrl+Enter"]; onActivated: window.install() }
 
     Dialog {
         id: busyDialog

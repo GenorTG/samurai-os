@@ -51,7 +51,7 @@ def shot(vm: VM, name: str) -> None:
 
 def next_page(vm: VM, name: str) -> None:
     shot(vm, name)
-    vm.key("alt", "n")
+    vm.key("alt", "right")
     time.sleep(0.8)
 
 
@@ -98,12 +98,12 @@ def test_graphical_install():
                      "10-development", "11-apps", "12-network"):
             next_page(vm, name)
         shot(vm, "13-summary")
-        vm.key("alt", "i")              # must do nothing: the erase box is not ticked
+        vm.key("ctrl", "ret")           # must do nothing: the erase box is not ticked
         time.sleep(2)
         assert "partitioning" not in guest(vm, "cat /var/log/samurai/install.log 2>/dev/null")
         vm.key("spc")
         shot(vm, "13-summary-confirmed")
-        vm.key("alt", "i")
+        vm.key("ctrl", "ret")
 
         wait_guest(vm, "cat /var/log/samurai/install.log", "partitioning /dev/vda", 90)
         time.sleep(20)

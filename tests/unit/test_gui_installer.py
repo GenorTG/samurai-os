@@ -213,7 +213,7 @@ def test_helper_feeds_the_passphrase_on_stdin_and_follows_the_log(tmp_path, caps
         "IFS= read -r a; IFS= read -r b; [ \"$a\" = \"$b\" ]\n"
         f"echo \"partitioning /dev/vda\" >> {log}\n"
         f"printf '%s' \"$a\" > {tmp_path}/seen\n"
-        "echo done-on-stdout\n! env | grep -q 'two  words'\nexit 3\n")
+        "echo done-on-stdout\necho umask=$(umask)\n! env | grep -q 'two  words'\nexit 3\n")
     backend.chmod(0o755)
     status = helper.run_backend(tmp_path / "p.toml", " two  words ", helper.Output(),
                                 backend=str(backend), log=log)
@@ -222,6 +222,18 @@ def test_helper_feeds_the_passphrase_on_stdin_and_follows_the_log(tmp_path, caps
     assert (tmp_path / "seen").read_text() == " two  words "
     assert "partitioning /dev/vda" in out and "done-on-stdout" in out
     assert "old run" not in out and "two  words" not in out
+    # the new system's directories must not inherit a private umask
+    assert "umask=0022" in out
+
+
+def test_helper_profile_copy_is_private_even_over_a_planted_link(tmp_path):
+    target = tmp_path / "victim"
+    target.write_text("keep")
+    path = tmp_path / "install-profile.toml"
+    path.symlink_to(target)
+    helper.write_private(path, "version = 1\n")
+    assert target.read_text() == "keep" and not path.is_symlink()
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
 
 def test_follow_handles_partial_lines(tmp_path, capsys):
