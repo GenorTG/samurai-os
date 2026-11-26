@@ -63,7 +63,8 @@ docker run --rm -i --name "$container" \
 set -euo pipefail
 pacman-key --init >/dev/null 2>&1
 pacman -Syu --noconfirm >/dev/null      # stale-image guard (see ci/build-iso.sh)
-pacman -S --noconfirm --needed namcap rust >/dev/null
+# rust: samurai-tools; the rest: samurai-toolbox-gui (packages are built with --nodeps)
+pacman -S --noconfirm --needed namcap rust cmake ninja qt6-base qt6-declarative >/dev/null
 
 # non-root builder, per spec 02 step 3
 useradd -m builder
@@ -98,7 +99,7 @@ for src in /src/pkgbuilds/*/; do
     if [ "$pkg" = samurai-tools ]; then
         # the Rust CLI replaces the shell dispatcher (updates/samurai stays for the live ISO)
         mkdir -p "$pkg/toolbox"
-        tar -C /src/toolbox --exclude=target -cf - . | tar -C "$pkg/toolbox" -xf -
+        tar -C /src/toolbox --exclude=target --exclude=./gui -cf - . | tar -C "$pkg/toolbox" -xf -
         for name in samurai-update samurai-snap samurai-rescue samurai-apps samurai-notifier validate-interventions.py \
                     samurai-notifier.service samurai-notifier.timer \
                     samurai-health.service samurai-health.timer \
@@ -109,6 +110,9 @@ for src in /src/pkgbuilds/*/; do
         cp -a /src/updates/interventions/0001-update-mechanism-demo.sh "$pkg/"
         cp -a /src/catalog/garuda-setup-wizard.toml /src/catalog/samurai.toml "$pkg/"
     fi
+    if [ "$pkg" = samurai-toolbox-gui ]; then
+        cp -a /src/toolbox/gui "$pkg/gui"
+    fi
     if [ -n "$SAMURAI_PKGREL_OVERRIDE" ] && \
        { [ "$pkg" = samurai-tools ] || [ "$pkg" = samurai-release ]; }; then
         sed -i "s/^pkgrel=.*/pkgrel=$SAMURAI_PKGREL_OVERRIDE/" "$pkg/PKGBUILD"
@@ -117,7 +121,7 @@ for src in /src/pkgbuilds/*/; do
     echo "==> makepkg $pkg"
     # --nodeps: runtime depends on our own packages (samurai-release ->
     # samurai-tools) cannot be installed from a repo this very run creates;
-    # none of these packages compile anything, so build deps are not needed
+    # build dependencies of the compiled packages are installed above
     su builder -c "cd /build/$pkg && makepkg -df --noconfirm"
     set -- /build/$pkg/*.pkg.tar.zst   # .sig files are created below, in the signing step
     # spec 02 step 4: namcap lint (advisory; its exit code is not a verdict)
