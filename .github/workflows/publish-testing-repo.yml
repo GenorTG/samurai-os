@@ -14,6 +14,7 @@ on:
       - "ci/publish-repo.sh"
       - "ci/check-no-epoch"
       - "ci/check-no-shadowing"
+      - "ci/reuse-published"
       - ".github/workflows/publish-testing-repo.yml"
   workflow_dispatch:
 

@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# A published package file name must never change bytes: pacman caches by name and checks the
+# database checksum. makepkg is not byte-reproducible, so for a version that is already published
+# either reuse the published file (same contents) or refuse the build (contents differ).
+#
+# Usage: reuse-published <built-package> <published-base-url>
+#   exit 0: version not published yet (kept as built), or replaced by the published file + .sig
+#   exit 1: published under this name with different contents (bump pkgrel), or the check failed
+set -euo pipefail
+pkg="$1"; base="${2%/}"
+name="$(basename "$pkg")"
+tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+
+code="$(curl -sSL --retry 4 -o "$tmp/$name" -w '%{http_code}' "$base/${name//:/%3A}")" || code=error
+case "$code" in
+    404) exit 0 ;;
+    200|000) [ -s "$tmp/$name" ] || { echo "error: cannot fetch $base/$name ($code)" >&2; exit 1; } ;;
+    *) echo "error: cannot tell whether $name is published (HTTP $code)" >&2; exit 1 ;;
+esac
+
+payload() {   # $1 package, $2 dir: contents and modes without build timestamps
+    mkdir -p "$2/files"
+    bsdtar -xpf "$1" -C "$2/files"
+    rm -f "$2/files/.BUILDINFO" "$2/files/.MTREE"
+    sed -i -e '/^builddate = /d' -e '/^# /d' "$2/files/.PKGINFO"
+    (cd "$2/files" && find . -printf '%y %m %p %l\n' | LC_ALL=C sort) > "$2/modes"
+}
+payload "$pkg" "$tmp/new"
+payload "$tmp/$name" "$tmp/old"
+if ! diff -r --no-dereference "$tmp/old/files" "$tmp/new/files" >/dev/null || ! diff "$tmp/old/modes" "$tmp/new/modes" >/dev/null; then
+    echo "error: $name is already published with different contents: bump pkgrel" >&2
+    exit 1
+fi
+curl -fsSL --retry 4 -o "$tmp/$name.sig" "$base/${name//:/%3A}.sig" ||
+    { echo "error: published $name has no signature to reuse" >&2; exit 1; }
+cp -f "$tmp/$name" "$pkg"
+cp -f "$tmp/$name.sig" "$pkg.sig"
+echo "==> reusing published $name (identical contents)"

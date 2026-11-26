@@ -9,6 +9,7 @@
 # Env:
 #   GNUPGHOME                offline/CI keyring holding the signing subkey (default ~/samurai-keys/gnupg)
 #   SAMURAI_PKGREL_OVERRIDE  monotonic pkgrel for samurai-tools/samurai-release (CI testing channel)
+#   SAMURAI_PUBLISHED_URL    published channel whose files are reused for unchanged versions (default stable)
 #   SAMURAI_BUILD_IMAGE      build container image (default archlinux:base-devel; pin a digest to freeze it)
 #
 # Key handling: the signing subkey is exported per run into a 0600 temp file,
@@ -56,6 +57,7 @@ docker run --rm -i --name "$container" \
     -e SAMURAI_PRIMARY="$primary" \
     -e SAMURAI_SUBKEY="$subkey" \
     -e SAMURAI_PKGREL_OVERRIDE="${SAMURAI_PKGREL_OVERRIDE:-}" \
+    -e SAMURAI_PUBLISHED_URL="${SAMURAI_PUBLISHED_URL:-https://github.com/GenorTG/samurai-repo/releases/download/x86_64}" \
     "$image" \
     bash -es <<'EOS'
 set -euo pipefail
@@ -120,7 +122,12 @@ for src in /src/pkgbuilds/*/; do
     set -- /build/$pkg/*.pkg.tar.zst   # .sig files are created below, in the signing step
     # spec 02 step 4: namcap lint (advisory; its exit code is not a verdict)
     su builder -c "cd /build/$pkg && namcap PKGBUILD $* 2>&1 | sed 's/^/    namcap: /'" || true
-    cp -v "$@" "$out64/"
+    # never change the bytes behind an already published file name (stable channel)
+    for built in "$@"; do
+        /src/ci/reuse-published "$built" "$SAMURAI_PUBLISHED_URL"
+        cp -v "$built" "$out64/"
+        if [ -f "$built.sig" ]; then cp -v "$built.sig" "$out64/"; fi
+    done
 done
 
 echo "==> signing packages + building samurai.db (SignedBy $SAMURAI_SUBKEY)"
