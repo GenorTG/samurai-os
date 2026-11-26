@@ -237,7 +237,11 @@ case "$cmd" in
         # the initramfs for the restored root so the boot matches it (spec 06
         # step 3). stderr stays visible: its progress/errors land in the
         # caller's capture (the pytest ROLLBACK-OUT forensics).
-        arch-chroot "$MOUNT_DIR" bash -c 'mkinitcpio --preset linux' \
+        arch-chroot "$MOUNT_DIR" bash -c 'for d in /usr/lib/modules/*; do
+                [ -f "$d/pkgbase" ] && [ -f "$d/vmlinuz" ] || continue
+                install -m644 "$d/vmlinuz" "/boot/vmlinuz-$(cat "$d/pkgbase")"
+            done
+            mkinitcpio -P' \
             || log "WARNING: initramfs regeneration failed — boot may still be broken"
         # mkinitcpio writes <img>.tmp then renames; if anything interrupted the
         # rename, the stale (possibly zeroed) img survives next to the good
@@ -249,11 +253,13 @@ case "$cmd" in
             log "rollback: recovering $(basename "$tmpf") over the stale image"
             mv "$tmpf" "${tmpf%.tmp}" || log "WARNING: rollback: recovery of $tmpf failed"
         done
-        magic=$(head -c 4 "$MOUNT_DIR"/boot/initramfs-linux.img 2>/dev/null | od -An -tx1 | tr -d ' \n')
-        case "$magic" in
-            *28b52ffd*|*fd2fb528*) log "rollback: initramfs OK (zstd magic $magic)" ;;
-            *) log "WARNING: rollback: initramfs magic unexpected: ${magic:-none} — the restored boot will fail; run 'samurai rescue initramfs' from the live ISO" ;;
-        esac
+        for img in "$MOUNT_DIR"/boot/initramfs-*.img; do
+            magic=$(head -c 4 "$img" 2>/dev/null | od -An -tx1 | tr -d ' \n')
+            case "$magic" in
+                *28b52ffd*|*fd2fb528*) log "rollback: $(basename "$img") OK" ;;
+                *) log "WARNING: rollback: $(basename "$img") magic unexpected: ${magic:-none} — run 'samurai rescue initramfs' from the live ISO" ;;
+            esac
+        done
         log "rescue: rollback staged (@-broken-$ts kept). Unmount and reboot."
         umount -R "$MOUNT_DIR" 2>/dev/null || true
         cryptsetup close samurai-root 2>/dev/null || true

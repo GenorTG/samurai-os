@@ -10,6 +10,15 @@ log() { printf '%s %s\n' "$(date -Is)" "$*"; }
 die() { printf 'FATAL: %s\n' "$*" >&2; exit "${2:-1}"; }
 
 CONFIG="root"
+# run inside the restored root: its kernels -> /boot, then every initramfs preset and the menu
+RESTORE_BOOT='found=0
+for d in /usr/lib/modules/*; do
+    [ -f "$d/pkgbase" ] && [ -f "$d/vmlinuz" ] || continue
+    install -m644 "$d/vmlinuz" "/boot/vmlinuz-$(cat "$d/pkgbase")"; found=1
+done
+[ "$found" -eq 1 ]
+mkinitcpio -P
+if command -v samurai >/dev/null && samurai boot --help >/dev/null 2>&1; then samurai boot sync; fi'
 cmd="${1:-list}"; shift 2>/dev/null || true
 
 booted_from_snapshot() {
@@ -143,19 +152,32 @@ print(json.dumps({"schema": 1, "config": config, "snapshots": [
         log "rollback: snapshotting current @ as before-rollback"
         snapper -c "$CONFIG" create --description "before-rollback" >/dev/null
         ts=$(date +%Y%m%d-%H%M%S)
+        # @ is mounted AT /, so "/@" is not a path: renaming needs the btrfs
+        # top level (subvolid=5), where @ and @snapshots are plain directories
+        dev=$(findmnt -n -o SOURCE / | sed 's/\[.*//')
+        work=$(mktemp -d /run/samurai-rollback.XXXXXX)
+        top="$work/top"; new="$work/new"; mkdir "$top" "$new"
+        cleanup() { umount -R "$new" 2>/dev/null || true; umount "$top" 2>/dev/null || true
+                    rmdir "$new" "$top" "$work" 2>/dev/null || true; }
+        trap cleanup EXIT
+        mount -o subvolid=5 "$dev" "$top" || die "cannot mount the btrfs top level of $dev"
+        [ ! -e "$top/@.rollback-stage" ] || die "a previous rollback left @.rollback-stage: delete it first (btrfs subvolume delete)"
+        btrfs subvolume snapshot "$snapshot_path" "$top/@.rollback-stage"   # writable copy of the target
         log "rollback: renaming subvolumes (old @ -> @-broken-$ts)"
-        btrfs subvolume snapshot "$snapshot_path" "/@.rollback-stage"   # writable copy of the target
-        mv "/@" "/@-broken-$ts"
-        mv "/@.rollback-stage" "/@"
-        # fstab unchanged (it targets subvol=@). The old broken root's
-        # subvolume is cleaned up after 14 days by the next cleanup timer.
-        log "rollback: regenerating boot entries + initramfs for the restored root"
-        # the restored root carries its own kernels; the ESP already has the
-        # bootloader. Regenerate initramfs for the kernels present there.
-        if [ -d "/@/boot" ] || mountpoint -q /boot; then
-            log "rollback: done — reboot to start the restored system"
+        mv "$top/@" "$top/@-broken-$ts"
+        if ! mv "$top/@.rollback-stage" "$top/@"; then
+            mv "$top/@-broken-$ts" "$top/@"
+            die "could not move the restored root into place; nothing changed"
         fi
-        log "rollback complete. old system kept at @-broken-$ts (14-day cleanup)"
+        # the ESP is not part of snapshots: put the restored root's own kernels
+        # and initramfs images back on it (fstab targets subvol=@, unchanged)
+        log "rollback: restoring kernels, initramfs and boot entries on the ESP"
+        mount -o subvol=@ "$dev" "$new"
+        for d in boot dev proc sys run var/log var/cache; do mount --rbind "/$d" "$new/$d" && mount --make-rslave "$new/$d"; done
+        if ! chroot "$new" /bin/sh -euc "$RESTORE_BOOT"; then
+            die "root restored, but rebuilding the boot files failed: do NOT reboot yet; fix it or run 'samurai rescue rollback' from the live ISO"
+        fi
+        log "rollback complete. previous system kept as subvolume @-broken-$ts (delete it when satisfied)"
         echo "Rollback complete. Reboot now: systemctl reboot"
         ;;
 

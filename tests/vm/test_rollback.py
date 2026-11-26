@@ -13,9 +13,11 @@ Limine menu interaction work.
 """
 from __future__ import annotations
 
+import shutil
+
 import pytest
 
-from conftest import INSTALL_TIMEOUT, find_iso
+from conftest import INSTALL_TIMEOUT, REPO, find_iso
 from vm import VM
 
 
@@ -120,3 +122,36 @@ def test_rollback_after_bad_update(mirror):
         assert out.strip() == "", out
     finally:
         restored.stop()
+
+
+def test_rollback_from_the_running_system(mirror):
+    """`samurai snap rollback <id>` on the installed system (it failed with `mv: cannot stat '/@'`).
+
+    The tool under test comes from the checkout, so a published ISO can run this.
+    """
+    shutil.copy2(REPO / "updates" / "samurai-snap", mirror.dir / "samurai-snap")
+    vm, ga = _install(mirror)
+    try:
+        ga.exec("curl -fsSL http://10.0.2.2:8966/samurai-snap -o /usr/local/bin/samurai-snap && "
+                "chmod 755 /usr/local/bin/samurai-snap", timeout=60)
+        _, out = ga.exec("samurai snap create vmtest-base >/dev/null && "
+                         "snapper -c root --csvout list --columns number,description | grep vmtest-base | cut -d, -f1")
+        snapid = out.strip().splitlines()[-1]
+        assert snapid.isdigit(), out
+        # damage after the snapshot: a root file, and the boot files on the ESP
+        ga.exec("touch /etc/after-snapshot && dd if=/dev/zero of=/boot/initramfs-linux.img bs=1M count=4 conv=notrunc 2>/dev/null; sync")
+        _, out = ga.exec(f"samurai snap rollback {snapid} 2>&1; echo ROLLBACK-RC=$?", timeout=900, check=False)
+        assert "ROLLBACK-RC=0" in out, out[-2500:]
+        _, out = ga.exec("ls /run | grep -c samurai-rollback; findmnt -rn | grep -c samurai-rollback", check=False)
+        assert out.split() == ["0", "0"], f"temporary mounts left behind: {out}"
+        ga.exec("sync")
+        ga.close()
+        vm.reboot()
+        vm.wait_for("login:", timeout=300)
+        ga = vm.qga(timeout=120)
+        _, out = ga.exec("test -e /etc/after-snapshot && echo STILL-THERE; findmnt -no OPTIONS /; "
+                         "systemctl --failed --no-legend | head -3; btrfs subvolume list / | grep -cE 'path @-broken-[0-9-]+$'", check=False)
+        assert "STILL-THERE" not in out and "subvol=/@" in out and out.strip().endswith("1"), out
+        ga.close()
+    finally:
+        vm.stop()
