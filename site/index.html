@@ -131,7 +131,7 @@
             <div><dt>0</dt><dd>Arch packages rebuilt or patched</dd></div>
             <div><dt>2</dt><dd>kernels by default: linux-cachyos + linux-zen</dd></div>
             <div><dt>LUKS2</dt><dd>full-root encryption, on by default</dd></div>
-            <div><dt>20</dt><dd>VM tests, from boot to a day of real use</dd></div>
+            <div><dt>34</dt><dd>VM tests, from boot to a day of real use</dd></div>
           </dl>
         </div>
 
@@ -165,7 +165,7 @@
             <ul class="w-dash">
               <li>Arch's repositories, unchanged. Kernels, Mesa, NVIDIA and KDE come straight from Arch mirrors.</li>
               <li>The CachyOS repository for <code>linux-cachyos</code> and its prebuilt NVIDIA modules, placed <em>after</em> Arch's repos, so it can add packages but never replace Arch's.</li>
-              <li>Chaotic-AUR is planned the same way, below Arch (ADR-0007). It arrives with the app catalog and is off in today's installer.</li>
+              <li>Chaotic-AUR the same way, below Arch (ADR-0007): prebuilt AUR packages, with signature checking and a pinned key.</li>
               <li>One signed repository of our own, <code>[samurai]</code>, built and signed on the maintainer's machine and served from GitHub Releases with <code>SigLevel = Required DatabaseRequired</code>. It holds only our tools, configs and meta-packages.</li>
               <li>pacman is the updater. <code>samurai update</code> wraps one <code>pacman -Syu</code> that takes Arch packages and ours in the same transaction.</li>
             </ul>
@@ -212,8 +212,8 @@
             <article class="w-card" aria-labelledby="f-guided">
               <div class="card-head"><p class="kind">Installer</p><span class="w-seal">VM-tested</span></div>
               <h3 id="f-guided" class="w-display">Guided, or from a profile</h3>
-              <p class="w-muted"><code>samurai-install</code> asks for disk, hostname, timezone, encryption,
-                kernels, bootloader, desktop, user and shell, then writes one validated
+              <p class="w-muted">A graphical installer on the live desktop, or <code>samurai-install</code> in a terminal, asks for disk, hostname, timezone, encryption,
+                kernels, bootloader, desktop, software, user and shell, then writes one validated
                 <code>install-profile.toml</code>. Feed that file back with <code>--profile</code> to install the
                 next machine the same way. A copy stays at <code>/var/lib/samurai/install-profile.toml</code>.</p>
             </article>
@@ -223,8 +223,8 @@
               <div class="card-head"><p class="kind">Desktop</p><span class="w-seal">VM-tested</span></div>
               <h3 id="f-kde" class="w-display">KDE Plasma by default</h3>
               <p class="w-muted">Plasma with SDDM, Konsole, Dolphin, Kate, Ark, Gwenview and Okular, Breeze Dark
-                as the default theme. GNOME, Xfce, LXQt or no desktop can be picked in the wizard, but only KDE is
-                tested.</p>
+                as the default theme with a two-panel layout and monitor widgets. GNOME, Xfce, LXQt or no desktop can be
+                picked in the installer, but only KDE is tested.</p>
             </article>
           </li>
           <li>
@@ -259,6 +259,25 @@
             </article>
           </li>
           <li>
+            <article class="w-card" aria-labelledby="f-toolbox">
+              <div class="card-head"><p class="kind">Desktop</p><span class="w-seal">VM-tested</span></div>
+              <h3 id="f-toolbox" class="w-display">Samurai Toolbox</h3>
+              <p class="w-muted">A KDE app over the <code>samurai</code> command: health and repairs, apps,
+                cleanup, kernels and boot settings, updates, snapshots and diagnostics. Anything that changes the
+                system asks for the administrator password.</p>
+            </article>
+          </li>
+          <li>
+            <article class="w-card" aria-labelledby="f-software">
+              <div class="card-head"><p class="kind">Software</p><span class="w-seal">VM: installed</span></div>
+              <h3 id="f-software" class="w-display">Ready on first boot</h3>
+              <p class="w-muted">Command-line tools, fonts, KDE apps, Docker and a gaming set (Steam, Heroic,
+                GameMode, MangoHud, gamescope, GE-Proton, Proton-CachyOS, Wine) by default, each a choice in the
+                installer. Optional: browsers, Python 3.10-3.13, Miniforge, AI command-line tools, Ollama,
+                Tailscale and a reverse proxy. No game has been launched in testing yet.</p>
+            </article>
+          </li>
+          <li>
             <article class="w-card" aria-labelledby="f-update">
               <div class="card-head"><p class="kind">Updates</p><span class="w-seal">VM-tested</span></div>
               <h3 id="f-update" class="w-display">Staged updates and a notifier</h3>
@@ -282,7 +301,7 @@
           </li>
           <li>
             <article class="w-card" aria-labelledby="f-vm">
-              <div class="card-head"><p class="kind">Process</p><span class="w-seal">20 tests</span></div>
+              <div class="card-head"><p class="kind">Process</p><span class="w-seal">34 tests</span></div>
               <h3 id="f-vm" class="w-display">Proven in a VM first</h3>
               <p class="w-muted">A headless QEMU/KVM + OVMF harness drives the ISO over serial and the guest
                 agent: ISO boot, default install, guided install, KDE, offline install, rollback, update from an
@@ -334,11 +353,11 @@ usage: samurai &lt;command&gt; [args]
           <article class="w-card dl-card" aria-labelledby="dl-online">
             <div class="card-head"><p class="kind">Netinstall</p><span class="w-seal quiet">needs network</span></div>
             <h3 id="dl-online" class="w-display">Online ISO</h3>
-            <p class="size">About 1.3 GB.</p>
+            <p class="size">About 1.9 GB.</p>
             <ul class="w-dash">
               <li>Live system plus the installer; packages are fetched during the install.</li>
               <li>You start on today's versions from Arch, CachyOS and <code>[samurai]</code>.</li>
-              <li>Ethernet connects on its own; Wi-Fi is set up with <code>iwctl</code> in the live console.</li>
+              <li>The live system is a Plasma desktop; set up Wi-Fi from its network applet.</li>
             </ul>
             <p class="best">Best when the machine has a good connection.</p>
             <div class="btn-row">
@@ -349,9 +368,9 @@ usage: samurai &lt;command&gt; [args]
           <article class="w-card w-card-accent dl-card" aria-labelledby="dl-offline">
             <div class="card-head"><p class="kind">Full desktop</p><span class="w-seal">no network needed</span></div>
             <h3 id="dl-offline" class="w-display">Offline ISO</h3>
-            <p class="size">About 4.6 GB (4.4 GiB), shipped in three parts.</p>
+            <p class="size">About 7.7 GB, shipped in four parts.</p>
             <ul class="w-dash">
-              <li>KDE Plasma, <code>linux-cachyos</code> + <code>linux-zen</code> and the AMD, Intel, Nouveau and NVIDIA driver packages baked in.</li>
+              <li>KDE Plasma, <code>linux-cachyos</code> + <code>linux-zen</code>, the driver packages and the default software, gaming set included, baked in.</li>
               <li>Installs with no network at all; run <code>samurai update</code> afterwards.</li>
               <li>Split into parts because GitHub limits a release file to 2 GiB. Join them before writing.</li>
             </ul>
@@ -421,14 +440,14 @@ gpg --verify SHA256SUMS.sig SHA256SUMS</code></pre>
           </li>
           <li>
             <h3 class="w-display">Boot the stick in UEFI mode</h3>
-            <p>Turn Secure Boot off for the live ISO, as with Arch's own. The live system logs you in on the
-              console. Ethernet connects by itself; for Wi-Fi use <code>iwctl</code>.</p>
+            <p>Turn Secure Boot off for the live ISO, as with Arch's own. The live system starts a Plasma desktop.
+              Ethernet connects by itself; for Wi-Fi use the network applet.</p>
           </li>
           <li>
-            <h3 class="w-display">Run the guided installer</h3>
-            <p>It checks UEFI and RAM, lists the disks, asks its questions, shows a summary and waits for an
-              explicit <code>yes</code>. The LUKS passphrase is asked twice and never written to the profile.
-              The firewall question defaults to firewalld; answer <code>n</code> to install without one.</p>
+            <h3 class="w-display">Run the installer</h3>
+            <p>Open <em>Install Samurai OS (graphical)</em> on the desktop. It lists the disks, walks through the
+              choices, shows a summary and starts only after you confirm the erase. The disk passphrase is never
+              written to the profile. Prefer a terminal? The second icon runs the same install as questions:</p>
             <div class="code" data-copy>
 <pre><code><span class="prompt"># </span>samurai-install</code></pre>
             </div>
@@ -630,9 +649,9 @@ gpg --verify SHA256SUMS.sig SHA256SUMS</code></pre>
           <details>
             <summary>Is there a graphical installer?</summary>
             <div class="answer">
-              <p>Not yet. Today's installer is the guided terminal wizard and the profile mode. A Calamares-based
-                graphical installer and a KDE live session are on the roadmap; both will write the same install
-                profile.</p>
+              <p>Yes. The ISO boots into a Plasma desktop with icons for the graphical installer, the terminal
+                installer and rescue. Both installers write the same install profile and run the same engine.
+                Today they erase the whole disk: no dual boot or manual partitioning yet.</p>
             </div>
           </details>
           <details>
@@ -683,19 +702,19 @@ gpg --verify SHA256SUMS.sig SHA256SUMS</code></pre>
           <ol class="road">
             <li>
               <div class="meta"><h3 class="w-display">Toolbox CLI</h3><span class="w-seal quiet">in progress</span></div>
-              <p>Available now: health checks and fixes, diagnostics, cleanup, repairs, mirrors, boot entries and kernel management. Still ahead: firewall and Tailscale commands, a task queue, a privileged helper and a Qt toolbox.</p>
+              <p>Available now: health checks and fixes, diagnostics, cleanup, repairs, mirrors, boot entries, kernel management and the Toolbox app. Still ahead: firewall and Tailscale commands, a task queue and a privileged background service.</p>
             </li>
             <li>
-              <div class="meta"><h3 class="w-display">Drivers and developer setup</h3><span class="w-seal quiet">planned</span></div>
-              <p>chwd hardware profiles, CUDA, a local-only gpu-unlock builder; opt-in Python versions, uv, Miniforge, Docker, AI CLIs.</p>
+              <div class="meta"><h3 class="w-display">Drivers</h3><span class="w-seal quiet">planned</span></div>
+              <p>chwd hardware profiles, CUDA and a local-only gpu-unlock builder.</p>
             </li>
             <li>
-              <div class="meta"><h3 class="w-display">Desktop ISO and graphical installer</h3><span class="w-seal quiet">planned</span></div>
-              <p>KDE live session, Calamares with catalog pages, a TUI installer, Chaotic-AUR, gaming stack, KDE panels and monitor widgets, snapshot entries in the boot menu.</p>
+              <div class="meta"><h3 class="w-display">Installer and boot polish</h3><span class="w-seal quiet">planned</span></div>
+              <p>Dual boot and manual partitioning, a boot splash and branding, snapshot entries in the boot menu.</p>
             </li>
             <li>
-              <div class="meta"><h3 class="w-display">Security, GUI toolbox, real hardware</h3><span class="w-seal quiet">planned</span></div>
-              <p>The M8 security baseline, a Qt6/QML toolbox over the same backend, a USB drive writer, then two weeks of daily driving on real machines before v1.0.</p>
+              <div class="meta"><h3 class="w-display">Security and real hardware</h3><span class="w-seal quiet">planned</span></div>
+              <p>The M8 security baseline, a USB drive writer, then two weeks of daily driving on real machines before v1.0.</p>
             </li>
           </ol>
           </div>
@@ -710,7 +729,7 @@ gpg --verify SHA256SUMS.sig SHA256SUMS</code></pre>
           <p class="w-eyebrow">Step through the curtain</p>
           <h2 id="cta-title" class="w-display">Try it in a VM tonight.</h2>
           <p class="lead">Grab an ISO, give a virtual machine UEFI firmware and 4 GiB of RAM, and run
-            <code>samurai-install</code>. Issues and ideas are welcome on GitHub.</p>
+            the installer from the desktop. Issues and ideas are welcome on GitHub.</p>
           <div class="btn-row">
             <a class="w-btn w-btn-primary" href="https://github.com/GenorTG/samurai-os/releases/latest" rel="noopener">Latest release</a>
             <a class="w-btn w-btn-subtle" href="https://github.com/GenorTG/samurai-os" rel="noopener">Source and specs</a>
