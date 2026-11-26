@@ -167,7 +167,7 @@ def test_update_streams_and_the_window_stays_usable(desktop):
     desktop.confirm("Update")
     desktop.authenticate()
     desktop.wait_text("System update", 60)
-    desktop.page("Overview")             # navigate while the update runs
+    desktop.page("Overview", PAGES["overview"])   # navigate while the update runs
     finished(desktop, "update", 2400)
     desktop.wait_text("Finished", 60)
     desktop.shot("update-finished")

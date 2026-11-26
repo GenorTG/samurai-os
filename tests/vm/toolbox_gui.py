@@ -75,7 +75,8 @@ def install_base(vm: VM) -> None:
 
 def wait_for_plasma(ga) -> None:
     run(ga, f"for i in $(seq 120); do pgrep -u {USER} -x plasmashell >/dev/null && "
-            "pgrep -u samurai -f polkit-kde-authentication-agent >/dev/null && exit 0; sleep 2; done; "
+            "pgrep -u samurai -f polkit-kde-authentication-agent >/dev/null && "
+            f"! pgrep -u {USER} -x ksplashqml >/dev/null && exit 0; sleep 2; done; "   # the splash eats clicks
             "exit 1", timeout=300)
     time.sleep(20)  # panel and wallpaper
 
@@ -168,16 +169,18 @@ class Desktop:
         """Click the `index`-th occurrence of `phrase` (negative: from the bottom)."""
         self.click_at(*self.wait_text(phrase, timeout)[index])
 
-    def page(self, name: str) -> None:
-        """Choose a page in the sidebar and wait for its header. The first click after another
-        window closed (a password dialog) can be spent on focusing, so try again."""
+    def page(self, name: str, shows: str) -> None:
+        """Choose a page in the sidebar and wait for text from its content (tesseract often
+        misses the large page header). The first click after another window closed (a password
+        dialog) can be spent on focusing, so try again."""
         for _ in range(3):
             left = min(self.wait_text("Overview"), key=lambda p: p[0])[0]
             entry = [p for p in self.wait_text(name) if p[0] < left + 150]
             assert entry, f"no sidebar entry {name!r}"
             self.click_at(*entry[0])
+            self.vm.move(1, 799)     # off the window: the pointer covers the label it clicked
             time.sleep(3)
-            if any(x > left + 150 and y < entry[0][1] and y < 170 for x, y in self.find(name)):
+            if self.find(shows):
                 return
         raise AssertionError(f"page {name!r} did not open")
 

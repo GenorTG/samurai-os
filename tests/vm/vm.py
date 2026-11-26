@@ -351,19 +351,24 @@ class VM:
             else:
                 raise ValueError(f"type_text cannot type {char!r}")
 
+    def _input(self, *events: dict) -> None:
+        reply = self.qmp_command("input-send-event", events=list(events))
+        if "error" in reply:
+            raise RuntimeError(f"input-send-event failed: {reply['error']}")
+
+    def move(self, x: int, y: int, width: int = 1280, height: int = 800) -> None:
+        """Put the absolute pointer on screen pixel (x, y)."""
+        self._input({"type": "abs", "data": {"axis": "x", "value": x * 32767 // width}},
+                    {"type": "abs", "data": {"axis": "y", "value": y * 32767 // height}})
+        time.sleep(0.2)
+
     def click(self, x: int, y: int, width: int = 1280, height: int = 800,
               double: bool = False) -> None:
         """Left click at screen pixel (x, y) through the absolute pointer."""
-        def event(*events: dict) -> None:
-            reply = self.qmp_command("input-send-event", events=list(events))
-            if "error" in reply:
-                raise RuntimeError(f"input-send-event failed: {reply['error']}")
-        event({"type": "abs", "data": {"axis": "x", "value": x * 32767 // width}},
-              {"type": "abs", "data": {"axis": "y", "value": y * 32767 // height}})
-        time.sleep(0.2)
+        self.move(x, y, width, height)
         for _ in range(2 if double else 1):
             for down in (True, False):
-                event({"type": "btn", "data": {"down": down, "button": "left"}})
+                self._input({"type": "btn", "data": {"down": down, "button": "left"}})
                 time.sleep(0.07)
 
     def eject_iso(self) -> None:
