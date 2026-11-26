@@ -2,16 +2,18 @@
 
 ## ISO build
 - `archiso` profile in `iso/`, derived from Arch's `releng` profile. Changes: our `pacman.conf`
-  (`[samurai]`, `[cachyos]`, `[chaotic-aur]`, spec 02), the KDE live session, Calamares, the terminal
-  installer, the toolbox (for rescue), branding.
+  (`[samurai]`, `[cachyos]`, `[chaotic-aur]`, spec 02), the KDE live session, the graphical and terminal
+  installers, the toolbox (for rescue), branding.
 - Build: `ci/build-iso.sh` runs `mkarchiso` inside a privileged `archlinux:latest` container. The same
   script runs locally (genorbox1, a Debian host) and in CI. Output: `samurai-<VERSION>-x86_64.iso` +
   `.sha256` + `.sig`.
 - UEFI only, x86_64 only. The live ISO boots with Secure Boot **off** (as Arch's ISO does). Secure
   Boot is set up after install with our own keys (spec 09).
-- Live session: Plasma (Wayland), auto-login user `live`, desktop icons "Install Samurai OS
-  (graphical)", "Install Samurai OS (terminal)" and "Samurai Rescue". The TTY login prints both
-  install commands, and `sshd` can be started from the live menu for a remote terminal install.
+- Live session: Plasma (Wayland), auto-login user `live` (created at boot, no password, sudo only for
+  the installer helper, `samurai-install` and `samurai-rescue`), desktop icons "Install Samurai OS
+  (graphical)", "Install Samurai OS (terminal)" and "Samurai Rescue". Networking is NetworkManager
+  with the iwd backend. The root console (tty2 and serial) prints the install commands; `sshd` can be
+  started there for a remote terminal install. A "terminal only" boot entry skips the desktop.
 - Live graphics: Mesa for AMD/Intel/VMs, nouveau for NVIDIA. A boot menu entry "NVIDIA
   (proprietary)" loads the NVIDIA open modules live for GPUs nouveau cannot drive (Blackwell).
 - Two flavors (`SAMURAI_ISO_FLAVOR`): **online** (netinstall, ~1.3 GB, packages from the mirrors)
@@ -32,7 +34,7 @@ systems, and the VM tests (which feed a profile file directly) test the same cod
 
 | Front-end | Tech | Use |
 |-----------|------|-----|
-| Graphical | Calamares (built in `[samurai]`, as Garuda and CachyOS do) with our own QML pages for the catalog steps | default on the live desktop |
+| Graphical | `installer/gui`: Qt Quick wizard (PySide6) plus a root helper that runs `samurai-install --profile` (ADR-0009) | default on the live desktop |
 | Terminal | `samurai-install`, a guided TUI (Rust + ratatui) with the same pages | TTY, SSH into the live ISO, low-RAM machines, power users |
 | Unattended | `samurai-install --profile my.toml --disk /dev/nvme0n1 --yes` | VM tests, reinstalling a machine the same way |
 
@@ -70,8 +72,8 @@ The app lists come from `catalog/`:
 
 ## `samurai-postinstall` (applies the profile)
 Runs in the target chroot, idempotent, every step logged to `/var/log/samurai/install.log`:
-1. Partition, encrypt, create subvolumes, unpack the live root (Calamares `unpackfs` / the same code in
-   `samurai-install`), generate fstab, locale, users.
+1. Partition, encrypt, create subvolumes, install the packages (`samurai-install`), generate fstab,
+   locale, users.
 2. Remove live-only packages.
 3. Repos and keyrings: `[samurai]`, `[cachyos]`, `[chaotic-aur]` with their keyrings (spec 02).
 4. Kernels and headers.

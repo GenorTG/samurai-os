@@ -13,8 +13,9 @@
 #   SAMURAI_OFFLINE=1           offline medium: no repo sync, no catalog apps
 #   SAMURAI_PACMAN_CONF=<file>  offline repository config for pac()
 #   SAMURAI_SERIAL_CONSOLE=1    VM harness: add console=ttyS0 to the cmdline
-# Install-time facts (UUIDs, encryption flags, the user's password hash) are
-# read from /var/lib/samurai/install-env (0600, written by the driver).
+# Install-time facts (UUIDs, encryption flags, GPU, the user's password hash)
+# are read from /var/lib/samurai/install-env (0600, written by the driver).
+# What gets installed is decided by samurai-profile-plan, never here.
 set -euo pipefail
 
 PROFILE="${1:?usage: samurai-postinstall /path/to/profile.toml}"
@@ -79,11 +80,14 @@ log "samurai-postinstall starting"
     read -r USHELL
     read -r ENCRYPT
     read -r AUTOKEY
-    read -r -a PACKAGES
     read -r DESKTOP
     read -r -a APPS
     read -r FW
     read -r SSHD
+    read -r KDE_THEME
+    read -r KDE_EFFECTS
+    read -r KDE_WIDGETS
+    read -r DOCKER_MODE
 } < <(python3 - "$PROFILE" <<'PY'
 import sys, tomllib
 p = tomllib.loads(open(sys.argv[1], "rb").read().decode())
@@ -99,11 +103,15 @@ print(u.get("name", "samurai"))
 print(u.get("shell", "bash"))
 print(int(d.get("encryption", True)))
 print(int(d.get("auto_unlock_keyfile", False)))
-print(" ".join(pk.get("install", [])))
 print(pk.get("desktop", "kde"))
 print(" ".join(pk.get("apps", [])))
 print(sec.get("firewall", "none"))
 print("yes" if sec.get("ssh_server", False) else "no")
+k = p.get("kde", {})
+print(k.get("theme", "breeze"))
+print("reduced" if k.get("reduced_effects", True) else "default")
+print("on" if k.get("monitor_widgets", True) else "off")
+print(p.get("development", {}).get("docker", "none"))
 PY
 ) || fatal "profile read failed"
 [ -n "$HOSTNAME" ] && [ ${#KERNEL_ARR[@]} -gt 0 ] && [ -n "$UNAME" ] || fatal "profile read incomplete"
@@ -112,6 +120,7 @@ v=$(env_get SAMURAI_ENCRYPT); [ -n "$v" ] && ENCRYPT=$v
 v=$(env_get SAMURAI_AUTOKEY); [ -n "$v" ] && AUTOKEY=$v
 UPWHASH=$(env_get SAMURAI_PWHASH)
 unset v
+NVIDIA=$(env_get SAMURAI_NVIDIA)
 
 ### identity ###
 log "identity: hostname=$HOSTNAME tz=$TZ locale=$LOCALE keymap=$KB"
@@ -151,106 +160,92 @@ if ! grep -q '^\[samurai\]' /etc/pacman.conf; then
     printf '\n# Samurai OS repository (spec 02): signed packages AND database\n[samurai]\nSigLevel = Required DatabaseRequired\nInclude = %s\n' \
         "$SAMURAI_ML_BOOT" >> /etc/pacman.conf
 fi
+### [chaotic-aur] (ADR-0007): the keyring package carries the trust; the primary
+### key is pinned, so a swapped keyring or mirror cannot slip in another signer
+CHAOTIC_FPR=EF925EA60F33D0CB85C44AD13056513887B78AEB
+log "repos: verifying [chaotic-aur] trust ($CHAOTIC_FPR)"
+grep -q '^\[chaotic-aur\]' /etc/pacman.conf || fatal "pacman.conf has no [chaotic-aur] section" 11
+[ -f /etc/pacman.d/chaotic-mirrorlist ] || fatal "chaotic-mirrorlist is not installed" 11
+pacman-key --populate chaotic || fatal "cannot populate the chaotic keyring (chaotic-keyring missing?)" 11
+# field 2 of the pub record is the computed validity: f = full (locally signed)
+gpg --homedir /etc/pacman.d/gnupg --batch --with-colons --list-keys "$CHAOTIC_FPR" 2>/dev/null \
+    | awk -F: '/^pub:/ {ok = ($2 == "f" || $2 == "u")} END {exit !ok}' \
+    || fatal "the pinned Chaotic-AUR key $CHAOTIC_FPR is missing or not trusted" 11
+
 if [ "${SAMURAI_OFFLINE:-0}" = 1 ]; then
     log "repos: offline install — no repo sync in the target"
 else
     pacman -Syy
 fi
 
-if [ "${#PACKAGES[@]}" -gt 0 ]; then
-    # offline installs already covered these; only fetch what is missing
-    MISSING=()
-    for p in "${PACKAGES[@]}"; do
-        installed "$p" || MISSING+=("$p")
-    done
-    if [ "${#MISSING[@]}" -gt 0 ]; then
-        log "installing missing [samurai] packages: ${MISSING[*]}"
-        pac_install "${MISSING[@]}"
-    else
-        log "[samurai] packages already present (offline cache path)"
-    fi
+### one transaction with everything the profile selects (spec 08 step 6) ###
+PLAN_ARGS=()
+[ "${SAMURAI_OFFLINE:-0}" = 1 ] && PLAN_ARGS+=(--offline)
+[ "$NVIDIA" = 1 ] && PLAN_ARGS+=(--nvidia)
+# PCI class 03xx display controller, vendor 1002 = AMD
+if lspci -mm -n 2>/dev/null | awk '{gsub(/"/,"")} $2 ~ /^03/ && $3=="1002"{f=1} END{exit !f}'; then
+    PLAN_ARGS+=(--amd)
 fi
+PLAN=$(samurai-profile-plan "$PROFILE" "${PLAN_ARGS[@]}") || fatal "cannot plan the package set" 12
+plan_get() { sed -n "s/^$1 //p" <<<"$PLAN"; }
+mapfile -t PLAN_PKGS < <(plan_get pkg)
+mapfile -t PLAN_SERVICES < <(plan_get service)
+mapfile -t PLAN_USER_SERVICES < <(plan_get user-service)
+mapfile -t PLAN_GROUPS < <(plan_get group)
+mapfile -t PLAN_DEFERRED < <(plan_get defer)
+[ "${#PLAN_PKGS[@]}" -gt 0 ] || fatal "the package plan is empty" 12
+log "packages: ${#PLAN_PKGS[@]} selected: ${PLAN_PKGS[*]}"
+pac_install "${PLAN_PKGS[@]}" || fatal "package installation failed" 16
+
 if [ -f "$SAMURAI_ML" ] && grep -q "^Include = $SAMURAI_ML_BOOT\$" /etc/pacman.conf; then
     sed -i "s|^Include = $SAMURAI_ML_BOOT\$|Include = $SAMURAI_ML|" /etc/pacman.conf
     log "repos: [samurai] now uses $SAMURAI_ML (samurai-mirrorlist package)"
 fi
 
-### desktop (spec 08: KDE Plasma default; alternatives opt-in) ###
-DM=""
-case "$DESKTOP" in
-    kde)
-        log "desktop: KDE Plasma (Breeze Dark)"
-        # day-one desktop: browser, PipeWire sound, screenshots, fonts with
-        # emoji, Flatpak for `samurai apps`, power profiles, Bluetooth
-        DESKTOP_PKGS=(plasma-meta sddm konsole dolphin kate ark gwenview okular
-            firefox pipewire pipewire-pulse pipewire-alsa wireplumber spectacle
-            noto-fonts noto-fonts-emoji flatpak power-profiles-daemon bluez bluez-utils)
-        pac_install "${DESKTOP_PKGS[@]}" || fatal "KDE install failed" 16
-        DM=sddm
-        # SDDM greeter on Wayland under KWin with the Breeze theme (what the
-        # Plasma "apply Plasma settings" button writes), so the login screen
-        # matches the desktop instead of a bare X11 fallback
-        install -d -m 755 /etc/sddm.conf.d
-        cat > /etc/sddm.conf.d/10-samurai-kde.conf <<'EOF'
-[General]
-DisplayServer=wayland
-GreeterEnvironment=QT_WAYLAND_SHELL_INTEGRATION=layer-shell
-Numlock=on
+FIRSTBOOT_NOTES=/var/lib/samurai/firstboot-notes
+note() { mkdir -p /var/lib/samurai; printf '%s   # %s\n' "$1" "$2" >> "$FIRSTBOOT_NOTES"; }
+for line in "${PLAN_DEFERRED[@]}"; do
+    [ -n "$line" ] || continue
+    log "deferred to first boot: ${line%%$'\t'*} (${line#*$'\t'})"
+    note "${line%%$'\t'*}" "${line#*$'\t'}"
+done
 
-[Theme]
-Current=breeze
-CursorTheme=breeze_cursors
-Font=Noto Sans,10,-1,5,50,0,0,0,0,0
-
-[Wayland]
-CompositorCommand=kwin_wayland --drm --no-lockscreen --no-global-shortcuts --locale1
-EOF
-        # Breeze Dark default for every new user (Genor 2026-11-17)
-        install -d /etc/skel/.config
-        cat > /etc/skel/.config/kdeglobals <<'EOF'
-[KDE]
-widgetStyle=Breeze
-
-[General]
-LookAndFeelPackage=org.kde.breezedark.desktop
-EOF
-        ;;
-    gnome)
-        log "desktop: GNOME"
-        pac_install gnome gnome-tweaks gdm || fatal "GNOME install failed" 16
-        DM=gdm
-        ;;
-    xfce)
-        log "desktop: XFCE"
-        pac_install xfce4 xfce4-goodies sddm || fatal "XFCE install failed" 16
-        DM=sddm
-        ;;
-    lxqt)
-        log "desktop: LXQt"
-        pac_install lxqt sddm || fatal "LXQt install failed" 16
-        DM=sddm
-        ;;
-    none)
-        log "desktop: none (CLI only)"
-        ;;
-    *)
-        fatal "unsupported desktop: $DESKTOP" 16
-        ;;
-esac
-[ -z "$DM" ] || enable_unit "$DM.service"
-for unit in bluetooth.service power-profiles-daemon.service; do
-    # file check, not `systemctl cat`: inside the chroot that asks the LIVE systemd
-    if [ -e "/usr/lib/systemd/system/$unit" ]; then
-        enable_unit "$unit"
+### desktop (spec 14: files and defaults come from samurai-settings-kde) ###
+log "desktop: $DESKTOP"
+# The login screen and the desktop follow the chosen keyboard too (vconsole.conf
+# only covers the console): without this a password typed in another layout at
+# install time cannot be typed at the first login.
+if [ "$DESKTOP" != none ]; then
+    XKB_LAYOUT=""; XKB_VARIANT=""
+    read -r XKB_LAYOUT XKB_VARIANT < <(awk -v k="$KB" '$1==k {print $2, $4; exit}' \
+        /usr/share/systemd/kbd-model-map 2>/dev/null) || true
+    # names the table does not list ("pl") match an XKB layout of the same name
+    [ -n "$XKB_LAYOUT" ] || [ ! -f "/usr/share/X11/xkb/symbols/$KB" ] || XKB_LAYOUT=$KB
+    [ "$XKB_VARIANT" != - ] || XKB_VARIANT=""
+    if [ -n "$XKB_LAYOUT" ]; then
+        install -d -m 755 /etc/X11/xorg.conf.d /etc/xdg
+        printf 'Section "InputClass"\n    Identifier "system-keyboard"\n    MatchIsKeyboard "on"\n    Option "XkbLayout" "%s"\n    Option "XkbVariant" "%s"\nEndSection\n' \
+            "$XKB_LAYOUT" "$XKB_VARIANT" > /etc/X11/xorg.conf.d/00-keyboard.conf
+        printf '[Layout]\nLayoutList=%s\nVariantList=%s\nUse=true\n' \
+            "$XKB_LAYOUT" "$XKB_VARIANT" > /etc/xdg/kxkbrc
+        chmod 644 /etc/X11/xorg.conf.d/00-keyboard.conf /etc/xdg/kxkbrc
+        log "keyboard: graphical layout $XKB_LAYOUT ${XKB_VARIANT}"
+    else
+        log "WARNING: keyboard: no graphical layout known for keymap $KB (login screen stays us)"
     fi
+fi
+if [ "$DESKTOP" = kde ]; then
+    samurai-kde-defaults apply --theme "$KDE_THEME" --effects "$KDE_EFFECTS" --widgets "$KDE_WIDGETS" \
+        || fatal "cannot apply the KDE defaults" 16
+fi
+for unit in "${PLAN_SERVICES[@]}"; do
+    [ -n "$unit" ] || continue
+    enable_unit "$unit"
 done
 
 ### firewall (spec 09, ADR-0006: firewalld default; deny inbound except DHCPv6) ###
 case "$FW" in
     firewalld|ufw)
-        FW_PKGS=("$FW")
-        [ "$DESKTOP" = kde ] && FW_PKGS+=(plasma-firewall)
-        pac_install "${FW_PKGS[@]}" || fatal "firewall install failed" 17
         if [ "$FW" = firewalld ]; then
             # Offline config: firewall-offline-cmd works without the daemon
             # (chroot) and writes /etc/firewalld/zones/public.xml.
@@ -305,12 +300,11 @@ case "$FW" in
     *) fatal "unsupported firewall: $FW" 17 ;;
 esac
 if [ "$SSHD" = yes ]; then
-    if pac_install openssh; then
-        # spec 09: key-only, no root. Root is locked anyway; passwords stay
-        # off so a fresh box is never brute-forceable before keys are placed
-        # (add them in ~/.ssh/authorized_keys from the console).
-        install -d -m 755 /etc/ssh/sshd_config.d
-        cat > /etc/ssh/sshd_config.d/10-samurai.conf <<'EOF'
+    # spec 09: key-only, no root. Root is locked anyway; passwords stay
+    # off so a fresh box is never brute-forceable before keys are placed
+    # (add them in ~/.ssh/authorized_keys from the console).
+    install -d -m 755 /etc/ssh/sshd_config.d
+    cat > /etc/ssh/sshd_config.d/10-samurai.conf <<'EOF'
 # Samurai OS (spec 09): key-only, no root login
 PermitRootLogin no
 PasswordAuthentication no
@@ -318,11 +312,8 @@ KbdInteractiveAuthentication no
 PermitEmptyPasswords no
 MaxAuthTries 3
 EOF
-        enable_unit sshd.service
-        log "ssh: sshd enabled (key-only; add authorized_keys for $UNAME before relying on it)"
-    else
-        log "WARNING: ssh: openssh not installable now (offline medium?); enable after the first update"
-    fi
+    enable_unit sshd.service
+    log "ssh: sshd enabled (key-only; add authorized_keys before relying on it)"
 fi
 
 # networking is a basic function (spec 09): NetworkManager always on when
@@ -353,7 +344,6 @@ EOF
 # offline installs (and anything skipped) leave a first-boot note instead, so
 # the user can run the exact command later. App failures never fail the
 # install: the base system is already complete at this point.
-FIRSTBOOT_NOTES=/var/lib/samurai/firstboot-notes
 if [ "${#APPS[@]}" -gt 0 ]; then
     mkdir -p /var/lib/samurai
     APPS_CMD="samurai apps install ${APPS[*]}"
@@ -381,15 +371,14 @@ if [ "${#APPS[@]}" -gt 0 ]; then
                 "$APPS_CMD" "$rc" >> "$FIRSTBOOT_NOTES"
         fi
     fi
-    if [ -s "$FIRSTBOOT_NOTES" ]; then
-        {
-            printf '\nStill to do from your install profile (%s):\n' "$FIRSTBOOT_NOTES"
-            sed 's/^/  /' "$FIRSTBOOT_NOTES"
-        } >> /etc/motd
-        log "apps: first-boot notes: $(tr '\n' ';' < "$FIRSTBOOT_NOTES")"
-    elif [ "$APPS_DONE" -eq 1 ]; then
-        log "apps: nothing deferred"
-    fi
+    if [ "$APPS_DONE" -eq 1 ]; then log "apps: installed"; fi
+fi
+if [ -s "$FIRSTBOOT_NOTES" ]; then
+    {
+        printf '\nStill to do from your install profile (%s):\n' "$FIRSTBOOT_NOTES"
+        sed 's/^/  /' "$FIRSTBOOT_NOTES"
+    } >> /etc/motd
+    log "first-boot notes: $(tr '\n' ';' < "$FIRSTBOOT_NOTES")"
 fi
 
 ### users ###
@@ -413,6 +402,35 @@ if ! id -u -- "$UNAME" >/dev/null 2>&1; then
     fi
 fi
 unset UPWHASH
+
+### groups and per-user services chosen by the profile ###
+for group in "${PLAN_GROUPS[@]}"; do
+    [ -n "$group" ] || continue
+    getent group "$group" >/dev/null || fatal "group $group does not exist (package missing?)" 20
+    usermod -aG "$group" -- "$UNAME" || fatal "cannot add $UNAME to $group" 20
+    log "user: $UNAME added to group $group"
+done
+# user units are enabled by symlink: there is no user systemd inside the chroot
+UHOME=$(getent passwd "$UNAME" | cut -d: -f6)
+[ -d "$UHOME" ] || fatal "home directory of $UNAME is missing" 20
+for unit in "${PLAN_USER_SERVICES[@]}"; do
+    [ -n "$unit" ] || continue
+    [ -f "/usr/lib/systemd/user/$unit" ] || fatal "user unit $unit does not exist" 20
+    case "$unit" in *.socket) want=sockets.target.wants ;; *) want=default.target.wants ;; esac
+    # as the user: nothing in the home can redirect a root write
+    runuser -u "$UNAME" -- sh -c 'mkdir -p "$1" && ln -sfn "$2" "$1/${2##*/}"' sh \
+        "$UHOME/.config/systemd/user/$want" "/usr/lib/systemd/user/$unit" \
+        || fatal "cannot enable user unit $unit" 20
+    log "user service: $unit enabled for $UNAME"
+done
+if [ "$DOCKER_MODE" = rootless ] && installed docker-rootless-extras; then
+    grep -q "^$UNAME:" /etc/subuid && grep -q "^$UNAME:" /etc/subgid \
+        || fatal "rootless Docker needs subordinate uid/gid ranges for $UNAME" 20
+fi
+# containers get the GPU (spec 13); rootful daemon configuration only
+if [ "$DOCKER_MODE" = group ] && [ "$NVIDIA" = 1 ] && command -v nvidia-ctk >/dev/null; then
+    nvidia-ctk runtime configure --runtime=docker || fatal "nvidia-ctk configuration failed" 20
+fi
 # the hash has served its purpose: it stays on no file of the installed system
 [ -f "$INSTALL_ENV" ] && sed -i '/^SAMURAI_PWHASH=/d' "$INSTALL_ENV"
 passwd -l root || fatal "could not lock root"
@@ -650,17 +668,6 @@ enable_unit fstrim.timer
 enable_unit 'btrfs-scrub@-.timer'
 # pacman cache hygiene (pacman-contrib also provides checkupdates for the notifier)
 enable_unit paccache.timer
-# compressed swap: half the RAM, capped, zstd (spec 06/10)
-if installed zram-generator; then
-    cat > /etc/systemd/zram-generator.conf <<'EOF'
-[zram0]
-zram-size = min(ram / 2, 8192)
-compression-algorithm = zstd
-swap-priority = 100
-EOF
-    log "swap: zram-generator configured (zram0 = min(ram/2, 8 GiB), zstd)"
-fi
-
 ### fingerprint + install info ###
 install -d -m 755 /var/lib/samurai
 { lspci -nn 2>/dev/null || true; lsusb 2>/dev/null || true; } | sed 's/^/  /' > /var/lib/samurai/hw-fingerprint

@@ -161,7 +161,7 @@ class Desktop:
     # ------------------------------------------------------------ doing
     def click_at(self, x: int, y: int) -> None:
         png = self.shot("ocr")
-        self.vm.click(x, y, self.size(png))
+        self.vm.click(x, y, *self.size(png))
         time.sleep(1)
 
     def click(self, phrase: str, index: int = 0, timeout: float = 60) -> None:

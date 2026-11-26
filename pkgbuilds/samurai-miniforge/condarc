@@ -1,0 +1,9 @@
+# Samurai OS (spec 13): conda is available but never auto-activated, so
+# `python` stays Arch's system python. Envs and package cache are per user.
+channels:
+  - conda-forge
+auto_activate_base: false
+envs_dirs:
+  - ~/.conda/envs
+pkgs_dirs:
+  - ~/.conda/pkgs

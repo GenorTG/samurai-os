@@ -37,7 +37,7 @@ def _offline_profile(mirror) -> None:
 
 def test_offline_install(mirror):
     _offline_profile(mirror)
-    vm = VM("offline-inst", iso=str(find_iso()), disk_size="20G", ram="6144", smp="4")
+    vm = VM("offline-inst", iso=str(find_iso()), disk_size="48G", ram="6144", smp="4")
     vm.start()
     try:
         vm.serial_connect()
@@ -73,7 +73,7 @@ def test_offline_install(mirror):
         code, out = ga2.exec(
             "systemctl is-active sddm; "
             "pacman -Q plasma-meta sddm networkmanager linux-cachyos linux-zen 2>&1; "
-            "grep LookAndFeelPackage /etc/skel/.config/kdeglobals; "
+            "sed -n '/^\\[KDE\\]/,/^$/p' /etc/xdg/kdeglobals; "
             "systemctl --failed --no-legend | wc -l; "
             "findmnt -no FSTYPE /; "
             "pacman -Q linux 2>/dev/null | wc -l"

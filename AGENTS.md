@@ -58,3 +58,32 @@ See `docs/specs/01-ARCHITECTURE.md` "Source layout". Today only `docs/`, `script
 - GUI VM tests read the screen with tesseract: set `OMP_THREAD_LIMIT=1` (OpenMP spins for minutes next to a
   busy VM), click dialog buttons relative to Cancel, and expect small grey text to be missed.
 - `samurai apps` must never spawn pacman once per package name (55 calls = 31 s in a VM).
+- Package selection for an install lives only in `installer/samurai-profile-plan` (postinstall, the
+  wizard's lists and the offline ISO closure read it). A new choice = planner + `validate-profile.py`
+  + `docs/plans/profile-schema.md` + unit test; offline-carried choices go into
+  `everything_offline_profiles()`.
+- Local PKGBUILD sources: run `ci/update-pkg-sums.py` after editing one. `iso/airootfs` holds
+  committed copies of installer files (unit tests fail on drift; copies in `usr/local/bin` are 755).
+- A branch whose `[samurai]` packages are unpublished is tested with `ci/build-pkgs.sh` +
+  `SAMURAI_LOCAL_PKGS=<dir> ci/build-iso.sh` (offline flavor only). Online installs of such a branch
+  fail until the packages are published; release order is repo first, ISO second.
+- KDE reads `LookAndFeelPackage` only from the `[KDE]` group; the system default lives in
+  `/etc/xdg/kdeglobals` (`samurai-kde-defaults`). A `[General]` copy in skel was ignored and installs came
+  up light while the tests grepped the file and passed (2026-11-26). Assert the effective value in a live
+  session (`kreadconfig6 ... ColorScheme`), not file contents.
+- Arch builds Wine as pure WoW64 (2026-11-26): most `lib32-*` Wine libraries no longer exist.
+- Hold `/tmp/samurai-vm.lock` only while a VM test runs: an interactive VM session under the lock
+  blocks every other lane (2026-11-26).
+- Graphical installer (`installer/gui`, ADR-0009) is a front-end only: new choices go to the planner and
+  schema first, then `model.py` + a QML page. Layout check without a VM, in an Arch container:
+  `tests/gui/render_pages.py OUT` and `tests/gui/drive_keyboard.py` (`QT_QPA_PLATFORM=offscreen`).
+- The Plasma controls style gives every button an automatic Alt+letter mnemonic: a letter `Shortcut`
+  becomes ambiguous and silently never fires. Use arrows / Ctrl combinations.
+- A root helper that sets a private umask passes it to `samurai-install`, which `mkdir`s directories of
+  the new system: spawn the engine with `umask=0o022` and create secret files with explicit modes.
+- Live-only files live in `/usr/lib/samurai-installer/`: `samurai-install` copies every
+  `/usr/local/bin/samurai-*` into the installed system.
+- VM tests must keep draining the serial socket: with nobody reading, the guest blocks on the serial
+  console (PID 1 hung in `tty_wait_until_sent` mid-reboot, `systemctl` timing out).
+- Plasma autologin needs `DisplayServer=wayland` in SDDM: with the default X11 server, stopping it right
+  after the autologin kills the new session. Live keyboard changes need `kwriteconfig6 --notify`.

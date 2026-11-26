@@ -1,0 +1,169 @@
+#!/usr/bin/env python3
+"""samurai-plasma-layout: top panel + task bar + monitor widgets (spec 14).
+
+Runs once at a new user's first Plasma login (autostart entry from /etc/skel,
+removed after success) and on demand to rebuild the panels. It REPLACES the
+current panels.
+
+  samurai-plasma-layout [--first-login] [--print]
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import pathlib
+import re
+import subprocess
+import sys
+import time
+import tomllib
+
+STATE = pathlib.Path("/etc/samurai/kde.toml")
+AUTOSTART = "autostart/samurai-plasma-layout.desktop"
+GPU_RE = re.compile(r"(?<![\w/])gpu/(gpu\d+)/usage(?![\w/])")
+
+
+def parse_gpus(sensor_list: str) -> list[str]:
+    """GPU ids (gpu0, gpu1, ...) from `kstatsviewer --list` output."""
+    return sorted(set(GPU_RE.findall(sensor_list)), key=lambda g: int(g[3:]))
+
+
+def count_sockets(lscpu: str) -> int:
+    """Physical CPU count from `lscpu -p=SOCKET` output (comment lines start with #)."""
+    ids = {line.strip() for line in lscpu.splitlines() if line.strip() and not line.startswith("#")}
+    return max(len(ids), 1)
+
+
+def monitors(gpus: list[str], sockets: int) -> list[dict]:
+    """One text-only widget per device. ksystemstats has no per-socket usage or
+    clock sensor, so multi-socket machines get one all-CPU widget (spec 14 gap)."""
+    def widget(title: str, labelled: list[tuple[str, str]]) -> dict:
+        return {"title": title, "sensors": [sensor for sensor, _ in labelled],
+                "labels": dict(labelled)}   # short legend: the panel has little room
+
+    cpu = "CPU" if sockets == 1 else f"CPU x{sockets}"
+    out = [widget(cpu, [("cpu/all/usage", cpu), ("cpu/all/averageFrequency", "@"),
+                        ("cpu/all/averageTemperature", "T")])]
+    for index, gpu in enumerate(gpus):
+        name = "GPU" if len(gpus) == 1 else f"GPU{index}"
+        out.append(widget(name, [(f"gpu/{gpu}/usage", name), (f"gpu/{gpu}/temperature", "T")]))
+    return out
+
+
+def layout_script(widgets: list[dict]) -> str:
+    """Plasma scripting API (JavaScript) that rebuilds both panels."""
+    return """var old = panels();
+for (var i = old.length - 1; i >= 0; i--) { old[i].remove(); }
+var screens = screenCount;
+var top = new Panel;
+top.location = "top";
+top.height = Math.round(gridUnit * 1.8);
+top.addWidget("org.kde.plasma.kickoff");
+top.addWidget("org.kde.plasma.pager");
+top.addWidget("org.kde.plasma.panelspacer");
+var monitors = %s;
+for (var m = 0; m < monitors.length; m++) {
+    var w = top.addWidget("org.kde.plasma.systemmonitor");
+    w.currentConfigGroup = ["Appearance"];
+    w.writeConfig("chartFace", "org.kde.ksysguard.textonly");
+    w.writeConfig("title", monitors[m].title);
+    w.writeConfig("showTitle", false);
+    w.currentConfigGroup = ["Sensors"];
+    w.writeConfig("highPrioritySensorIds", JSON.stringify(monitors[m].sensors));
+    w.writeConfig("totalSensors", "[]");
+    w.writeConfig("lowPrioritySensorIds", "[]");
+    w.currentConfigGroup = ["SensorLabels"];
+    for (var id in monitors[m].labels) { w.writeConfig(id, monitors[m].labels[id]); }
+}
+top.addWidget("org.kde.plasma.systemtray");
+top.addWidget("org.kde.plasma.digitalclock");
+top.addWidget("org.kde.plasma.showdesktop");
+var bottom = new Panel;
+bottom.location = "bottom";
+bottom.height = Math.round(gridUnit * 2.4);
+bottom.lengthMode = "fill";
+bottom.floating = false;
+var tasks = bottom.addWidget("org.kde.plasma.taskmanager");
+tasks.currentConfigGroup = ["General"];
+tasks.writeConfig("groupingStrategy", 0);
+tasks.writeConfig("showOnlyCurrentDesktop", false);
+tasks.writeConfig("maxStripes", 1);
+tasks.writeConfig("launchers", []);
+print("samurai-layout-ok");
+""" % json.dumps(widgets)
+
+
+def run(argv: list[str], timeout: int = 30) -> subprocess.CompletedProcess:
+    return subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
+
+
+def widgets_enabled() -> bool:
+    try:
+        return bool(tomllib.loads(STATE.read_text(encoding="utf-8")).get("monitor_widgets", True))
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
+        return True
+
+
+def sensor_list() -> str:
+    try:
+        return run(["kstatsviewer", "--list"], timeout=60).stdout
+    except (OSError, subprocess.TimeoutExpired) as e:
+        print(f"warning: sensor list unavailable ({e}); no GPU widgets", file=sys.stderr)
+        return ""
+
+
+def build_script() -> str:
+    widgets: list[dict] = []
+    if widgets_enabled():
+        try:
+            lscpu = run(["lscpu", "-p=SOCKET"]).stdout
+        except (OSError, subprocess.TimeoutExpired):
+            lscpu = ""
+        widgets = monitors(parse_gpus(sensor_list()), count_sockets(lscpu))
+    return layout_script(widgets)
+
+
+def wait_for_plasmashell(timeout: int = 120) -> bool:
+    deadline = time.monotonic() + timeout
+    probe = ["qdbus6", "org.kde.plasmashell", "/PlasmaShell",
+             "org.kde.PlasmaShell.evaluateScript", "print(panels().length)"]
+    while time.monotonic() < deadline:
+        try:
+            result = run(probe)
+            # the default layout exists once at least one panel is there
+            if result.returncode == 0 and result.stdout.strip().isdigit() and int(result.stdout) > 0:
+                return True
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        time.sleep(2)
+    return False
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="samurai-plasma-layout", description=__doc__.split("\n")[0])
+    parser.add_argument("--first-login", action="store_true",
+                        help="remove the autostart entry after success")
+    parser.add_argument("--print", action="store_true", dest="show",
+                        help="print the Plasma script instead of applying it")
+    args = parser.parse_args(argv)
+    if args.show:
+        print(build_script())
+        return 0
+    if not wait_for_plasmashell():
+        print("error: Plasma is not running (log into a Plasma session first)", file=sys.stderr)
+        return 1
+    result = run(["qdbus6", "org.kde.plasmashell", "/PlasmaShell",
+                  "org.kde.PlasmaShell.evaluateScript", build_script()], timeout=90)
+    if result.returncode != 0 or "samurai-layout-ok" not in result.stdout:
+        print(f"error: layout script failed: {result.stdout}{result.stderr}", file=sys.stderr)
+        return 1
+    print("panel layout applied")
+    if args.first_login:
+        config = pathlib.Path(os.environ.get("XDG_CONFIG_HOME") or pathlib.Path.home() / ".config")
+        (config / AUTOSTART).unlink(missing_ok=True)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

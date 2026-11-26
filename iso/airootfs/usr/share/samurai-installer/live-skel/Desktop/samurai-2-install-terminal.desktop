@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Install Samurai OS (terminal)
+Comment=Guided installation in a terminal
+Exec=konsole --hold -e sudo -n /usr/local/bin/samurai-install
+Icon=utilities-terminal
+Terminal=false
+Categories=System;

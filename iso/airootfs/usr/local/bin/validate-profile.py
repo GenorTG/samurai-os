@@ -25,16 +25,22 @@ import subprocess
 import sys
 import tomllib
 
-ALLOWED_TOP = {"version", "system", "disk", "boot", "user", "packages", "repos", "security", "hardware"}
+ALLOWED_TOP = {"version", "system", "disk", "boot", "user", "packages", "repos", "security", "hardware",
+               "kde", "gaming", "development", "network"}
 ALLOWED = {
     "system": {"hostname", "timezone", "locale", "keyboard"},
     "disk": {"device", "layout", "filesystem", "encryption", "auto_unlock_keyfile"},
     "boot": {"kernels", "bootloader"},
     "user": {"name", "shell", "groups", "root_locked", "password_hash"},
-    "packages": {"install", "desktop", "apps"},
+    "packages": {"install", "desktop", "apps", "browsers"},
     "repos": {"samurai", "cachyos", "chaotic_aur", "arch_mirror"},
     "security": {"firewall", "ssh_server"},
     "hardware": {"nvidia"},
+    "kde": {"theme", "monitor_widgets", "reduced_effects"},
+    "gaming": {"enabled", "steam", "heroic", "gamemode", "mangohud", "gamescope", "proton_ge",
+               "proton_cachyos", "wine"},
+    "development": {"python", "conda", "docker", "ai_clis", "ollama"},
+    "network": {"tailscale", "reverse_proxy"},
 }
 KNOWN_KERNELS = {"linux", "linux-lts", "linux-zen", "linux-cachyos", "linux-cachyos-lts"}
 KNOWN_BOOTLOADERS = {"limine", "grub", "systemd-boot", "refind"}
@@ -44,8 +50,14 @@ KNOWN_LAYOUTS = {"erase"}
 KNOWN_FS = {"btrfs"}
 KNOWN_FIREWALLS = {"none", "firewalld", "ufw"}
 KNOWN_NVIDIA = {"auto", "yes", "no"}
+KNOWN_THEMES = {"breeze"}
+UNPACKAGED_THEMES = {"otto", "scratchy"}
+KNOWN_PYTHONS = {"3.10", "3.11", "3.12", "3.13"}
+KNOWN_CONDA = {"miniforge", "none"}
+KNOWN_DOCKER = {"group", "rootless", "none"}
+KNOWN_PROXIES = {"none", "caddy", "nginx", "traefik"}
 # repos toggles are accepted only at their defaults until the installer honours them
-REPO_DEFAULTS = {"samurai": True, "cachyos": True, "chaotic_aur": False}
+REPO_DEFAULTS = {"samurai": True, "cachyos": True, "chaotic_aur": True}
 USERNAME_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
 HOSTNAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9-]{0,62}$")
 LOCALE_RE = re.compile(r"^[a-zA-Z]{2,3}(_[A-Za-z]{2,4})?\.[A-Za-z0-9-]+$")
@@ -105,6 +117,80 @@ def validate_apps(apps) -> list[str]:
     except mod.UsageError as e:
         fail(str(e))
     return []
+
+
+def validate_category(ids, category: str, where: str) -> None:
+    """A list of distinct catalog app ids that belong to one category."""
+    if not isinstance(ids, list) or not all(isinstance(a, str) and APP_REF_RE.match(a) for a in ids):
+        fail(f"{where} must be a list of catalog app ids")
+    if len(set(ids)) != len(ids):
+        fail(f"{where} lists an app twice")
+    if not ids:
+        return
+    mod = _load_apps_module()
+    if mod is None:
+        fail(f"{where} needs the app catalog, but samurai-apps is not installed")
+    try:
+        catalog = mod.load_catalog()
+    except mod.CatalogError as e:
+        fail(f"app catalog unusable: {e}")
+    for app_id in ids:
+        app = catalog.apps.get(app_id)
+        if app is None or app.hidden or app.category != category:
+            offered = sorted(a.id for a in catalog.apps.values()
+                             if a.category == category and not a.hidden)
+            fail(f"{where}: {app_id!r} is not one of {offered}")
+
+
+def validate_software(profile: dict, desktop: str) -> None:
+    """Spec 08 pages 6a and 8-11 (docs/plans/profile-schema.md)."""
+    packages = profile.get("packages", {})
+    if "browsers" in packages:
+        validate_category(packages["browsers"], "browsers", "packages.browsers")
+        if packages["browsers"] and desktop == "none":
+            fail("packages.browsers needs a desktop")
+
+    if "kde" in profile:
+        if desktop != "kde":
+            fail('[kde] needs packages.desktop = "kde"')
+        kde = profile["kde"]
+        theme = _str(kde, "theme", "breeze", "kde")
+        if theme in UNPACKAGED_THEMES:
+            fail(f"kde.theme = {theme!r} is not packaged yet (redistribution licence unconfirmed)")
+        if theme not in KNOWN_THEMES:
+            fail(f"unsupported kde.theme: {theme!r}")
+        _bool(kde, "monitor_widgets", True, "kde")
+        _bool(kde, "reduced_effects", True, "kde")
+
+    gaming = profile.get("gaming", {})
+    enabled = _bool(gaming, "enabled", False, "gaming")
+    chosen = [k for k in sorted(ALLOWED["gaming"] - {"enabled"})
+              if _bool(gaming, k, enabled, "gaming")]
+    if enabled and desktop == "none":
+        fail("gaming.enabled needs a desktop")
+    if not enabled and chosen:
+        fail(f"gaming.enabled is false but these items are on: {', '.join(chosen)}")
+
+    dev = profile.get("development", {})
+    pythons = _str_list(dev, "python", [], "development")
+    if not all(v in KNOWN_PYTHONS for v in pythons) or len(set(pythons)) != len(pythons):
+        fail(f"development.python must be a list without duplicates from {sorted(KNOWN_PYTHONS)}")
+    conda = _str(dev, "conda", "none", "development")
+    if conda == "miniconda":
+        fail("development.conda = 'miniconda' is not packaged (Anaconda licence); use 'miniforge'")
+    if conda not in KNOWN_CONDA:
+        fail(f"unsupported development.conda: {conda!r}")
+    docker = _str(dev, "docker", "none", "development")
+    if docker not in KNOWN_DOCKER:
+        fail(f"development.docker must be one of {sorted(KNOWN_DOCKER)}, got {docker!r}")
+    validate_category(dev.get("ai_clis", []), "ai-cli", "development.ai_clis")
+    _bool(dev, "ollama", False, "development")
+
+    net = profile.get("network", {})
+    _bool(net, "tailscale", False, "network")
+    proxy = _str(net, "reverse_proxy", "none", "network")
+    if proxy not in KNOWN_PROXIES:
+        fail(f"network.reverse_proxy must be one of {sorted(KNOWN_PROXIES)}, got {proxy!r}")
 
 
 def fail(msg: str) -> None:
@@ -271,6 +357,7 @@ def validate(path: str) -> dict:
     desktop = _str(pkgsec, "desktop", "kde", "packages")
     if desktop not in KNOWN_DESKTOPS:
         fail(f"unsupported desktop: {desktop!r} (choose from {sorted(KNOWN_DESKTOPS)})")
+    validate_software(profile, desktop)
 
     sec = profile.get("security", {})
     if _str(sec, "firewall", "none", "security") not in KNOWN_FIREWALLS:

@@ -54,7 +54,7 @@ def _find_ovmf() -> tuple[str, str]:
 class VM:
     def __init__(self, name: str, iso: str | None = None, disk: str | None = None,
                  disk_size: str = "40G", ram: str = "4096", smp: str = "4",
-                 pointer: bool = False):
+                 pointer: bool = False, graphical: bool = False):
         name = _artifact_name(name)
         self.name = name
         WORK.mkdir(parents=True, exist_ok=True)
@@ -68,6 +68,7 @@ class VM:
             os.unlink(self.disk_path)
         self.ram, self.smp = ram, smp
         self.pointer = pointer  # absolute USB tablet, for scenarios that click in the GUI
+        self.graphical = graphical   # KMS-capable display + absolute pointer for GUI tests
         self.code, self.vars = _find_ovmf()
         self.vars_rw = str(WORK / f"{name}-VARS.fd")
         self.serial_sock = str(WORK / f"{name}-serial.sock")
@@ -105,10 +106,16 @@ class VM:
             "-device", "virtserialport,chardev=qga0,name=org.qemu.guest_agent.0",
             "-monitor", "none",
         ]
-        if self.pointer:
+        if self.pointer and not self.graphical:
             cmd += ["-device", "qemu-xhci", "-device", "usb-tablet"]
         if self.iso:
             cmd += ["-drive", f"file={self.iso},media=cdrom,read-only=on"]
+        if self.graphical:
+            cmd += ["-vga", "none", "-device", "virtio-vga,xres=1280,yres=800",
+                    "-device", "qemu-xhci", "-device", "usb-tablet",
+                    # a restart asked for inside the guest pauses the VM, so the test
+                    # can eject the medium before the firmware looks at it again
+                    "-action", "reboot=shutdown,shutdown=pause"]
         # pylint: disable=consider-using-with
         self.proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
 
@@ -117,9 +124,10 @@ class VM:
         while time.time() < deadline:
             if os.path.exists(path):
                 try:
-                    socket.socket(socket.AF_UNIX).connect(path)  # probe
+                    with socket.socket(socket.AF_UNIX) as probe:
+                        probe.connect(path)
                     return
-                except (ConnectionRefusedError, FileNotFoundError):
+                except (ConnectionRefusedError, FileNotFoundError, BlockingIOError):
                     pass
             time.sleep(0.3)
         raise TimeoutError(f"socket never appeared: {path}")
@@ -236,6 +244,13 @@ class VM:
     def qga(self, timeout: float = 120.0):
         from qga import GuestAgent  # noqa: local import for sys.path simplicity
         self.wait_socket(self.qga_sock, timeout=60)
+        # the chardev takes one client: while QEMU is still dropping the previous one a
+        # connect fails with EAGAIN
+        for _ in range(40):
+            try:
+                return GuestAgent(self.qga_sock, timeout=timeout)
+            except BlockingIOError:
+                time.sleep(0.25)
         return GuestAgent(self.qga_sock, timeout=timeout)
 
     def ensure_qga(self) -> "GuestAgent":
@@ -249,66 +264,107 @@ class VM:
             time.sleep(2)
             return self.qga()
 
-    # --- keyboard and pointer (what a person at the machine does) ---
-    def key(self, *keys: str) -> None:
-        """Press a chord of QEMU qcodes, e.g. key("alt", "r") or key("ret")."""
-        reply = self.qmp_command("send-key", keys=[{"type": "qcode", "data": k} for k in keys])
-        if "error" in reply:
-            raise RuntimeError(f"send-key {keys}: {reply['error']}")
-        time.sleep(0.15)
-
-    def type_text(self, text: str) -> None:
-        plain = {" ": "spc", "-": "minus", ".": "dot", "/": "slash", "=": "equal", ",": "comma"}
-        for ch in text:
-            if ch.isascii() and (ch.islower() or ch.isdigit()):
-                self.key(ch)
-            elif ch.isascii() and ch.isupper():
-                self.key("shift", ch.lower())
-            else:
-                self.key(plain[ch])
-
-    def click(self, x: int, y: int, screen: tuple[int, int]) -> None:
-        """Left click at pixel (x, y) of a `screen`-sized display (needs pointer=True)."""
-        def send(*events):
-            reply = self.qmp_command("input-send-event", events=list(events))
-            if "error" in reply:
-                raise RuntimeError(f"input-send-event: {reply['error']}")
-            time.sleep(0.2)
-
-        send(*({"type": "abs", "data": {"axis": axis, "value": value * 32767 // (size - 1)}}
-               for axis, value, size in (("x", x, screen[0]), ("y", y, screen[1]))))
-        for down in (True, False):
-            send({"type": "btn", "data": {"button": "left", "down": down}})
-
     # --- power ---
-    def qmp_command(self, cmd: str, **args) -> dict:
+    @staticmethod
+    def _qmp_reply(stream) -> dict:
+        """The reply to the last command. Asynchronous events can arrive first;
+        taking one for the reply and disconnecting makes QEMU drop the queued
+        command (a post-install system_reset got lost this way, 2026-11-26)."""
+        while True:
+            line = stream.readline()
+            if not line:
+                raise ConnectionError("QMP socket closed before the reply")
+            message = json.loads(line)
+            if "return" in message or "error" in message:
+                return message
+
+    def _qmp_call(self, cmd: str, args: dict | None = None) -> dict:
         self.wait_socket(self.qmp_sock)
-        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        s.settimeout(30)
-        s.connect(self.qmp_sock)
-        f = s.makefile("rw")
-        f.readline()  # greeting
-        f.write('{"execute": "qmp_capabilities"}\n'); f.flush(); f.readline()
-        req = {"execute": cmd}
-        if args:
-            req["arguments"] = args
-        f.write(json.dumps(req) + "\n"); f.flush()
-        resp = f.readline()
-        s.close()
-        return json.loads(resp)
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+            s.settimeout(30)
+            s.connect(self.qmp_sock)
+            with s.makefile("rw") as stream:
+                stream.readline()  # greeting
+                stream.write('{"execute": "qmp_capabilities"}\n')
+                stream.flush()
+                self._qmp_reply(stream)
+                request: dict = {"execute": cmd}
+                if args:
+                    request["arguments"] = args
+                stream.write(json.dumps(request) + "\n")
+                stream.flush()
+                return self._qmp_reply(stream)
+
+    def qmp_command(self, cmd: str, **args) -> dict:
+        return self._qmp_call(cmd, args)
 
     def qmp_query_block(self) -> list:
-        self.wait_socket(self.qmp_sock)
-        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        s.settimeout(30)
-        s.connect(self.qmp_sock)
-        f = s.makefile("rw")
-        f.readline()
-        f.write('{"execute": "qmp_capabilities"}\n'); f.flush(); f.readline()
-        f.write('{"execute": "query-block"}\n'); f.flush()
-        resp = json.loads(f.readline())
-        s.close()
-        return resp.get("return", [])
+        return self._qmp_call("query-block").get("return", [])
+
+    def wait_guest_restart(self, timeout: float = 180.0) -> None:
+        """Graphical VMs: wait until the guest itself asked to restart or power off."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            # drain the console: with nobody reading it the guest's PID 1 blocks on the
+            # serial tty in the middle of shutting down
+            self.serial_read(max_wait=1.0)
+            status = self._qmp_call("query-status").get("return", {}).get("status")
+            if status == "shutdown":
+                return
+            time.sleep(1)
+        raise TimeoutError("the guest never restarted")
+
+    def resume_after_restart(self) -> None:
+        """Reset and run a VM paused by its own restart request."""
+        # back to normal actions first: "reboot=shutdown" also turns our reset into a stop
+        reply = self.qmp_command("set-action", reboot="reset", shutdown="poweroff")
+        if "error" in reply:
+            raise RuntimeError(f"set-action failed: {reply['error']}")
+        self.reboot()
+        # the reset is processed after the command returns; until then QEMU refuses cont
+        for _ in range(40):
+            time.sleep(0.5)
+            reply = self.qmp_command("cont")
+            if "error" not in reply:
+                return
+        raise RuntimeError(f"cont failed: {reply['error']}")
+
+    # --- keyboard and pointer (graphical tests) ---
+    def key(self, *qcodes: str) -> None:
+        """Press the given keys together (QEMU qcodes), then release them."""
+        keys = [{"type": "qcode", "data": code} for code in qcodes]
+        reply = self.qmp_command("send-key", keys=keys, **{"hold-time": 40})
+        if "error" in reply:
+            raise RuntimeError(f"send-key {qcodes} failed: {reply['error']}")
+        time.sleep(0.12)
+
+    def type_text(self, text: str) -> None:
+        """Type printable ASCII (letters, digits, a little punctuation) on a US keyboard."""
+        plain = {" ": "spc", "-": "minus", ".": "dot", "/": "slash", "=": "equal", ",": "comma"}
+        for char in text:
+            if char.isascii() and (char.islower() or char.isdigit()):
+                self.key(char)
+            elif char.isascii() and char.isupper():
+                self.key("shift", char.lower())
+            elif char in plain:
+                self.key(plain[char])
+            else:
+                raise ValueError(f"type_text cannot type {char!r}")
+
+    def click(self, x: int, y: int, width: int = 1280, height: int = 800,
+              double: bool = False) -> None:
+        """Left click at screen pixel (x, y) through the absolute pointer."""
+        def event(*events: dict) -> None:
+            reply = self.qmp_command("input-send-event", events=list(events))
+            if "error" in reply:
+                raise RuntimeError(f"input-send-event failed: {reply['error']}")
+        event({"type": "abs", "data": {"axis": "x", "value": x * 32767 // width}},
+              {"type": "abs", "data": {"axis": "y", "value": y * 32767 // height}})
+        time.sleep(0.2)
+        for _ in range(2 if double else 1):
+            for down in (True, False):
+                event({"type": "btn", "data": {"down": down, "button": "left"}})
+                time.sleep(0.07)
 
     def eject_iso(self) -> None:
         """Remove the attached ISO so the reboot lands on the installed disk
@@ -320,7 +376,9 @@ class VM:
                 return
 
     def reboot(self) -> None:
-        self.qmp_command("system_reset")
+        reply = self.qmp_command("system_reset")
+        if "error" in reply:
+            raise RuntimeError(f"system_reset failed: {reply['error']}")
 
     def stop(self) -> None:
         if self.proc:

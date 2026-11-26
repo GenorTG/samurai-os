@@ -1,0 +1,32 @@
+# Maintainer: Samurai OS <build@smart-samurai.pl>
+# Spec: docs/specs/10-DEFAULTS-AND-SOFTWARE.md "Gaming". Arch builds Wine as pure
+# WoW64, so no lib32 libraries are needed (the spec's lib32 list predates that).
+# .exe files open with Wine through our handler: wine-staging's wine.desktop does
+# not claim the type current shared-mime-info gives them.
+pkgname=samurai-wine
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Samurai OS Wine stack: wine-staging with its documented optional dependencies"
+arch=(any)
+url="https://github.com/GenorTG/samurai-os"
+license=('PolyForm-Noncommercial-1.0.0')
+depends=(
+    wine-staging winetricks wine-mono wine-gecko
+    alsa-lib alsa-plugins cups dosbox ffmpeg gnutls gst-libav gst-plugins-bad gst-plugins-base
+    gst-plugins-base-libs gst-plugins-good gst-plugins-ugly gtk3 libgphoto2 libpulse libva
+    libxcomposite libxinerama ocl-icd pcsclite samba sane sdl2-compat unixodbc v4l-utils
+    vulkan-icd-loader
+)
+backup=(etc/xdg/mimeapps.list)
+source=(samurai-wine.desktop mimeapps.list LICENSE)
+sha256sums=(
+    'd9a1feb3b445ade2d1d9841e506765be3e1e84229e0b09673be1baabbacceef5'
+    'df075613cfd6fad412f5c9ab493df704f6c59c5d703e1dbcb9aa4be76bb3860a'
+    '1be06492345bb03a60d13d23d744d979cc7cf1ce154da5227651f8dd78f25017'
+)
+
+package() {
+    install -Dm644 "$srcdir/samurai-wine.desktop" "$pkgdir/usr/share/applications/samurai-wine.desktop"
+    install -Dm644 "$srcdir/mimeapps.list" "$pkgdir/etc/xdg/mimeapps.list"
+    install -Dm644 "$srcdir/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

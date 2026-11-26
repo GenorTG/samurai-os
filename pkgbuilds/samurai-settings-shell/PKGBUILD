@@ -1,0 +1,31 @@
+# Maintainer: Samurai OS <build@smart-samurai.pl>
+# Spec: docs/specs/10-DEFAULTS-AND-SOFTWARE.md "Shells" (fish default, bash always,
+# zsh optional, starship prompt).
+pkgname=samurai-settings-shell
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Samurai OS shell defaults for fish, bash and zsh (starship, eza, zoxide, fzf)"
+arch=(any)
+url="https://github.com/GenorTG/samurai-os"
+license=('PolyForm-Noncommercial-1.0.0')
+depends=(bash fish starship eza zoxide fzf)
+optdepends=('zsh: zsh defaults')
+install=samurai-settings-shell.install
+source=(samurai.fish samurai-path.sh samurai.bash samurai.zsh LICENSE)
+sha256sums=(
+    'e5212ddf20a937e13e4d3e9ca3a8334c0740456dda479a02dc0ad97c6a89d094'
+    'c3261236ef3d99a2c4da473d1082af3350e7a14e20c91528f3923526f447edd6'
+    '164917da09a4a265b865b76c137743459a0c135435f8201e527aa1edc7616ea0'
+    '5e9be19815bc522a314ff05ec91f3e321e1f91fb575e8cb4c7711103b10a6313'
+    '1be06492345bb03a60d13d23d744d979cc7cf1ce154da5227651f8dd78f25017'
+)
+
+package() {
+    cd "$srcdir"
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+    install -Dm644 samurai.fish "$pkgdir/usr/share/fish/vendor_conf.d/samurai.fish"
+    install -Dm644 samurai-path.sh "$pkgdir/etc/profile.d/samurai-path.sh"
+    install -Dm644 samurai.bash "$pkgdir/usr/share/samurai/shell/samurai.bash"
+    install -Dm644 samurai.zsh "$pkgdir/usr/share/samurai/shell/samurai.zsh"
+    install -dm755 "$pkgdir/usr/share/samurai/shell/bash.d"
+}

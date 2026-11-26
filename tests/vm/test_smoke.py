@@ -31,7 +31,7 @@ def test_iso_boot():
         qga = vm.ensure_qga()
         _, out = qga.exec("cat /etc/hostname")
         assert out.strip() == "samurai"
-        _, out = qga.exec("systemctl is-active systemd-networkd || true")
+        _, out = qga.exec("systemctl is-active NetworkManager || true")
         assert out.strip() == "active"
     finally:
         vm.stop()

@@ -39,10 +39,15 @@ Include = /etc/pacman.d/mirrorlist
 # verified when the mirror serves one.
 [cachyos]
 SigLevel = Required DatabaseOptional
-Server = https://nl.cachyos.org/repo/$arch/$repo
 Server = https://aur.cachyos.org/repo/$arch/$repo
 Server = https://mirror.cachyos.org/repo/$arch/$repo
 Server = https://build.cachyos.org/repo/$arch/$repo
+Server = https://nl.cachyos.org/repo/$arch/$repo
 
-#[chaotic-aur]
-#Include = /etc/pacman.d/chaotic-mirrorlist
+# Chaotic-AUR (ADR-0007): prebuilt AUR packages, below Arch and CachyOS so it
+# only ADDS packages. Packages must be signed by a key from chaotic-keyring
+# (primary EF92 5EA6 0F33 D0CB 85C4 4AD1 3056 5138 87B7 8AEB); the database
+# is not published signed.
+[chaotic-aur]
+SigLevel = Required DatabaseOptional
+Include = /etc/pacman.d/chaotic-mirrorlist

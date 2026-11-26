@@ -66,6 +66,131 @@ mkdir -p /var/log/samurai
 install -d -m 700 "$RUNDIR"
 log "samurai-install starting: $*"
 
+### Wizard input helpers: every answer is bounded before it reaches the profile ###
+ask_yes() {   # $1 question, $2 default (y|n): status 0 = yes
+    local answer hint="y/N"
+    [ "$2" = y ] && hint="Y/n"
+    read -r -p "  $1 [$hint]: " answer
+    case "$answer" in
+        y|Y) return 0 ;;
+        n|N) return 1 ;;
+        '') [ "$2" = y ] ;;
+        *) die "answer y or n (got: $answer)" ;;
+    esac
+}
+pick_many() {   # $1 prompt, rest: values; sets PICKED from the typed numbers
+    local prompt=$1 n; shift
+    local values=("$@") answer=()
+    PICKED=()
+    read -r -a answer -p "  $prompt: "
+    for n in "${answer[@]}"; do
+        case "$n" in *[!0-9]*) die "invalid number: $n" ;; esac
+        [ "$n" -ge 1 ] && [ "$n" -le ${#values[@]} ] || die "invalid number: $n"
+        [[ " ${PICKED[*]} " == *" ${values[n-1]} "* ]] || PICKED+=("${values[n-1]}")
+    done
+}
+toml_list() {   # values (already bounded) as a TOML array
+    local out="" v
+    for v in "$@"; do out+="\"$v\", "; done
+    printf '[%s]' "${out%, }"
+}
+choose_catalog() {   # $1 category, $2 prompt; sets PICKED
+    local ids=() names=() id name i
+    while IFS=$'\t' read -r id name; do ids+=("$id"); names+=("$name"); done \
+        < <(samurai-profile-plan --list "$1")
+    [ ${#ids[@]} -gt 0 ] || die "the app catalog lists nothing for $1"
+    for i in "${!ids[@]}"; do printf '    %d) %s\n' $((i + 1)) "${names[i]}"; done
+    pick_many "$2" "${ids[@]}"
+}
+
+# spec 08 pages 8, 9 and 10; fills the WIZ_* software variables
+wizard_software() {
+    WIZ_BROWSERS=()
+    WIZ_GAMING=false
+    WIZ_GAMING_OFF=()
+    if [ "$WIZ_DESKTOP" != none ]; then
+        echo "  Browsers (Enter = Firefox, 0 = none):"
+        local ids=() names=() id name i answer=()
+        while IFS=$'\t' read -r id name; do ids+=("$id"); names+=("$name"); done \
+            < <(samurai-profile-plan --list browsers)
+        for i in "${!ids[@]}"; do printf '    %d) %s\n' $((i + 1)) "${names[i]}"; done
+        read -r -a answer -p "  Browser numbers [Firefox]: "
+        if [ ${#answer[@]} -eq 0 ]; then
+            WIZ_BROWSERS=(firefox)
+        elif [ "${answer[*]}" != 0 ]; then
+            for i in "${answer[@]}"; do
+                case "$i" in *[!0-9]*) die "invalid number: $i" ;; esac
+                [ "$i" -ge 1 ] && [ "$i" -le ${#ids[@]} ] || die "invalid number: $i"
+                WIZ_BROWSERS+=("${ids[i-1]}")
+            done
+        fi
+
+        if ask_yes "Gaming set (Steam, Heroic, GameMode, MangoHud, gamescope, Proton, Wine)" y; then
+            WIZ_GAMING=true
+            echo "    1) steam 2) heroic 3) gamemode 4) mangohud 5) gamescope 6) proton_ge 7) proton_cachyos 8) wine"
+            pick_many "Leave out, numbers [none]" steam heroic gamemode mangohud gamescope proton_ge proton_cachyos wine
+            WIZ_GAMING_OFF=("${PICKED[@]}")
+        fi
+    fi
+
+    echo "  Extra Python versions (3.14 is the system python): 1) 3.10  2) 3.11  3) 3.12  4) 3.13"
+    pick_many "Python numbers [none]" 3.10 3.11 3.12 3.13
+    WIZ_PYTHON=("${PICKED[@]}")
+    echo "  Conda: 1) Miniforge (default)  2) none"
+    local sel
+    read -r -p "  Conda choice [1]: " sel
+    case "${sel:-1}" in 1) WIZ_CONDA=miniforge ;; 2) WIZ_CONDA=none ;; *) die "invalid conda choice" ;; esac
+    echo "  Docker: 1) docker group (default; the group is root-equivalent)  2) rootless  3) off"
+    read -r -p "  Docker choice [1]: " sel
+    case "${sel:-1}" in 1) WIZ_DOCKER=group ;; 2) WIZ_DOCKER=rootless ;; 3) WIZ_DOCKER=none ;; *) die "invalid docker choice" ;; esac
+    echo "  AI command-line tools:"
+    choose_catalog ai-cli "AI CLI numbers [none]"
+    WIZ_AI=("${PICKED[@]}")
+    WIZ_OLLAMA=false
+    if ask_yes "Local AI (Ollama)" n; then WIZ_OLLAMA=true; fi
+    local app
+    WIZ_APPS=()
+    read -r -a WIZ_APPS -p "  More catalog apps or @bundles, e.g. '@office vlc' [none]: "
+    for app in "${WIZ_APPS[@]}"; do
+        [[ $app =~ ^@?[A-Za-z0-9][A-Za-z0-9_.+-]{0,63}$ ]] || die "invalid app name: $app"
+    done
+}
+
+# spec 08 page 11 (after the firewall question)
+wizard_network() {
+    WIZ_TAILSCALE=false
+    if ask_yes "Tailscale" y; then WIZ_TAILSCALE=true; fi
+    echo "  Reverse proxy: 1) none (default)  2) Caddy  3) nginx  4) traefik  (installed disabled)"
+    local sel
+    read -r -p "  Reverse proxy choice [1]: " sel
+    case "${sel:-1}" in
+        1) WIZ_PROXY=none ;; 2) WIZ_PROXY=caddy ;; 3) WIZ_PROXY=nginx ;; 4) WIZ_PROXY=traefik ;;
+        *) die "invalid reverse proxy choice" ;;
+    esac
+    WIZ_SSH=false
+    if ask_yes "SSH server (key-only login)" n; then WIZ_SSH=true; fi
+}
+
+# the software sections of the profile (docs/plans/profile-schema.md)
+wizard_software_toml() {
+    local item on
+    if [ "$WIZ_DESKTOP" = kde ]; then
+        printf '\n[kde]\ntheme = "breeze"\nmonitor_widgets = %s\nreduced_effects = %s\n' \
+            "$WIZ_WIDGETS" "$WIZ_EFFECTS"
+    fi
+    printf '\n[gaming]\nenabled = %s\n' "$WIZ_GAMING"
+    if [ "$WIZ_GAMING" = true ]; then
+        for item in steam heroic gamemode mangohud gamescope proton_ge proton_cachyos wine; do
+            on=true
+            [[ " ${WIZ_GAMING_OFF[*]} " == *" $item "* ]] && on=false
+            printf '%s = %s\n' "$item" "$on"
+        done
+    fi
+    printf '\n[development]\npython = %s\nconda = "%s"\ndocker = "%s"\nai_clis = %s\nollama = %s\n' \
+        "$(toml_list "${WIZ_PYTHON[@]}")" "$WIZ_CONDA" "$WIZ_DOCKER" "$(toml_list "${WIZ_AI[@]}")" "$WIZ_OLLAMA"
+    printf '\n[network]\ntailscale = %s\nreverse_proxy = "%s"\n' "$WIZ_TAILSCALE" "$WIZ_PROXY"
+}
+
 ### Attended guided wizard (spec 08 Guided mode) ###
 # Asks exactly the questions the profile schema supports; everything it does
 # not ask keeps the profile default. Writes $RUNDIR/attended.toml and falls
@@ -160,6 +285,14 @@ wizard() {
     [ "$WIZ_DESKTOP" = none ] || [ "$memmb" -ge 7000 ] || \
         echo "  note: a desktop feels best with >= 8 GiB RAM (this box has ${memmb} MiB)"
 
+    # KDE setup (spec 08 page 6a; only the packaged Breeze Dark theme today)
+    WIZ_WIDGETS=true
+    WIZ_EFFECTS=true
+    if [ "$WIZ_DESKTOP" = kde ]; then
+        if ! ask_yes "Monitor widgets in the top panel (CPU/GPU)" y; then WIZ_WIDGETS=false; fi
+        if ! ask_yes "Reduced effects (faster desktop)" y; then WIZ_EFFECTS=false; fi
+    fi
+
     # user
     read -r -p "  Username [samurai]: " WIZ_USER; WIZ_USER=${WIZ_USER:-samurai}
     [[ $WIZ_USER =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || die "invalid username: $WIZ_USER"
@@ -170,8 +303,8 @@ wizard() {
     # plaintext never appears in a process argument list); plaintext never
     # reaches the profile file. Empty twice => postinstall generates one and
     # drops it in /root/initial-credentials (0600).
-    read -r -s -p "  User password (Enter = generate): " p1; echo
-    read -r -s -p "  again: " p2; echo
+    IFS= read -r -s -p "  User password (Enter = generate): " p1; echo
+    IFS= read -r -s -p "  again: " p2; echo
     WIZ_PWHASH=""
     if [ -n "$p1" ]; then
         [ "$p1" = "$p2" ] || die "passwords do not match"
@@ -179,9 +312,12 @@ wizard() {
         unset p1 p2
     fi
 
+    wizard_software
+
     # firewall (spec 09 / ADR-0006): firewalld on by default
     read -r -p "  Firewall (firewalld, deny inbound) [Y/n]: " fw
     case "$fw" in n|N) WIZ_FW=none ;; *) WIZ_FW=firewalld ;; esac
+    wizard_network
 
     # summary + last-chance confirm (the backend asks its own Proceed? too)
     echo
@@ -190,7 +326,11 @@ wizard() {
     echo "  LUKS2:   $WIZ_ENC"
     echo "  host:    $WIZ_HOST | tz: $WIZ_TZ"
     echo "  kernels:$(echo $WIZ_KERNELS) | bootloader: $WIZ_BLDR"
-    echo "  desktop: $WIZ_DESKTOP | firewall: $WIZ_FW"
+    echo "  desktop: $WIZ_DESKTOP | browsers: ${WIZ_BROWSERS[*]:-none}"
+    echo "  gaming:  $WIZ_GAMING${WIZ_GAMING_OFF[*]:+ (without ${WIZ_GAMING_OFF[*]})}"
+    echo "  python:  ${WIZ_PYTHON[*]:-system only} | conda: $WIZ_CONDA | docker: $WIZ_DOCKER"
+    echo "  AI CLIs: ${WIZ_AI[*]:-none} | ollama: $WIZ_OLLAMA | apps: ${WIZ_APPS[*]:-none}"
+    echo "  network: firewall $WIZ_FW | tailscale $WIZ_TAILSCALE | proxy $WIZ_PROXY | ssh $WIZ_SSH"
     echo "  user:    $WIZ_USER ($WIZ_SHELL)"
     echo "  ---------------------------------------------"
     read -r -p "  Write this profile and continue? [yes/no]: " go
@@ -209,8 +349,11 @@ wizard() {
         printf '[user]\nname = "%s"\nshell = "%s"\ngroups = ["wheel"]\nroot_locked = true\n' \
             "$WIZ_USER" "$WIZ_SHELL"
         [ -n "$WIZ_PWHASH" ] && printf 'password_hash = "%s"\n' "$WIZ_PWHASH"
-        printf '\n[packages]\ndesktop = "%s"\ninstall = [\n    "samurai-release",\n    "samurai-mirrorlist",\n    "samurai-keyring",\n    "qemu-guest-agent",\n    "networkmanager",\n    "wpa_supplicant",\n]\n\n[repos]\nsamurai = true\ncachyos = true\nchaotic_aur = false\narch_mirror = "auto"\n\n[security]\nfirewall = "%s"\nssh_server = false\n' \
-            "$WIZ_DESKTOP" "$WIZ_FW"
+        printf '\n[packages]\ndesktop = "%s"\nbrowsers = %s\napps = %s\ninstall = [\n    "samurai-release",\n    "samurai-mirrorlist",\n    "samurai-keyring",\n    "qemu-guest-agent",\n    "networkmanager",\n    "wpa_supplicant",\n]\n' \
+            "$WIZ_DESKTOP" "$(toml_list "${WIZ_BROWSERS[@]}")" "$(toml_list "${WIZ_APPS[@]}")"
+        wizard_software_toml
+        printf '\n[repos]\nsamurai = true\ncachyos = true\nchaotic_aur = true\narch_mirror = "auto"\n\n[security]\nfirewall = "%s"\nssh_server = %s\n' \
+            "$WIZ_FW" "$WIZ_SSH"
         } > "$WIZ_PROFILE"      # redirect inside the subshell: the umask applies to the file
     )
     log "wizard wrote $WIZ_PROFILE (disk=$WIZ_DISK enc=$WIZ_ENC bldr=$WIZ_BLDR fw=$WIZ_FW)"
@@ -374,8 +517,8 @@ if [ "$DEVICE_ENCRYPT" -eq 1 ]; then
     else
         # real install: the passphrase is the only keyslot. No helper keyfile
         # is ever added (an earlier version left a dead second slot behind).
-        read -r -s -p "LUKS passphrase: " pass1; echo
-        read -r -s -p "LUKS passphrase (again): " pass2; echo
+        IFS= read -r -s -p "LUKS passphrase: " pass1; echo
+        IFS= read -r -s -p "LUKS passphrase (again): " pass2; echo
         [ "$pass1" = "$pass2" ] || die "passphrases do not match"
         [ ${#pass1} -ge 8 ] || die "passphrase too short (minimum 8 characters)"
         printf '%s' "$pass1" | cryptsetup luksFormat "${LUKS_OPTS[@]}" "$ROOTPART"
@@ -516,7 +659,8 @@ fi
 
 # One package set for both paths (offline repo or mirrors): base, kernels,
 # firmware + microcode, GPU stacks, bootloader, snapshots, shells, zram.
-BASE_PKGS=(base cachyos-keyring "${KERNEL_ARR[@]}" linux-firmware mkinitcpio
+BASE_PKGS=(base cachyos-keyring chaotic-keyring chaotic-mirrorlist
+    "${KERNEL_ARR[@]}" linux-firmware mkinitcpio
     "${GPU_PKGS[@]}" "${KERNEL_HEADERS[@]}"
     amd-ucode intel-ucode zram-generator pacman-contrib sudo fish zsh python pciutils
     "${BLDR_PKGS[@]}" snapper snap-pac)
@@ -530,11 +674,16 @@ PACSTAT=1
 # installed (one NVIDIA provider, chosen kernels, chosen bootloader), not the
 # whole cache. postinstall uses the same repo through SAMURAI_PACMAN_CONF.
 # Desktop choice decides the offline path: the baked cache covers the KDE
-# release default set (Genor 2026-11-20: base version installable without
-# network). Other choices fall back to the network.
+# release default set and a system without a desktop (Genor 2026-11-20: base
+# version installable without network). Other desktops use the network.
 OFFLINE_CONF=/etc/samurai-offline-pacman.conf      # inside the target
 OFFLINE_MNT=/var/cache/samurai-offline             # inside the target
-if [ "$DESKTOP" = kde ] && [ -f "$OFFLINE_DIR/samurai-offline.db" ]; then
+# A pinned Arch mirror on a system without a desktop asks for that snapshot's
+# packages, so it installs from the network.
+OFFLINE_WANTED=0
+[ "$DESKTOP" = kde ] && OFFLINE_WANTED=1
+[ "$DESKTOP" = none ] && [ "$ARCH_MIRROR" = auto ] && OFFLINE_WANTED=1
+if [ "$OFFLINE_WANTED" = 1 ] && [ -f "$OFFLINE_DIR/samurai-offline.db" ]; then
     log "offline install: local repository on the medium — resolving from it (no network)"
     mkdir -p /mnt/var/lib/pacman /mnt/etc/pacman.d/gnupg /mnt/tmp "/mnt$OFFLINE_MNT"
     # pre-init the target keyring: archlinux/cachyos-keyring run --populate
@@ -666,6 +815,7 @@ SAMURAI_LUKS_UUID=$LUKS_UUID
 SAMURAI_ESP_UUID=$ESP_UUID
 SAMURAI_ENCRYPT=$DEVICE_ENCRYPT
 SAMURAI_AUTOKEY=$AUTOKEY
+SAMURAI_NVIDIA=$WANT_NVIDIA
 SAMURAI_PWHASH=$PI_PWHASH
 EOF
 )

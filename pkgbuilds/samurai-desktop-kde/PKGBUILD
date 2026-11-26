@@ -1,0 +1,28 @@
+# Maintainer: Samurai OS <build@smart-samurai.pl>
+# Spec: docs/specs/10-DEFAULTS-AND-SOFTWARE.md "Desktop", spec 14.
+# Discover (from plasma-meta) manages Flatpak only: packagekit-qt6 is never added.
+# Browsers are install-profile choices, not dependencies.
+pkgname=samurai-desktop-kde
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Samurai OS KDE Plasma desktop and applications"
+arch=(any)
+url="https://github.com/GenorTG/samurai-os"
+license=('PolyForm-Noncommercial-1.0.0')
+depends=(
+    samurai-desktop-base samurai-settings-kde
+    plasma-meta sddm sddm-kcm
+    konsole dolphin kate ark spectacle gwenview okular kcalc partitionmanager
+    kdeconnect haruna elisa
+    plasma-systemmonitor ksystemstats
+    kio-admin xdg-desktop-portal-kde
+    samurai-toolbox-gui
+)
+source=(LICENSE)
+sha256sums=(
+    '1be06492345bb03a60d13d23d744d979cc7cf1ce154da5227651f8dd78f25017'
+)
+
+package() {
+    install -Dm644 "$srcdir/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

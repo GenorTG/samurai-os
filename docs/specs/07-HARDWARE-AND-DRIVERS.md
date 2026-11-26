@@ -41,7 +41,7 @@ standard repository driver packages.
 | Not PCI/USB | handled by `samurai hw` itself, not chwd: CPU microcode (`intel-ucode`/`amd-ucode`), firmware packages, `sof-firmware` for Intel audio DSPs, fingerprint readers (`fprintd`) and Wacom tablets by USB id, printers via the setup assistant |
 
 ## When detection runs
-1. **Installer**: the Calamares chwd step (same as CachyOS) applies profiles into the target system,
+1. **Installer**: the installer's chwd step applies profiles into the target system,
    using packages from the ISO's offline cache when they are there, the network otherwise.
 2. **First boot**: `samurai-hw-firstboot.service` re-runs detection once with network. It catches
    anything the offline install skipped.

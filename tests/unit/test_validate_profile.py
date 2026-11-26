@@ -156,8 +156,8 @@ def test_pacman_conf_target():
     assert re.search(r"(?m)^CheckSpace$", text)
     assert re.search(r"(?m)^SigLevel\s*= Required DatabaseOptional$", text)
     assert "[samurai]" not in text.replace("# [samurai]", "")          # appended by postinstall, below everything
-    order = [m.group(1) for m in re.finditer(r"(?m)^\[(core|extra|multilib|cachyos)\]$", text)]
-    assert order == ["core", "extra", "multilib", "cachyos"]
+    order = [m.group(1) for m in re.finditer(r"(?m)^\[(core|extra|multilib|cachyos|chaotic-aur)\]$", text)]
+    assert order == ["core", "extra", "multilib", "cachyos", "chaotic-aur"]
 
 
 def test_live_iso_hardening():
@@ -173,6 +173,7 @@ ISO_COPIES = {
     "iso/airootfs/usr/local/bin/samurai-install": "installer/samurai-install",
     "iso/airootfs/usr/local/bin/samurai-postinstall": "installer/samurai-postinstall",
     "iso/airootfs/usr/local/bin/validate-profile.py": "installer/validate-profile.py",
+    "iso/airootfs/usr/local/bin/samurai-profile-plan": "installer/samurai-profile-plan",
     "iso/airootfs/usr/share/samurai/profile-default.toml": "installer/profile-default.toml",
     "iso/airootfs/usr/share/samurai/pacman.conf.target": "installer/pacman.conf.target",
 }

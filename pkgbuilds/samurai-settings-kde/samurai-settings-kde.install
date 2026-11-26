@@ -1,0 +1,10 @@
+# shellcheck shell=bash
+# (re)applies the chosen options from /etc/samurai/kde.toml; user settings in
+# ~/.config always win over these system values.
+post_install() {
+    usr/bin/samurai-kde-defaults apply || echo "warning: samurai-kde-defaults apply failed"
+}
+
+post_upgrade() {
+    post_install
+}

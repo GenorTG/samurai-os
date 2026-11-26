@@ -1,0 +1,42 @@
+# Maintainer: Samurai OS <build@smart-samurai.pl>
+# Spec: docs/specs/13-DEVELOPER-ENVIRONMENT.md "Python". Repackages Astral's
+# python-build-standalone release, pinned by the SHA256SUMS of that release.
+# 3.10 reached end of life in October 2026: this is its last upstream build (spec 13).
+pkgname=samurai-python310
+pkgver=3.10.22
+pkgrel=1
+_pbs=20261009
+_minor=3.10
+pkgdesc="CPython 3.10 (python-build-standalone) in /opt/samurai/python/3.10"
+arch=(x86_64)
+url="https://github.com/astral-sh/python-build-standalone"
+license=('PSF-2.0')
+depends=(glibc)
+conflicts=('python310')
+options=(!strip !debug)
+_asset="cpython-${pkgver}+${_pbs}-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz"
+source=("$_asset::$url/releases/download/${_pbs}/${_asset//+/%2B}"
+        LICENSE)
+sha256sums=(
+    'caa66b308e10f35b8114054df7d927903f971f631cfa3237b84c40d5d5f35549'
+    '1be06492345bb03a60d13d23d744d979cc7cf1ce154da5227651f8dd78f25017'
+)
+
+check() {
+    "$srcdir/python/bin/python$_minor" -c 'import ssl, sqlite3, ctypes, venv'
+}
+
+package() {
+    local prefix="/opt/samurai/python/$_minor"
+    install -dm755 "$pkgdir$prefix" "$pkgdir/usr/bin"
+    cp -a "$srcdir/python/." "$pkgdir$prefix/"
+    # pacman owns this tree: no pip installs into it (PEP 668); use venvs
+    printf '[externally-managed]\nError=This Python is managed by pacman (samurai-python310). Create a venv: uv venv --python 3.10\n' \
+        > "$pkgdir$prefix/lib/python$_minor/EXTERNALLY-MANAGED"
+    ln -s "$prefix/bin/python$_minor" "$pkgdir/usr/bin/python$_minor"
+    printf '#!/bin/sh\nexec /usr/bin/python%s -m pip "$@"\n' "$_minor" > "$pkgdir/usr/bin/pip$_minor"
+    chmod 755 "$pkgdir/usr/bin/pip$_minor"
+    install -Dm644 "$pkgdir$prefix/lib/python$_minor/LICENSE.txt" \
+        "$pkgdir/usr/share/licenses/$pkgname/LICENSE.python"
+    install -Dm644 "$srcdir/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE.packaging"
+}

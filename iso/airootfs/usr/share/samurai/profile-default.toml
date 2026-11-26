@@ -35,13 +35,13 @@ root_locked = true           # always (spec 09); false is refused
 # Desktop: KDE Plasma is the default face of Samurai OS (Genor 2026-11-20);
 # alternatives gnome/xfce/lxqt/none arrive via the wizard or the toolbox.
 desktop = "kde"
+browsers = ["firefox"]       # catalog ids in category "browsers"
 # Optional catalog apps and @bundles (`samurai apps list`, `samurai apps bundles`).
 # Strict allowlist: exact catalog ids only. Online installs apply them at the end;
 # offline installs leave a first-boot note with the exact command instead.
 # apps = ["firefox", "@gaming", "@dev"]
-# M2 install set: enough for a booting, testable system. Desktop/gaming/dev
-# packages arrive with their milestones (M6–M7); samurai-postinstall applies
-# whatever the profile lists, from repos the ISO trusts.
+# Extra packages besides what the sections below select
+# (samurai-profile-plan turns the whole profile into one transaction).
 install = [
     "samurai-release",
     "samurai-mirrorlist",
@@ -51,10 +51,39 @@ install = [
     "wpa_supplicant",
 ]
 
+# Software choices (spec 08 pages 6a and 8-11; docs/plans/profile-schema.md).
+# These are the guided installer's defaults; a section left out installs nothing.
+[kde]
+theme = "breeze"             # otto/scratchy: refused until packaged
+monitor_widgets = true
+reduced_effects = true
+
+[gaming]
+enabled = true
+steam = true
+heroic = true
+gamemode = true
+mangohud = true
+gamescope = true
+proton_ge = true
+proton_cachyos = true
+wine = true
+
+[development]
+python = []                  # any of "3.10", "3.11", "3.12", "3.13"
+conda = "miniforge"          # miniforge | none
+docker = "group"             # group (root-equivalent) | rootless | none
+ai_clis = []
+ollama = false
+
+[network]
+tailscale = true
+reverse_proxy = "none"       # none | caddy | nginx | traefik
+
 [repos]
-samurai = true               # these three are fixed in M2; the validator refuses other values
+samurai = true               # these three are fixed; the validator refuses other values
 cachyos = true               # [cachyos] is baked into the ISO (linux-cachyos + keyring)
-chaotic_aur = false
+chaotic_aur = true           # ADR-0007
 arch_mirror = "auto"         # "auto" = live medium mirrors; or an https URL to pin
                              # (spec 11: Arch archive for update-from-archive testing)
 

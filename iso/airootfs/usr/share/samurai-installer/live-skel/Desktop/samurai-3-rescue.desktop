@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Samurai Rescue
+Comment=Repair or roll back an installed system
+Exec=konsole -e /usr/lib/samurai-installer/rescue-terminal
+Icon=document-revert
+Terminal=false
+Categories=System;

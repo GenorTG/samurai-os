@@ -1,0 +1,41 @@
+# Maintainer: Samurai OS <build@smart-samurai.pl>
+# Spec: docs/specs/13-DEVELOPER-ENVIRONMENT.md "Python". Repackages Astral's
+# python-build-standalone release, pinned by the SHA256SUMS of that release.
+pkgname=samurai-python311
+pkgver=3.11.18
+pkgrel=1
+_pbs=20261124
+_minor=3.11
+pkgdesc="CPython 3.11 (python-build-standalone) in /opt/samurai/python/3.11"
+arch=(x86_64)
+url="https://github.com/astral-sh/python-build-standalone"
+license=('PSF-2.0')
+depends=(glibc)
+conflicts=('python311')
+options=(!strip !debug)
+_asset="cpython-${pkgver}+${_pbs}-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz"
+source=("$_asset::$url/releases/download/${_pbs}/${_asset//+/%2B}"
+        LICENSE)
+sha256sums=(
+    'd873f435e58d396a18858d4f52a335f1abe8cea385cb9d411ec511f958249d54'
+    '1be06492345bb03a60d13d23d744d979cc7cf1ce154da5227651f8dd78f25017'
+)
+
+check() {
+    "$srcdir/python/bin/python$_minor" -c 'import ssl, sqlite3, ctypes, venv'
+}
+
+package() {
+    local prefix="/opt/samurai/python/$_minor"
+    install -dm755 "$pkgdir$prefix" "$pkgdir/usr/bin"
+    cp -a "$srcdir/python/." "$pkgdir$prefix/"
+    # pacman owns this tree: no pip installs into it (PEP 668); use venvs
+    printf '[externally-managed]\nError=This Python is managed by pacman (samurai-python311). Create a venv: uv venv --python 3.11\n' \
+        > "$pkgdir$prefix/lib/python$_minor/EXTERNALLY-MANAGED"
+    ln -s "$prefix/bin/python$_minor" "$pkgdir/usr/bin/python$_minor"
+    printf '#!/bin/sh\nexec /usr/bin/python%s -m pip "$@"\n' "$_minor" > "$pkgdir/usr/bin/pip$_minor"
+    chmod 755 "$pkgdir/usr/bin/pip$_minor"
+    install -Dm644 "$pkgdir$prefix/lib/python$_minor/LICENSE.txt" \
+        "$pkgdir/usr/share/licenses/$pkgname/LICENSE.python"
+    install -Dm644 "$srcdir/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE.packaging"
+}

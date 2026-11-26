@@ -1,0 +1,292 @@
+#!/usr/bin/env python3
+"""samurai-profile-plan: what an install profile installs (spec 08 step 6).
+
+The single place that turns profile choices into packages and services, used by
+samurai-postinstall, the installers' summary and selection pages, and the
+offline ISO closure (ci/build-iso.sh). Schema: docs/plans/profile-schema.md.
+Validate the profile first (validate-profile.py): this tool trusts its values.
+
+  samurai-profile-plan PROFILE [--offline] [--nvidia] [--amd] [--json]
+  samurai-profile-plan --offline-closure      packages the offline ISO carries
+  samurai-profile-plan --list browsers|ai-cli catalog choices: id<TAB>name
+
+Default output is line based, for shell: "pkg NAME", "service UNIT",
+"user-service UNIT", "group NAME", "defer COMMAND<TAB>REASON".
+"""
+from __future__ import annotations
+
+import argparse
+import importlib.machinery
+import importlib.util
+import json
+import pathlib
+import sys
+import tomllib
+from dataclasses import dataclass, field
+
+BASE_PACKAGES = ["samurai-base", "samurai-settings-system", "samurai-settings-shell",
+                 "samurai-settings-dev"]
+BASE_SERVICES = ["ananicy-cpp.service", "irqbalance.service", "systemd-oomd.service"]
+DESKTOPS = {
+    # desktop: (packages, display manager unit)
+    "kde": (["samurai-desktop-base", "samurai-desktop-kde"], "sddm.service"),
+    "gnome": (["samurai-desktop-base", "gnome", "gnome-tweaks", "gdm"], "gdm.service"),
+    "xfce": (["samurai-desktop-base", "xfce4", "xfce4-goodies", "sddm"], "sddm.service"),
+    "lxqt": (["samurai-desktop-base", "lxqt", "sddm"], "sddm.service"),
+    "none": ([], ""),
+}
+# 32-bit graphics userspace for Steam and 32-bit games (Wine itself is WoW64)
+LIB32_GPU = ["lib32-mesa", "lib32-vulkan-radeon", "lib32-vulkan-intel",
+             "lib32-vulkan-nouveau", "lib32-vulkan-icd-loader"]
+GAMING_ITEMS = {
+    "steam": ["steam", "protontricks"],
+    "heroic": ["heroic-games-launcher-bin"],
+    "gamemode": ["gamemode", "lib32-gamemode"],
+    "mangohud": ["mangohud", "lib32-mangohud", "goverlay"],
+    "gamescope": ["gamescope"],
+    "proton_ge": ["samurai-proton-ge"],
+    "proton_cachyos": ["proton-cachyos-slr"],
+    "wine": ["samurai-wine", "umu-launcher"],
+}
+PYTHON_VERSIONS = ("3.10", "3.11", "3.12", "3.13")
+CONDA = {"miniforge": ["samurai-miniforge"], "none": []}
+DOCKER_PACKAGES = ["docker", "docker-compose", "docker-buildx"]
+ROOTLESS_PACKAGES = ["docker-rootless-extras", "rootlesskit", "slirp4netns", "fuse-overlayfs"]
+REVERSE_PROXIES = {"none": [], "caddy": ["caddy"], "nginx": ["nginx", "certbot"],
+                   "traefik": ["traefik"]}
+# browsers whose packages the offline ISO carries
+OFFLINE_BROWSERS = ["firefox"]
+
+
+@dataclass
+class Feature:
+    """One choice: installed as a whole, or deferred as a whole when offline."""
+    id: str
+    group: str
+    packages: list[str] = field(default_factory=list)
+    services: list[str] = field(default_factory=list)
+    user_services: list[str] = field(default_factory=list)
+    user_groups: list[str] = field(default_factory=list)
+    command: str = ""      # how to get it later when the medium does not carry it
+    reason: str = ""       # set: never installed by the installer, only deferred
+
+
+def load_apps_module():
+    """samurai-apps owns the catalog merge: next to this script, or updates/."""
+    here = pathlib.Path(__file__).resolve().parent
+    for cand in (here / "samurai-apps", here.parent / "updates" / "samurai-apps"):
+        if cand.is_file():
+            loader = importlib.machinery.SourceFileLoader("samurai_apps", str(cand))
+            spec = importlib.util.spec_from_loader("samurai_apps", loader)
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[spec.name] = module
+            loader.exec_module(module)
+            return module
+    raise SystemExit("error: samurai-apps (the catalog reader) is not installed")
+
+
+def load_catalog(directory: str | None = None):
+    module = load_apps_module()
+    try:
+        return module.load_catalog(pathlib.Path(directory) if directory else None)
+    except module.CatalogError as e:
+        raise SystemExit(f"error: app catalog unusable: {e}")
+
+
+def catalog_choices(catalog, category: str) -> list[tuple[str, str]]:
+    return [(a.id, a.name) for a in catalog.apps.values()
+            if a.category == category and not a.hidden]
+
+
+def app_feature(catalog, app_id: str, group: str) -> Feature:
+    app = catalog.apps[app_id]
+    command = f"samurai apps install {app.id}"
+    if app.packages and not app.user_commands and not app.flatpak:
+        return Feature(app.id, group, packages=list(app.packages),
+                       services=list(app.services), command=command)
+    return Feature(app.id, group, command=command, reason="per-user or Flatpak installer, needs network")
+
+
+def default_browsers(desktop: str) -> list[str]:
+    return [] if desktop == "none" else ["firefox"]
+
+
+def features(profile: dict, catalog, nvidia: bool = False, amd: bool = False) -> list[Feature]:
+    packages = profile.get("packages", {})
+    desktop = packages.get("desktop", "kde")
+    security = profile.get("security", {})
+    out = [Feature("profile", "profile", packages=list(packages.get("install", []))),
+           Feature("base", "base", packages=list(BASE_PACKAGES), services=list(BASE_SERVICES))]
+
+    desktop_packages, display_manager = DESKTOPS[desktop]
+    if desktop_packages:
+        out.append(Feature(desktop, "desktop", packages=list(desktop_packages),
+                           services=[display_manager, "bluetooth.service",
+                                     "power-profiles-daemon.service"],
+                           user_groups=["realtime"]))
+
+    firewall = security.get("firewall", "none")
+    if firewall != "none":
+        extra = ["plasma-firewall"] if desktop == "kde" else []
+        out.append(Feature(firewall, "firewall", packages=[firewall, *extra]))
+    if security.get("ssh_server", False):
+        out.append(Feature("ssh", "ssh", packages=["openssh"]))
+
+    for browser in packages.get("browsers", default_browsers(desktop)):
+        out.append(app_feature(catalog, browser, "browser"))
+
+    gaming = profile.get("gaming", {})
+    if gaming.get("enabled", False):
+        for item, item_packages in GAMING_ITEMS.items():
+            if not gaming.get(item, True):
+                continue
+            feature = Feature(item, "gaming", packages=list(item_packages),
+                              command=f"sudo pacman -S --needed {' '.join(item_packages)}")
+            if item == "steam":
+                feature.packages += LIB32_GPU + (["lib32-nvidia-utils"] if nvidia else [])
+                feature.command = f"sudo pacman -S --needed {' '.join(feature.packages)}"
+            if item == "gamemode":
+                feature.user_groups = ["gamemode"]
+            out.append(feature)
+
+    dev = profile.get("development", {})
+    for version in dev.get("python", []):
+        name = "samurai-python" + version.replace(".", "")
+        out.append(Feature(f"python{version}", "development", packages=[name],
+                           command=f"sudo pacman -S --needed {name}"))
+    conda = dev.get("conda", "none")
+    if CONDA[conda]:
+        out.append(Feature(conda, "development", packages=list(CONDA[conda]),
+                           command=f"sudo pacman -S --needed {' '.join(CONDA[conda])}"))
+    docker = dev.get("docker", "none")
+    if docker != "none":
+        toolkit = ["nvidia-container-toolkit"] if nvidia else []
+        wanted = DOCKER_PACKAGES + (ROOTLESS_PACKAGES if docker == "rootless" else []) + toolkit
+        feature = Feature(f"docker-{docker}", "development", packages=wanted,
+                          command=f"sudo pacman -S --needed {' '.join(wanted)}")
+        if docker == "group":
+            feature.services = ["docker.socket"]
+            feature.user_groups = ["docker"]
+        else:
+            feature.user_services = ["docker.socket"]
+        out.append(feature)
+    for cli in dev.get("ai_clis", []):
+        out.append(app_feature(catalog, cli, "ai-cli"))
+    if dev.get("ollama", False):
+        gpu = ["ollama-cuda"] if nvidia else ["ollama-rocm"] if amd else []
+        out.append(Feature("ollama", "ai-local", packages=["ollama", *gpu],
+                           services=["ollama.service"],
+                           command=f"sudo pacman -S --needed {' '.join(['ollama', *gpu])}"
+                                   " && sudo systemctl enable --now ollama"))
+
+    network = profile.get("network", {})
+    if network.get("tailscale", False):
+        out.append(Feature("tailscale", "network", packages=["tailscale"],
+                           services=["tailscaled.service"],
+                           command="sudo pacman -S --needed tailscale && sudo systemctl enable --now tailscaled"))
+    proxy = network.get("reverse_proxy", "none")
+    if REVERSE_PROXIES[proxy]:
+        out.append(Feature(proxy, "network", packages=list(REVERSE_PROXIES[proxy]),
+                           command=f"sudo pacman -S --needed {' '.join(REVERSE_PROXIES[proxy])}"))
+    return out
+
+
+def everything_offline_profiles() -> list[dict]:
+    """Profiles whose union is the offline ISO's package set (besides what
+    ci/build-iso.sh lists for the base system: kernels, drivers, bootloaders)."""
+    shared = {
+        "packages": {"desktop": "kde", "browsers": list(OFFLINE_BROWSERS)},
+        "gaming": {"enabled": True},
+        "development": {"python": list(PYTHON_VERSIONS), "conda": "miniforge", "docker": "rootless"},
+        "network": {"tailscale": True, "reverse_proxy": "caddy"},
+        "security": {"firewall": "firewalld", "ssh_server": True},
+    }
+    variants = [shared]
+    for proxy in ("nginx", "traefik"):
+        variants.append({"packages": {"desktop": "none"}, "network": {"reverse_proxy": proxy}})
+    variants.append({"packages": {"desktop": "kde", "browsers": []}, "security": {"firewall": "ufw"}})
+    return variants
+
+
+def offline_closure(catalog) -> list[str]:
+    names: dict[str, None] = {}
+    for profile in everything_offline_profiles():
+        for feature in features(profile, catalog, nvidia=True):
+            names.update(dict.fromkeys(feature.packages))
+    return list(names)
+
+
+def build_plan(profile: dict, catalog, offline: bool = False, nvidia: bool = False,
+               amd: bool = False) -> dict:
+    carried = set(offline_closure(catalog))
+    carried.update(profile.get("packages", {}).get("install", []))
+    plan: dict = {"packages": [], "services": [], "user_services": [], "user_groups": [],
+                  "deferred": []}
+    seen: set[str] = set()
+
+    def extend(key: str, values: list[str]) -> None:
+        plan[key].extend(v for v in values if v not in plan[key])
+
+    for feature in features(profile, catalog, nvidia=nvidia, amd=amd):
+        available = all(p in carried for p in feature.packages)
+        if feature.reason or (offline and not available):
+            plan["deferred"].append({
+                "id": feature.id, "command": feature.command,
+                "reason": feature.reason or "not on the offline medium",
+            })
+            continue
+        for name in feature.packages:
+            if name not in seen:
+                seen.add(name)
+                plan["packages"].append(
+                    {"name": name, "group": feature.group, "offline": name in carried})
+        for key in ("services", "user_services", "user_groups"):
+            extend(key, getattr(feature, key))
+    return plan
+
+
+def plan_lines(plan: dict) -> list[str]:
+    lines = [f"pkg {p['name']}" for p in plan["packages"]]
+    lines += [f"service {s}" for s in plan["services"]]
+    lines += [f"user-service {s}" for s in plan["user_services"]]
+    lines += [f"group {g}" for g in plan["user_groups"]]
+    lines += [f"defer {d['command']}\t{d['reason']}" for d in plan["deferred"]]
+    return lines
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="samurai-profile-plan", description=__doc__.split("\n")[0])
+    parser.add_argument("profile", nargs="?")
+    parser.add_argument("--offline", action="store_true", help="defer what the offline ISO lacks")
+    parser.add_argument("--nvidia", action="store_true")
+    parser.add_argument("--amd", action="store_true")
+    parser.add_argument("--json", action="store_true")
+    parser.add_argument("--catalog", help="catalog directory")
+    parser.add_argument("--offline-closure", action="store_true")
+    parser.add_argument("--list", choices=("browsers", "ai-cli"))
+    args = parser.parse_args(argv)
+    catalog = load_catalog(args.catalog)
+    if args.offline_closure:
+        print("\n".join(offline_closure(catalog)))
+        return 0
+    if args.list:
+        for app_id, name in catalog_choices(catalog, args.list):
+            print(f"{app_id}\t{name}")
+        return 0
+    if not args.profile:
+        parser.error("a profile file is required")
+    try:
+        profile = tomllib.loads(pathlib.Path(args.profile).read_text(encoding="utf-8"))
+        plan = build_plan(profile, catalog, offline=args.offline, nvidia=args.nvidia, amd=args.amd)
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as e:
+        print(f"error: cannot read {args.profile}: {e}", file=sys.stderr)
+        return 1
+    except KeyError as e:
+        print(f"error: unknown profile value {e}; run validate-profile.py", file=sys.stderr)
+        return 1
+    print(json.dumps(plan) if args.json else "\n".join(plan_lines(plan)))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

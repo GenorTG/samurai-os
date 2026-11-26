@@ -1,0 +1,4 @@
+# Live medium only. The wizard's helper and the terminal installer take no arguments
+# through sudo; the rescue tool takes its subcommands (it exists to give root access to an
+# installed system).
+live ALL=(root) NOPASSWD: /usr/lib/samurai-installer/samurai-installer-helper "", /usr/local/bin/samurai-install "", /usr/local/bin/samurai-rescue

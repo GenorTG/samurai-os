@@ -4,7 +4,7 @@ Plasma is the default face of Samurai OS, alternatives opt-in).
 Flow:
 1. unattended profile with desktop="kde" (autokey affordance for headless boot)
 2. postinstall installs Plasma + SDDM + apps, enables SDDM, writes the
-   Breeze Dark default into /etc/skel/.config/kdeglobals
+   Breeze Dark default into /etc/xdg/kdeglobals [KDE]
 3. reboot -> SDDM greeter on the VGA console (screendump), serial getty
    still answers for the asserts
 4. asserts: sddm active, plasma installed, Breeze Dark default, root btrfs,
@@ -34,7 +34,7 @@ def _kde_profile(mirror) -> str:
 
 def test_kde_install(mirror):
     _kde_profile(mirror)
-    vm = VM("kde-inst", iso=str(find_iso()), disk_size="20G", ram="6144", smp="4")
+    vm = VM("kde-inst", iso=str(find_iso()), disk_size="48G", ram="6144", smp="4")
     vm.start()
     try:
         vm.serial_connect()
@@ -59,7 +59,7 @@ def test_kde_install(mirror):
         _, out = ga.exec(
             "systemctl is-active sddm; "
             "pacman -Q plasma-meta sddm konsole dolphin 2>&1; "
-            "grep LookAndFeelPackage /etc/skel/.config/kdeglobals; "
+            "sed -n '/^\\[KDE\\]/,/^$/p' /etc/xdg/kdeglobals; "
             "systemctl --failed --no-legend | wc -l; "
             "findmnt -no FSTYPE /; "
             "head -2 /etc/motd"

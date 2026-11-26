@@ -1,0 +1,175 @@
+#!/usr/bin/env python3
+"""Root half of the graphical installer: run the ONE install engine for it.
+
+The wizard runs unprivileged and calls this through sudo (live medium only). This
+program takes no arguments. It reads one JSON request on stdin:
+
+    {"profile": "<install-profile.toml>", "passphrase": "<LUKS passphrase or empty>"}
+
+copies the profile into a root-only directory, validates it, and runs
+``samurai-install --profile FILE --yes``, feeding the passphrase on its stdin (never in
+argv, the environment or a file). It streams the backend's output and the new lines of the
+install log to stdout. If the wizard goes away the installation still runs to the end.
+"""
+from __future__ import annotations
+
+import fcntl
+import json
+import os
+import pathlib
+import subprocess
+import sys
+import threading
+import time
+import tomllib
+
+RUNDIR = pathlib.Path("/run/samurai-installer")
+LOG = pathlib.Path("/var/log/samurai/install.log")
+VALIDATOR = "/usr/local/bin/validate-profile.py"
+BACKEND = "/usr/local/bin/samurai-install"
+# no suspend or reboot from the desktop while the disk is half written
+INHIBIT = ("/usr/bin/systemd-inhibit", "--what=sleep:shutdown:idle", "--who=Samurai OS installer",
+           "--why=Installation in progress", "--mode=block")
+MAX_REQUEST = 256 * 1024
+MIN_PASSPHRASE = 8
+ENVIRONMENT = {"PATH": "/usr/local/sbin:/usr/local/bin:/usr/bin", "LANG": "C.UTF-8",
+               "HOME": "/root"}
+
+
+class Output:
+    """stdout that survives a vanished reader (the install must finish anyway)."""
+
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.alive = True
+
+    def line(self, text: str) -> None:
+        with self.lock:
+            if not self.alive:
+                return
+            try:
+                sys.stdout.write(text.rstrip("\n") + "\n")
+                sys.stdout.flush()
+            except (BrokenPipeError, OSError, ValueError):
+                self.alive = False
+
+
+def refuse(message: str) -> int:
+    print(f"FATAL: {message}", flush=True)
+    return 2
+
+
+def parse_request(raw: str) -> tuple[str, str]:
+    """(profile, passphrase) from the request, or ValueError."""
+    if len(raw) > MAX_REQUEST:
+        raise ValueError("request too large")
+    data = json.loads(raw)
+    if not isinstance(data, dict) or set(data) != {"profile", "passphrase"}:
+        raise ValueError("request must hold exactly 'profile' and 'passphrase'")
+    profile, passphrase = data["profile"], data["passphrase"]
+    if not isinstance(profile, str) or not isinstance(passphrase, str):
+        raise ValueError("profile and passphrase must be strings")
+    if any(ch in passphrase for ch in "\r\n\0"):
+        raise ValueError("the passphrase must be a single line")
+    disk = tomllib.loads(profile).get("disk", {})
+    if not isinstance(disk, dict):
+        raise ValueError("[disk] must be a table")
+    if disk.get("encryption", True):
+        if len(passphrase) < MIN_PASSPHRASE:
+            raise ValueError(f"the passphrase needs at least {MIN_PASSPHRASE} characters")
+    elif passphrase:
+        raise ValueError("a passphrase was sent for an unencrypted install")
+    return profile, passphrase
+
+
+def write_private(path: pathlib.Path, text: str) -> None:
+    """A new file only root can read (the profile carries the password hash)."""
+    path.unlink(missing_ok=True)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(text)
+
+
+def follow(path: pathlib.Path, start: int, done: threading.Event, out: Output) -> None:
+    """Forward lines appended to the install log after byte ``start``."""
+    position, pending = start, b""
+    while True:
+        finished = done.is_set()
+        try:
+            with path.open("rb") as handle:
+                handle.seek(position)
+                chunk = handle.read()
+        except OSError:
+            chunk = b""
+        position += len(chunk)
+        *lines, pending = (pending + chunk).split(b"\n")
+        for line in lines:
+            out.line(line.decode("utf-8", "replace"))
+        if finished:
+            if pending:
+                out.line(pending.decode("utf-8", "replace"))
+            return
+        time.sleep(0.4)
+
+
+def run_backend(profile_path: pathlib.Path, passphrase: str, out: Output,
+                backend: str = BACKEND, log: pathlib.Path = LOG,
+                wrapper: tuple[str, ...] = ()) -> int:
+    start = log.stat().st_size if log.exists() else 0
+    done = threading.Event()
+    process = subprocess.Popen(
+        [*wrapper, backend, "--profile", str(profile_path), "--yes"], stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=ENVIRONMENT,
+        # its own session: a signal to the wizard's session never kills a half install.
+        # umask 022 like a root shell: the backend creates directories of the new system
+        start_new_session=True, umask=0o022)
+    follower = threading.Thread(target=follow, args=(log, start, done, out))
+    follower.start()
+    assert process.stdin is not None and process.stdout is not None
+    try:
+        if passphrase:
+            # samurai-install asks twice (entry + confirmation)
+            process.stdin.write(f"{passphrase}\n{passphrase}\n".encode())
+        process.stdin.close()
+    except BrokenPipeError:
+        pass   # it failed before asking; the exit status says why
+    for raw in process.stdout:
+        out.line(raw.decode("utf-8", "replace"))
+    status = process.wait()
+    done.set()
+    follower.join()
+    return status
+
+
+def main() -> int:
+    if len(sys.argv) != 1:
+        return refuse("this helper takes no arguments")
+    if os.geteuid() != 0:
+        return refuse("this helper must run as root")
+    try:
+        profile, passphrase = parse_request(sys.stdin.read(MAX_REQUEST + 1))
+    except (ValueError, tomllib.TOMLDecodeError) as e:
+        return refuse(f"bad request: {e}")
+    RUNDIR.mkdir(mode=0o700, exist_ok=True)
+    with open(RUNDIR / "lock", "w", encoding="utf-8") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            return refuse("an installation is already running")
+        path = RUNDIR / "install-profile.toml"
+        write_private(path, profile)
+        try:
+            check = subprocess.run([VALIDATOR, str(path)], capture_output=True, text=True,
+                                   env=ENVIRONMENT, check=False)
+            if check.returncode != 0:
+                return refuse(check.stderr.strip() or "the profile is invalid")
+            out = Output()
+            status = run_backend(path, passphrase, out, wrapper=INHIBIT)
+            out.line(f"samurai-installer-helper: exit {status}")
+            return status
+        finally:
+            path.unlink(missing_ok=True)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

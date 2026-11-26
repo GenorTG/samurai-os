@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# "Samurai Rescue" on the live desktop: find and mount the installed system, then stay
+# in a shell with the other rescue commands listed.
+sudo -n /usr/local/bin/samurai-rescue mount
+cat <<'HELP'
+
+Samurai Rescue. Next steps:
+  sudo samurai-rescue chroot             work inside the installed system
+  sudo samurai-rescue rollback <number>  return to an earlier snapshot
+  sudo samurai-rescue bootloader         repair the boot menu
+  sudo samurai-rescue initramfs          rebuild the boot images
+  sudo samurai-rescue kernel             repair the kernel
+  sudo samurai-rescue unmount            finish
+
+HELP
+exec bash

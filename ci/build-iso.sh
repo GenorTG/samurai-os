@@ -7,7 +7,11 @@
 #   online:            netinstall; no baked cache, the installer pulls current
 #                      packages from the mirrors (~1.3 GB).
 # The ISO is renamed samurai-os-<date>-<flavor>-x86_64.iso.
-# Requires: docker, ~4 GB free in /var, network access to Arch mirrors.
+# Env:
+#   SAMURAI_LOCAL_PKGS=<dir>  test builds only: take these unsigned [samurai]
+#                             packages (ci/build-pkgs.sh) ahead of the
+#                             published ones in the offline cache
+# Requires: docker, ~30 GB free, network access to the package mirrors.
 # The container runs privileged: mkarchiso's pacstrap bind-mounts
 # /proc, /sys and /dev into the airootfs (CAP_SYS_ADMIN).
 set -euo pipefail
@@ -25,6 +29,14 @@ case "$flavor" in
     offline|online) ;;
     *) echo "error: SAMURAI_ISO_FLAVOR must be offline or online (got: $flavor)" >&2; exit 2 ;;
 esac
+
+local_pkgs="${SAMURAI_LOCAL_PKGS:-}"
+local_mount=()
+if [ -n "$local_pkgs" ]; then
+    [ "$flavor" = offline ] || { echo "error: SAMURAI_LOCAL_PKGS only applies to the offline flavor" >&2; exit 2; }
+    local_pkgs="$(realpath -e "$local_pkgs")"
+    local_mount=(-v "$local_pkgs":/localpkgs:ro)
+fi
 
 mkdir -p "$out_dir"
 # Build from a staged profile so generated packages cannot accumulate in the
@@ -48,7 +60,7 @@ mkdir -p "$bin_dir" "$lib_dir" "$profile_dir/airootfs/etc"
 # keeps Arch's stock config. Install the same repo set into the live ISO so
 # attended installs can resolve the CachyOS default kernel.
 cp -f "$repo_root/iso/pacman.conf" "$profile_dir/airootfs/etc/pacman.conf"
-for f in samurai-install samurai-postinstall validate-profile.py; do
+for f in samurai-install samurai-postinstall samurai-profile-plan validate-profile.py; do
     cp -f "$repo_root/installer/$f" "$bin_dir/$f"
 done
 # target pacman.conf template (samurai-install installs it on the new system)
@@ -84,8 +96,13 @@ done
 mkdir -p "$profile_dir/airootfs/usr/share/samurai/catalog"
 cp -f "$repo_root"/catalog/*.toml "$profile_dir/airootfs/usr/share/samurai/catalog/"
 printf '%s\n' "$flavor" > "$profile_dir/airootfs/etc/samurai-iso-flavor"
+# graphical installer (live medium only; kept out of /usr/local/bin so
+# samurai-install never copies it to the target)
+gui_dir="$profile_dir/airootfs/usr/lib/samurai-installer"
+mkdir -p "$gui_dir"
+tar --exclude='__pycache__' -C "$repo_root/installer/gui" -cf - . | tar -C "$gui_dir" -xf -
 chmod 755 "$bin_dir"/samurai-install "$bin_dir"/samurai-postinstall \
-    "$bin_dir"/validate-profile.py
+    "$bin_dir"/samurai-profile-plan "$bin_dir"/validate-profile.py
 # profiledef's file_permissions would otherwise reset copied tools to 644
 for f in "$bin_dir"/samurai*; do
     rel="/usr/local/bin/$(basename "$f")"
@@ -98,7 +115,7 @@ sed -i "s|^iso_application=.*|iso_application=\"Samurai OS Live/Installer ($flav
 ### profile's full package closure + sync dbs into the ISO, so the default
 ### install runs WITHOUT network ("a base version installable without a lot
 ### of curls"). Every package is downloaded with signature checking ON
-### (Arch, CachyOS and [samurai] keys populated first, CachyOS and Samurai
+### (Arch, CachyOS, Chaotic-AUR and [samurai] keys populated first, their
 ### primary fingerprints pinned), so the cache only contains packages that
 ### verified at build time. The installer then reads it with SigLevel Never:
 ### the ISO (checksummed/signed with the release) is the install-time anchor.
@@ -108,7 +125,7 @@ echo "==> downloading offline install cache (release default set)"
 # stale-state rule: a reused download dir would keep two versions of one
 # package and pacman -U would refuse the pair — purge first
 docker run --rm -v "$out_dir":/b alpine sh -c 'rm -rf /b/offline-pkgs'
-docker run --rm -v "$out_dir":/b -v "$repo_root":/src:ro "$image" bash -c '
+docker run --rm -v "$out_dir":/b -v "$repo_root":/src:ro "${local_mount[@]}" "$image" bash -c '
 set -euo pipefail
 pacman-key --init >/dev/null 2>&1
 pacman -Syu --noconfirm >/dev/null
@@ -120,7 +137,7 @@ sed -i "s|^ParallelDownloads.*|ParallelDownloads = 2|" /etc/pacman.conf
 # CachyOS keyring: the package cannot vouch for itself, so it is fetched over
 # HTTPS from the four mirrors and its PRIMARY key fingerprint is pinned.
 CACHYOS_FPR=882DCFE48E2051D48E2562ABF3B607488DB35A47
-for s in nl aur mirror build; do
+for s in mirror aur build nl; do
     curl -fsSL --retry 4 -o /tmp/ck.db "https://$s.cachyos.org/repo/x86_64/cachyos/cachyos.db" || continue
     kr=$(bsdtar -tf /tmp/ck.db | grep -o "^cachyos-keyring-[^/]*" | head -1) || continue
     curl -fsSL --retry 4 -o /tmp/ck.pkg.tar.zst "https://$s.cachyos.org/repo/x86_64/cachyos/$kr-any.pkg.tar.zst" && break
@@ -136,14 +153,35 @@ SAMURAI_FPR=DFE8C148C042AA3C199AAEA08436E12731EDD3FA
 pacman-key --add /src/iso/airootfs/usr/share/samurai/build-key.txt >/dev/null
 pacman-key --finger "$SAMURAI_FPR" | tr -d " " | grep -q "$SAMURAI_FPR" || { echo "error: samurai build key mismatch" >&2; exit 1; }
 pacman-key --lsign-key "$SAMURAI_FPR" >/dev/null
+/src/ci/chaotic-bootstrap.sh
+pacman -S --noconfirm --needed python >/dev/null
+# test builds: unsigned branch packages take precedence over the published ones
+LOCAL_REPO=""
+if compgen -G "/localpkgs/*.pkg.tar.zst" >/dev/null; then
+    echo "==> using LOCAL unsigned packages (test build, never release this ISO)"
+    mkdir -p /tmp/localrepo
+    cp /localpkgs/*.pkg.tar.zst /tmp/localrepo/
+    repo-add -q /tmp/localrepo/samurai-local.db.tar.gz /tmp/localrepo/*.pkg.tar.zst
+    LOCAL_REPO="[samurai-local]
+SigLevel = Never
+Server = file:///tmp/localrepo
+"
+fi
 cat >> /etc/pacman.conf <<REPOS
 
+[multilib]
+Include = /etc/pacman.d/mirrorlist
+
 [cachyos]
-Server = https://nl.cachyos.org/repo/\$arch/\$repo
 Server = https://aur.cachyos.org/repo/\$arch/\$repo
 Server = https://mirror.cachyos.org/repo/\$arch/\$repo
 Server = https://build.cachyos.org/repo/\$arch/\$repo
+Server = https://nl.cachyos.org/repo/\$arch/\$repo
 
+[chaotic-aur]
+Include = /etc/pacman.d/chaotic-mirrorlist
+
+$LOCAL_REPO
 [samurai]
 SigLevel = Required DatabaseRequired
 Server = https://github.com/GenorTG/samurai-repo/releases/download/x86_64
@@ -155,21 +193,24 @@ mkdir -p /b/offline-pkgs /tmp/freshdb
 # plain -Sw would miss everything the build container already has (glibc,
 # bash, coreutils — the -U target is empty and needs them all)
 pacman --dbpath /tmp/freshdb -Sy >/dev/null
+# everything an install profile can select without network (single source:
+# the planner the installer uses)
+plan="$(python3 /src/installer/samurai-profile-plan --offline-closure --catalog /src/catalog)"
+read -r -d "" -a planned <<<"$plan" || true
+[ "${#planned[@]}" -gt 20 ] || { echo "error: the offline closure plan looks empty" >&2; exit 1; }
 pacman --dbpath /tmp/freshdb -Sw --noconfirm --cachedir /b/offline-pkgs \
     base linux-cachyos linux-cachyos-headers linux-zen linux-zen-headers \
     linux linux-headers linux-lts linux-lts-headers linux-cachyos-lts linux-cachyos-lts-headers \
     linux-firmware mkinitcpio dkms linux-cachyos-nvidia-open nvidia-open \
+    chaotic-keyring chaotic-mirrorlist \
     nvidia-open-lts nvidia-open-dkms nvidia-utils nvidia-settings \
     mesa vulkan-radeon vulkan-intel vulkan-nouveau \
     intel-media-driver libva-intel-driver \
     amd-ucode intel-ucode zram-generator pacman-contrib sudo fish zsh python pciutils snapper snap-pac \
     grub limine refind efibootmgr os-prober \
     networkmanager wpa_supplicant qemu-guest-agent archlinux-keyring cachyos-keyring \
-    plasma-meta sddm konsole dolphin kate ark gwenview okular \
-    firefox pipewire pipewire-pulse pipewire-alsa wireplumber spectacle \
-    noto-fonts noto-fonts-emoji flatpak power-profiles-daemon bluez bluez-utils \
-    firewalld plasma-firewall \
-    samurai-release samurai-mirrorlist samurai-keyring openssh \
+    samurai-release samurai-mirrorlist samurai-keyring \
+    "${planned[@]}" \
     cachyos/pahole
 # cachyos/pahole: linux-cachyos-headers needs pahole>=1:1.32-2, newer than
 # extra (repo order makes plain "pahole" resolve to extra and fail)
@@ -240,13 +281,15 @@ if compgen -G "/out/offline-pkgs/cachyos-keyring-*.pkg.tar.zst" >/dev/null; then
 else
     # online flavor: no offline cache, fetch the keyring through the same
     # 4-server fallback the offline download uses
-    for s in nl aur mirror build; do
+    for s in mirror aur build nl; do
         curl -fsSL --retry 4 -o /tmp/ck.db "https://$s.cachyos.org/repo/x86_64/cachyos/cachyos.db" || continue
         kr=$(bsdtar -tf /tmp/ck.db | grep -o "^cachyos-keyring-[^/]*" | head -1) || continue
         curl -fsSL --retry 4 -o /tmp/ck.pkg.tar.zst "https://$s.cachyos.org/repo/x86_64/cachyos/$kr-any.pkg.tar.zst" && break
     done
     pacman -U --noconfirm /tmp/ck.pkg.tar.zst >/dev/null
 fi
+# [chaotic-aur] is in the ISO profile: trust it and provide its mirrorlist
+/src/ci/chaotic-bootstrap.sh
 mkarchiso -v -w /work -o /out /out/profile
 '
 

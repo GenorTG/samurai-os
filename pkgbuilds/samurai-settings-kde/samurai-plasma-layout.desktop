@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Samurai OS panel layout (first login)
+Exec=/usr/bin/samurai-plasma-layout --first-login
+OnlyShowIn=KDE;
+NoDisplay=true
+X-KDE-autostart-phase=2

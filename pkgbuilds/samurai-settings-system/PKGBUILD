@@ -1,0 +1,46 @@
+# Maintainer: Samurai OS <build@smart-samurai.pl>
+# Spec: docs/specs/10-DEFAULTS-AND-SOFTWARE.md "Performance defaults" (config only).
+# Reason for the package: one removable owner for every tuning default; the
+# tools it configures are dependencies so the defaults are never half-applied.
+pkgname=samurai-settings-system
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Samurai OS system defaults: sysctl, zram, I/O schedulers, THP, journald, shutdown timeout, process priorities"
+arch=(any)
+url="https://github.com/GenorTG/samurai-os"
+license=('PolyForm-Noncommercial-1.0.0')
+depends=(systemd zram-generator ananicy-cpp cachyos-ananicy-rules irqbalance scx-scheds power-profiles-daemon)
+install=samurai-settings-system.install
+source=(
+    70-samurai-performance.conf
+    50-samurai-thp.conf
+    60-samurai-ioschedulers.rules
+    50-samurai-journald.conf
+    50-samurai-timeout.conf
+    50-samurai-zram.conf
+    50-samurai-oomd-user.conf
+    LICENSE
+)
+sha256sums=(
+    'b10e6f1bdd4c81743af76d3015edd4782b87e1409509290d5572c8f479d35a95'
+    'a344019d3424f128a1cde1f9650ff805e630f8960438bf1393025abc9f235ac6'
+    'a7ba8216c7bd51ad53845146f4dc38d3c3fa75908700481ad31c803d6577c284'
+    'e5dc26483ddeb63f62e13e4ad7ea11ca7ea233b428419811831a574c21d16a84'
+    'beffa0db4681012bb47fad54ad3f8df8d8d3e44353cc6914c964783662c83dd1'
+    'e1ab0a150a160693f62e8a0b09b4c26656414f8b2c04d32fcf62f1dfddc047f6'
+    'c75414bf888575c36db6336578c03208138ce4f5c952e95e7a7770c14e461b93'
+    '1be06492345bb03a60d13d23d744d979cc7cf1ce154da5227651f8dd78f25017'
+)
+
+package() {
+    cd "$srcdir"
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+    install -Dm644 70-samurai-performance.conf "$pkgdir/usr/lib/sysctl.d/70-samurai-performance.conf"
+    install -Dm644 50-samurai-thp.conf "$pkgdir/usr/lib/tmpfiles.d/50-samurai-thp.conf"
+    install -Dm644 60-samurai-ioschedulers.rules "$pkgdir/usr/lib/udev/rules.d/60-samurai-ioschedulers.rules"
+    install -Dm644 50-samurai-journald.conf "$pkgdir/usr/lib/systemd/journald.conf.d/50-samurai.conf"
+    install -Dm644 50-samurai-timeout.conf "$pkgdir/usr/lib/systemd/system.conf.d/50-samurai-timeout.conf"
+    install -Dm644 50-samurai-timeout.conf "$pkgdir/usr/lib/systemd/user.conf.d/50-samurai-timeout.conf"
+    install -Dm644 50-samurai-zram.conf "$pkgdir/usr/lib/systemd/zram-generator.conf.d/50-samurai.conf"
+    install -Dm644 50-samurai-oomd-user.conf "$pkgdir/usr/lib/systemd/system/user@.service.d/50-samurai-oomd.conf"
+}

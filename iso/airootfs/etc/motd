@@ -1,9 +1,13 @@
 Welcome, ronin — this is Samurai OS. Arch in spirit, sharpened for you.
 
+Install:
+  graphical     the desktop icon "Install Samurai OS (graphical)" (Ctrl+Alt+F1)
+  terminal      samurai-install
+
 Your blade is the `samurai` command:
   samurai update       refresh the system — a snapshot is taken first, always
   samurai snap         capture this moment before you act
   samurai rescue       for when the path darkens
   samurai health       check the blade for nicks, and mend them
 
-Ethernet walks in on its own. Wi-Fi answers only to iwctl.
+Ethernet walks in on its own. Wi-Fi: the network icon, or nmtui.

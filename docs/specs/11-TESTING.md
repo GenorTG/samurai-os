@@ -38,7 +38,7 @@ Scenarios in `full`:
 |----------|---------|
 | `iso-boot` | ISO boots on OVMF to a Plasma live session; toolbox and `samurai rescue` start |
 | `install-default` | scripted install, LUKS on; first boot reaches SDDM after unlocking; layout and subvolumes match spec 06 |
-| `install-calamares` | the Calamares UI driven by keys finishes; same assertions (semi-automated, screenshots reviewed) |
+| `install-gui` | `tests/vm/test_installer_gui.py`: the graphical wizard driven by keys finishes, the installed system boots; screenshots reviewed |
 | `firstboot` | no failed units; `samurai health` all green; hw fingerprint written; snapper configs present |
 | `update-from-archive` | install pinned to a date ≥ 30 days ago, `samurai update` to today succeeds, reboots, healthy |
 | `intervention-<id>` | one per intervention: before-state machine → update → after-state verified |
@@ -51,7 +51,7 @@ Scenarios in `full`:
 | `rescue-bootloader` | delete the Limine EFI binary; boot the ISO; `samurai rescue bootloader`; installed system boots |
 | `uninstall-check` | remove every `samurai-*` package (keeping Arch equivalents); the system still boots to a shell (spec 01 design test) |
 | `toolbox-actions` | each CLI action in spec 04 with `--dry-run`, plus the non-destructive ones for real |
-| `install-profile-parity` | the same choices made through Calamares and through the terminal installer produce byte-identical `install-profile.toml` files and the same `pacman -Qq` set |
+| `install-profile-parity` | the same choices made through the graphical and the terminal installer produce byte-identical `install-profile.toml` files and the same `pacman -Qq` set |
 | `install-tui` | terminal installer driven through the serial console (expect script) in guided mode |
 | `catalog-resolve` | every package in `catalog/` resolves to a repo; a full "everything ticked" install in a VM succeeds (nightly, long) |
 | `python-versions` | `python3.10`…`python3.14` each create a venv and import `ssl, sqlite3, ctypes`; `uv venv --python 3.11` downloads nothing; `conda create -n t python=3.12` works as the user |
