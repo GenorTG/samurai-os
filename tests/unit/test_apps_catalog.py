@@ -109,3 +109,16 @@ def test_safe_root_commands_only(apps, catalog):
                                 "systemctl enable --now bad;unit"])
     assert a.enable_units() == ["x.service"]
     assert a.manual_root_steps() == ["rm -rf / ; echo", "systemctl enable --now bad;unit"]
+
+
+def test_parse_providers_takes_the_first_repository_and_wrapped_fields(apps):
+    info = (
+        "Repository      : core\nName            : alpha\n"
+        "Provides        : virtual-a=2  libfoo.so=1-64\n                  wrapped-name\n"
+        "Depends On      : virtual-b\n\n"
+        "Repository      : extra\nName            : beta\nProvides        : virtual-a  virtual-b\n\n"
+        "Repository      : extra\nName            : gamma\nProvides        : None\n"
+    )
+    wanted = {"virtual-a", "virtual-b", "wrapped-name", "absent"}
+    assert apps.parse_providers(info, wanted) == {
+        "virtual-a": "core/alpha", "wrapped-name": "core/alpha", "virtual-b": "extra/beta"}

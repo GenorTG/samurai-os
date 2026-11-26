@@ -15,6 +15,8 @@ Kirigami.ScrollablePage {
     property bool loading: false
     property bool planning: false
     property string errorText: ""
+    // a fresh offline install has no package databases: nothing resolves until an update
+    property bool noDatabases: false
     // answers to older requests are dropped
     property int request: 0
 
@@ -41,6 +43,7 @@ Kirigami.ScrollablePage {
             loading = false
             const data = win.parse(out)
             errorText = data ? "" : "Cannot read the application catalog: " + err
+            noDatabases = data !== null && data.db_age_days === null
             const list = data ? data.apps : []
             // search results are ranked; the full list is grouped by category
             if (term === "") {
@@ -190,6 +193,19 @@ Kirigami.ScrollablePage {
                 text: page.win.escapeHtml(page.errorText)
                 visible: page.errorText !== ""
             }
+            Kirigami.InlineMessage {
+                Layout.fillWidth: true
+                Layout.margins: Kirigami.Units.smallSpacing
+                type: Kirigami.MessageType.Warning
+                text: "There are no package databases yet, so applications show as unavailable. "
+                    + "Run a system update first."
+                visible: page.noDatabases
+                actions: Kirigami.Action {
+                    text: "Open Updates"
+                    icon.name: "system-software-update"
+                    onTriggered: page.win.currentPage = "updates"
+                }
+            }
             Kirigami.Heading {
                 level: 3
                 text: "Bundles"
@@ -222,15 +238,16 @@ Kirigami.ScrollablePage {
             }
         }
 
-        delegate: QQC2.ItemDelegate {
+        delegate: QQC2.Control {
             id: row
             required property var modelData
             readonly property string note: modelData.reason && modelData.status !== "available"
                 ? modelData.reason : ""
 
             width: list.width
-            hoverEnabled: true
-            down: false
+            padding: Kirigami.Units.largeSpacing
+            topPadding: Kirigami.Units.smallSpacing
+            bottomPadding: Kirigami.Units.smallSpacing
 
             contentItem: RowLayout {
                 spacing: Kirigami.Units.largeSpacing
@@ -286,6 +303,12 @@ Kirigami.ScrollablePage {
                     }
                 }
             }
+        }
+
+        QQC2.BusyIndicator {
+            anchors.centerIn: parent
+            running: visible
+            visible: page.loading && page.shown.length === 0
         }
 
         Kirigami.PlaceholderMessage {

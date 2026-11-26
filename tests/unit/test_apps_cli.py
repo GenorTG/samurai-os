@@ -167,3 +167,14 @@ def test_human_list_has_markers(catalog, tmp_path):
     assert r.returncode == 0
     assert "System utilities" in r.stdout
     assert any(l.strip().startswith(("✓ htop", "+ htop")) for l in r.stdout.splitlines())
+
+
+@pytest.mark.parametrize("age", [None, 0.5])
+def test_list_and_search_json_report_the_database_age(make_index, age):
+    """The toolbox tells a fresh offline install (no sync databases) to update first."""
+    _, path = make_index(db_age_days=age)
+    env = {**os.environ, "SAMURAI_APPS_FAKE_INDEX": str(path), "SAMURAI_CATALOG_DIR": str(CATALOG_DIR)}
+    for argv in (["list", "--json"], ["search", "--json", "--", "htop"]):
+        out = subprocess.run([sys.executable, str(APPS_TOOL), *argv], capture_output=True, text=True,
+                             env=env, check=True)
+        assert json.loads(out.stdout)["db_age_days"] == age

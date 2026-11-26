@@ -9,6 +9,8 @@ Kirigami.ApplicationWindow {
 
     property string currentPage: "overview"
     property bool closeAnyway: false
+    // `currentPage` may be set before the page stack exists
+    property bool ready: false
 
     readonly property var pages: [
         { id: "overview", title: "Overview", icon: "go-home", file: "OverviewPage.qml" },
@@ -83,6 +85,13 @@ Kirigami.ApplicationWindow {
     }
     // confirm first, then run
     function confirmRun(tag, options) {
+        const refused = options.steps.map(s => Backend.refusal(s)).filter(r => r !== "")
+        if (refused.length > 0) {
+            inform("Not possible from the toolbox",
+                   "This value is not accepted here. If you are sure, use a terminal.",
+                   refused.join("\n"))
+            return
+        }
         options.action = () => run(tag, options.steps)
         confirm.ask(options)
     }
@@ -103,8 +112,15 @@ Kirigami.ApplicationWindow {
     pageStack.globalToolBar.style: Kirigami.ApplicationHeaderStyle.ToolBar
     pageStack.globalToolBar.showNavigationButtons: Kirigami.ApplicationHeaderStyle.NoNavigationButtons
 
-    onCurrentPageChanged: showPage()
-    Component.onCompleted: showPage()
+    onCurrentPageChanged: {
+        if (ready) {
+            showPage()
+        }
+    }
+    Component.onCompleted: {
+        ready = true
+        showPage()
+    }
     onClosing: close => {
         if (Backend.busy && !closeAnyway) {
             close.accepted = false
@@ -126,7 +142,6 @@ Kirigami.ApplicationWindow {
     }
 
     globalDrawer: Kirigami.OverlayDrawer {
-        id: sidebar
         edge: Qt.LeftEdge
         modal: false
         drawerOpen: true
@@ -152,11 +167,17 @@ Kirigami.ApplicationWindow {
         }
     }
 
-    footer: LogPanel {
-        id: logPanel
-        // an invisible footer still reserves its height under the sidebar
-        height: visible ? implicitHeight : 0
-        leftPadding: sidebar.width + Kirigami.Units.smallSpacing
+    // Kirigami moves the footer left under the sidebar but keeps the page width: the wrapper
+    // lets the panel span the whole window
+    footer: Item {
+        visible: logPanel.active
+        implicitHeight: logPanel.active ? logPanel.implicitHeight : 0
+
+        LogPanel {
+            id: logPanel
+            x: -parent.x
+            width: app.width
+        }
     }
 
     ConfirmDialog {

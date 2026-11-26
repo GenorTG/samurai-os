@@ -152,7 +152,7 @@ rules at the top of `samurai.toml`), installed by `samurai-tools` to `/usr/share
 | `samurai status --json` / `--report` | last update check / last `samurai update` report |
 | `samurai health --json` | results, each with `fixable` |
 | `samurai clean --preview --json <target...>` | sizes, notes, items, description |
-| `samurai apps list/search/info/bundles --json` | see below |
+| `samurai apps list/search/info/bundles --json` | see below; list and search carry `db_age_days` (null: no databases yet) |
 | `samurai kernel list --json` | installed/running/default/bootable, install warnings, remove blockers |
 | `samurai boot get --json` | timeout, default kernel, parameters marked `protected` |
 | `samurai mirrors status --json` | age and server URLs |

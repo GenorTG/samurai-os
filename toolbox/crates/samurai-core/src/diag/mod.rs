@@ -345,6 +345,7 @@ pub const STDOUT: &str = "-";
 
 pub fn redactor(sys: &dyn System, extra_users: &[String]) -> Redactor {
     Redactor::new(user_names(sys, extra_users), sys.read("/etc/hostname"))
+        .with_machine_id(sys.read("/etc/machine-id"))
 }
 
 #[derive(Debug, PartialEq, Eq)]

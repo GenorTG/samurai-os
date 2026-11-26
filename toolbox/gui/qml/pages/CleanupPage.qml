@@ -29,10 +29,10 @@ Kirigami.ScrollablePage {
             const data = win.parse(out)
             errorText = data ? "" : "The preview failed: " + err
             targets = data ? data.targets : []
-            // safe targets start ticked; risky ones never do
+            // safe targets with something to delete start ticked; risky ones never do
             const next = {}
             for (const t of targets) {
-                next[t.id] = t.risk === "safe" && t.bytes !== 0
+                next[t.id] = t.risk === "safe" && t.bytes > 0
             }
             selected = next
         })

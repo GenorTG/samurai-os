@@ -55,6 +55,8 @@ public:
     Q_INVOKABLE bool start(const QString &tag, const QVariantList &steps);
     /// Stop a task that runs as the user. Privileged operations cannot be interrupted.
     Q_INVOKABLE void cancel();
+    /// Why the helper would refuse a step; empty when it is allowed.
+    Q_INVOKABLE QString refusal(const QVariantMap &step) const;
     /// The terminal command equivalent to a step.
     Q_INVOKABLE QString describe(const QVariantMap &step) const;
     Q_INVOKABLE void copy(const QString &text) const;

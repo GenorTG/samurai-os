@@ -439,6 +439,28 @@ def load_fake_index(path: str) -> Index:
                  pending_upgrades=data.get("pending_upgrades", []), fake=True)
 
 
+def parse_providers(info: str, wanted: set[str]) -> dict[str, str]:
+    """name -> "repo/package" from `pacman -Si` output, for the names in `wanted`. pacman lists
+    repositories in configuration order, so the first provider is the one it would pick."""
+    found: dict[str, str] = {}
+    fields = {"Repository": "", "Name": ""}
+    key = ""
+    for line in info.splitlines():
+        if line[:1].isspace():
+            value = line                      # a wrapped field continues
+        else:
+            key, _, value = line.partition(":")
+            key = key.strip()
+        if key in fields:
+            fields[key] = value.strip()
+        elif key == "Provides":
+            for item in value.split():
+                name = item.split("=", 1)[0]
+                if name in wanted:
+                    found.setdefault(name, f"{fields['Repository']}/{fields['Name']}")
+    return found
+
+
 def build_index(catalog: Catalog) -> Index:
     fake = os.environ.get("SAMURAI_APPS_FAKE_INDEX")
     if fake:   # test fixture: describes availability only; never set in production
@@ -459,13 +481,10 @@ def build_index(catalog: Catalog) -> Index:
         if len(parts) == 2:
             idx.groups.setdefault(parts[0], []).append(parts[1])
     wanted = _catalog_packages(catalog)
-    for name in sorted(wanted):
-        if name in idx.sync or name in idx.groups:
-            continue
-        r = _run(["pacman", "-Sp", "--print-format", "%r/%n", name])
-        lines = [l for l in r.stdout.splitlines() if "/" in l and " " not in l]
-        if r.returncode == 0 and lines:
-            idx.provides[name] = lines[0]
+    virtual = {n for n in wanted if n not in idx.sync and n not in idx.groups}
+    if virtual:
+        # one pass over the sync databases: asking pacman once per name took half a minute
+        idx.provides = parse_providers(_run(["pacman", "-Si"]).stdout, virtual)
     if wanted:
         t = _run(["pacman", "-T", *sorted(n for n in wanted if n not in idx.groups)])
         unsatisfied = set(t.stdout.split())
@@ -717,6 +736,7 @@ def cmd_list(args, catalog: Catalog, idx: Index) -> int:
         states = [s for s in states if s.installable and not s.installed]
     if args.json:
         _dump({"schema": JSON_SCHEMA, "catalog": catalog.source_dir,
+               "db_age_days": idx.db_age_days,   # null: no sync databases yet
                "apps": [state_json(s, catalog) for s in states], "summary": _summary(states)})
         return EXIT_OK
     sty = Style(sys.stdout)
@@ -794,7 +814,7 @@ def cmd_search(args, catalog: Catalog, idx: Index) -> int:
     bundles = [b for b in catalog.bundles.values()
                if term.lower() in (b.id + " " + b.name + " " + b.description).lower()]
     if args.json:
-        _dump({"schema": JSON_SCHEMA, "term": term,
+        _dump({"schema": JSON_SCHEMA, "term": term, "db_age_days": idx.db_age_days,
                "apps": [state_json(s, catalog) for s in states],
                "bundles": [b.id for b in bundles]})
         return EXIT_OK if states or bundles else EXIT_FAIL

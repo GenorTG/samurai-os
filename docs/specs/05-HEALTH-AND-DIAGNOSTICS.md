@@ -85,8 +85,8 @@ runs `detect()`, runs `fix()`, and checks the issue is gone (spec 11 `health-*`)
 
 ### Redaction (on by default for `bundle`)
 Replaced with stable placeholders (`<user1>`, `<mac1>`, ...): user names and home paths, hostname,
-MAC addresses, IPv4/IPv6 addresses outside loopback, Wi-Fi SSIDs, disk/board serial numbers, email
-addresses, anything that looks like a token or key. `--no-redact` exists but asks twice.
+MAC addresses, IPv4/IPv6 addresses outside loopback, Wi-Fi SSIDs, disk/board serial numbers, the
+machine id, email addresses, anything that looks like a token or key. `--no-redact` exists but asks twice.
 
 ### Upload (opt-in)
 - `diag bundle --upload` shows the redacted file, asks, then uploads it to our own paste service

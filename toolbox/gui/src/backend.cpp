@@ -121,6 +121,15 @@ void Backend::capture(const Invocation &invocation, const QJSValue &callback, in
     process->start(invocation.program, invocation.arguments);
 }
 
+QString Backend::refusal(const QVariantMap &step) const
+{
+    const QString verb = step.value(QStringLiteral("verb")).toString();
+    if (verb.isEmpty()) {
+        return {};
+    }
+    return privilegedInvocation(verb, step.value(QStringLiteral("args")).toStringList()).error;
+}
+
 QString Backend::describe(const QVariantMap &step) const
 {
     QStringList words;

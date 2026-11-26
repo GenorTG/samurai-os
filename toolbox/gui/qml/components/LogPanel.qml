@@ -14,7 +14,8 @@ QQC2.Pane {
         cancelled: "Cancelled", denied: "Not authorised", idle: ""
     })
 
-    visible: Backend.state !== "idle"
+    readonly property bool active: Backend.state !== "idle"
+
     padding: Kirigami.Units.smallSpacing
 
     contentItem: ColumnLayout {
