@@ -5,8 +5,7 @@ from __future__ import annotations
 import json
 import pathlib
 
-from PySide6.QtCore import (Property, QObject, QProcess, QRunnable, QThreadPool, QTimer, Signal,
-                            Slot)
+from PySide6.QtCore import Property, QObject, QProcess, QTimer, Signal, Slot
 from PySide6.QtQml import QQmlPropertyMap
 
 from . import engine, model, system
@@ -139,13 +138,9 @@ class Backend(QObject):
         self.disksChanged.emit()
 
     def _poll_network(self) -> None:
-        worker = _Task(system.network_online)
-        worker.signals.done.connect(self._set_online)
-        QThreadPool.globalInstance().start(worker)
-
-    def _set_online(self, value: object) -> None:
-        if bool(value) != self.online:
-            self._facts["online"] = bool(value)
+        online = system.network_online()      # nmcli: milliseconds
+        if online != self.online:
+            self._facts["online"] = online
             self.onlineChanged.emit()
 
     @Property(bool, notify=revisionChanged)
@@ -408,20 +403,6 @@ class Backend(QObject):
     @Slot()
     def reboot(self) -> None:
         QProcess.startDetached("systemctl", ["reboot"])
-
-
-class _TaskSignals(QObject):
-    done = Signal(object)
-
-
-class _Task(QRunnable):
-    def __init__(self, function) -> None:
-        super().__init__()
-        self.function = function
-        self.signals = _TaskSignals()
-
-    def run(self) -> None:
-        self.signals.done.emit(self.function())
 
 
 def gather_facts(tools: engine.Tools) -> dict:

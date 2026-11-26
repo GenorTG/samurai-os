@@ -79,7 +79,7 @@ def plan(tools: Tools, text: str, offline: bool, nvidia: bool, amd: bool) -> dic
 
 
 def catalog(tools: Tools) -> list[dict]:
-    """Selectable catalog apps: [{id, name, category, category_name, description}]."""
+    """Selectable catalog apps: [{id, name, category, category_name, packages}]."""
     # list --json needs pacman for install states; on the live medium it is there
     done = _run([*tools.apps, "list", "--json"])
     cats = _run([*tools.apps, "categories", "--json"])
@@ -90,7 +90,7 @@ def catalog(tools: Tools) -> list[dict]:
         raise EngineError(f"the app catalog is unusable: {done.stderr.strip() or e}") from e
     return [{"id": a["id"], "name": a["name"], "category": a["category"],
              "category_name": names.get(a["category"], a["category"]),
-             "description": a.get("description") or a.get("note") or ""} for a in apps]
+             "packages": ", ".join(p["name"] for p in a.get("packages", []))} for a in apps]
 
 
 def write_private(path: pathlib.Path, text: str) -> None:

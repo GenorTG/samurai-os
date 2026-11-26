@@ -96,16 +96,5 @@ PageBody {
         }
     }
     PlainLabel { Layout.fillWidth: true; visible: text !== ""; text: page.saveMessage }
-
-    CheckBox {
-        Layout.topMargin: 8
-        Layout.bottomMargin: 12
-        text: "I understand that all data on " + (page.disk.path ?? "the disk") + " will be erased"
-        font.bold: true
-        checked: window.confirmed
-        onClicked: {
-            window.confirmed = checked
-            checked = Qt.binding(() => window.confirmed)
-        }
-    }
+    Item { Layout.preferredHeight: 8 }
 }

@@ -73,6 +73,11 @@ ApplicationWindow {
         Qt.callLater(activatePage)
     }
     function activatePage() {
+        if (pageId === "summary") {
+            // the keyboard lands on the confirmation; nothing is ticked for the user
+            confirmBox.forceActiveFocus(Qt.TabFocusReason)
+            return
+        }
         const item = pageRepeater.itemAt(index)
         if (item && item.item && item.item.activate)
             item.item.activate()
@@ -232,6 +237,19 @@ ApplicationWindow {
                     horizontalAlignment: Text.AlignRight
                     opacity: 0.85
                 }
+                // in the footer so it is on screen however long the summary is
+                CheckBox {
+                    id: confirmBox
+                    visible: window.pageId === "summary"
+                    enabled: window.blocker === ""
+                    font.bold: true
+                    text: "Erase all data on " + (installer.choices.disk || "the disk")
+                    checked: window.confirmed
+                    onClicked: {
+                        window.confirmed = checked
+                        checked = Qt.binding(() => window.confirmed)
+                    }
+                }
                 Button {
                     visible: window.index < window.summaryIndex
                     text: "Next"
@@ -242,7 +260,7 @@ ApplicationWindow {
                 }
                 Button {
                     visible: window.pageId === "summary"
-                    text: "Erase disk and install"
+                    text: "Install now"
                     icon.name: "run-install"
                     highlighted: enabled
                     enabled: window.blocker === "" && window.confirmed

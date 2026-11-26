@@ -16,7 +16,7 @@ ColumnLayout {
         return catalog.filter(a => {
             if (onlySelected.checked && !isOn(a))
                 return false
-            return needle === "" || (a.name + " " + a.id + " " + a.category_name + " " + a.description)
+            return needle === "" || (a.name + " " + a.id + " " + a.category_name + " " + a.packages)
                        .toLowerCase().indexOf(needle) >= 0
         })
     }
@@ -97,7 +97,7 @@ ColumnLayout {
                     Label {
                         Layout.fillWidth: true
                         textFormat: Text.PlainText
-                        text: row.modelData.description
+                        text: row.modelData.packages
                         elide: Text.ElideRight
                         opacity: 0.7
                     }

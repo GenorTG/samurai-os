@@ -53,7 +53,8 @@ def _find_ovmf() -> tuple[str, str]:
 
 class VM:
     def __init__(self, name: str, iso: str | None = None, disk: str | None = None,
-                 disk_size: str = "40G", ram: str = "4096", smp: str = "4"):
+                 disk_size: str = "40G", ram: str = "4096", smp: str = "4",
+                 graphical: bool = False):
         name = _artifact_name(name)
         self.name = name
         WORK.mkdir(parents=True, exist_ok=True)
@@ -66,6 +67,7 @@ class VM:
         if disk is None and os.path.exists(self.disk_path):
             os.unlink(self.disk_path)
         self.ram, self.smp = ram, smp
+        self.graphical = graphical   # KMS-capable display + absolute pointer for GUI tests
         self.code, self.vars = _find_ovmf()
         self.vars_rw = str(WORK / f"{name}-VARS.fd")
         self.serial_sock = str(WORK / f"{name}-serial.sock")
@@ -105,6 +107,9 @@ class VM:
         ]
         if self.iso:
             cmd += ["-drive", f"file={self.iso},media=cdrom,read-only=on"]
+        if self.graphical:
+            cmd += ["-vga", "none", "-device", "virtio-vga,xres=1280,yres=800",
+                    "-device", "qemu-xhci", "-device", "usb-tablet"]
         # pylint: disable=consider-using-with
         self.proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
 
@@ -281,6 +286,38 @@ class VM:
 
     def qmp_query_block(self) -> list:
         return self._qmp_call("query-block").get("return", [])
+
+    # --- keyboard and pointer (graphical tests) ---
+    def key(self, *qcodes: str) -> None:
+        """Press the given keys together (QEMU qcodes), then release them."""
+        keys = [{"type": "qcode", "data": code} for code in qcodes]
+        reply = self.qmp_command("send-key", keys=keys, **{"hold-time": 40})
+        if "error" in reply:
+            raise RuntimeError(f"send-key {qcodes} failed: {reply['error']}")
+        time.sleep(0.12)
+
+    def type_text(self, text: str) -> None:
+        """Type lowercase letters, digits, '-' and spaces on a US keyboard."""
+        names = {"-": "minus", " ": "spc"}
+        for char in text:
+            if not (char.isascii() and (char.islower() or char.isdigit() or char in names)):
+                raise ValueError(f"type_text cannot type {char!r}")
+            self.key(names.get(char, char))
+
+    def click(self, x: int, y: int, width: int = 1280, height: int = 800,
+              double: bool = False) -> None:
+        """Left click at screen pixel (x, y) through the absolute pointer."""
+        def event(*events: dict) -> None:
+            reply = self.qmp_command("input-send-event", events=list(events))
+            if "error" in reply:
+                raise RuntimeError(f"input-send-event failed: {reply['error']}")
+        event({"type": "abs", "data": {"axis": "x", "value": x * 32767 // width}},
+              {"type": "abs", "data": {"axis": "y", "value": y * 32767 // height}})
+        time.sleep(0.2)
+        for _ in range(2 if double else 1):
+            for down in (True, False):
+                event({"type": "btn", "data": {"down": down, "button": "left"}})
+                time.sleep(0.07)
 
     def eject_iso(self) -> None:
         """Remove the attached ISO so the reboot lands on the installed disk

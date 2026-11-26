@@ -10,6 +10,16 @@ PageBody {
         return installer.disks.find(d => d.path === wanted) ?? null
     }
 
+    function activate() {
+        for (let i = 0; i < cards.count; i++) {
+            const card = cards.itemAt(i)
+            if (card && card.modelData.blocked === "") {
+                card.focusChoice()
+                return
+            }
+        }
+    }
+
     RowLayout {
         Layout.fillWidth: true
         PlainLabel { Layout.fillWidth: true; text: "Pick the disk to erase and install on." }
@@ -17,12 +27,14 @@ PageBody {
     }
 
     Repeater {
+        id: cards
         model: installer.disks
         delegate: Frame {
             id: card
             required property var modelData
             readonly property bool selected: installer.choices.disk === modelData.path
             Layout.fillWidth: true
+            function focusChoice() { radio.forceActiveFocus(Qt.TabFocusReason) }
             background: Rectangle {
                 radius: 6
                 color: card.selected ? Qt.rgba(0.85, 0.27, 0.33, 0.12) : "transparent"
@@ -33,6 +45,7 @@ PageBody {
                 anchors.fill: parent
                 spacing: 2
                 RadioButton {
+                    id: radio
                     autoExclusive: false
                     enabled: card.modelData.blocked === ""
                     checked: card.selected
