@@ -303,8 +303,8 @@ wizard() {
     # plaintext never appears in a process argument list); plaintext never
     # reaches the profile file. Empty twice => postinstall generates one and
     # drops it in /root/initial-credentials (0600).
-    read -r -s -p "  User password (Enter = generate): " p1; echo
-    read -r -s -p "  again: " p2; echo
+    IFS= read -r -s -p "  User password (Enter = generate): " p1; echo
+    IFS= read -r -s -p "  again: " p2; echo
     WIZ_PWHASH=""
     if [ -n "$p1" ]; then
         [ "$p1" = "$p2" ] || die "passwords do not match"
@@ -517,8 +517,8 @@ if [ "$DEVICE_ENCRYPT" -eq 1 ]; then
     else
         # real install: the passphrase is the only keyslot. No helper keyfile
         # is ever added (an earlier version left a dead second slot behind).
-        read -r -s -p "LUKS passphrase: " pass1; echo
-        read -r -s -p "LUKS passphrase (again): " pass2; echo
+        IFS= read -r -s -p "LUKS passphrase: " pass1; echo
+        IFS= read -r -s -p "LUKS passphrase (again): " pass2; echo
         [ "$pass1" = "$pass2" ] || die "passphrases do not match"
         [ ${#pass1} -ge 8 ] || die "passphrase too short (minimum 8 characters)"
         printf '%s' "$pass1" | cryptsetup luksFormat "${LUKS_OPTS[@]}" "$ROOTPART"

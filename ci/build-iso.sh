@@ -96,6 +96,11 @@ done
 mkdir -p "$profile_dir/airootfs/usr/share/samurai/catalog"
 cp -f "$repo_root"/catalog/*.toml "$profile_dir/airootfs/usr/share/samurai/catalog/"
 printf '%s\n' "$flavor" > "$profile_dir/airootfs/etc/samurai-iso-flavor"
+# graphical installer (live medium only; kept out of /usr/local/bin so
+# samurai-install never copies it to the target)
+gui_dir="$profile_dir/airootfs/usr/lib/samurai-installer"
+mkdir -p "$gui_dir"
+tar --exclude='__pycache__' -C "$repo_root/installer/gui" -cf - . | tar -C "$gui_dir" -xf -
 chmod 755 "$bin_dir"/samurai-install "$bin_dir"/samurai-postinstall \
     "$bin_dir"/samurai-profile-plan "$bin_dir"/validate-profile.py
 # profiledef's file_permissions would otherwise reset copied tools to 644

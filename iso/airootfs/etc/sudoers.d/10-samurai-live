@@ -1,0 +1,3 @@
+# Live medium only. The wizard and the two desktop tools may become root; they take
+# fixed arguments (none), so the desktop user cannot pass anything to them through sudo.
+live ALL=(root) NOPASSWD: /usr/lib/samurai-installer/samurai-installer-helper "", /usr/local/bin/samurai-install "", /usr/local/bin/samurai-rescue ""

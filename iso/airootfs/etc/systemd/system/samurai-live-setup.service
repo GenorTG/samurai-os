@@ -1,0 +1,12 @@
+[Unit]
+Description=Create the Samurai OS live desktop user
+ConditionPathExists=/run/archiso
+Before=display-manager.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/lib/samurai-installer/live-setup
+
+[Install]
+WantedBy=multi-user.target

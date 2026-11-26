@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# The unprivileged desktop user of the live medium (spec 08). Live system only.
+set -euo pipefail
+[ -d /run/archiso ] || exit 0
+skel=/usr/share/samurai-installer/live-skel
+if ! id -u live >/dev/null 2>&1; then
+    useradd -m -k "$skel" -s /usr/bin/bash -c "Live session" live
+    # no password: autologin, and nothing to type at a manually locked screen
+    # (sshd refuses empty passwords)
+    passwd -d live >/dev/null
+fi
+config=/home/live/.config
+install -d -o live -g live -m 700 "$config"
+# Breeze Dark: the colour scheme itself plus the global theme name
+{
+    cat /usr/share/color-schemes/BreezeDark.colors
+    printf '\n[KDE]\nLookAndFeelPackage=org.kde.breezedark.desktop\n'
+} > "$config/kdeglobals"
+chown live:live "$config/kdeglobals"
+chmod 755 /home/live/Desktop/*.desktop

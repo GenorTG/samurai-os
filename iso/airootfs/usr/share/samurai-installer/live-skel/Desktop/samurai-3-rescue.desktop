@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Samurai Rescue
+Comment=Repair or roll back an installed system
+Exec=konsole --hold -e sudo -n /usr/local/bin/samurai-rescue
+Icon=tools-report-bug
+Terminal=false
+Categories=System;

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Install Samurai OS (graphical)
+Comment=Guided installation in a window
+Exec=/usr/lib/samurai-installer/samurai-installer
+Icon=system-software-install
+Terminal=false
+Categories=System;
