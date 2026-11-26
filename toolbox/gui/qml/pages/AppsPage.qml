@@ -58,8 +58,6 @@ Kirigami.ScrollablePage {
         Backend.query(["apps", "bundles", "--json"], (code, out) => {
             const data = win.parse(out)
             bundles = data ? data.bundles : []
-            // the list header grows when they arrive: stay at the top
-            Qt.callLater(list.positionViewAtBeginning)
         })
     }
 
@@ -215,6 +213,9 @@ Kirigami.ScrollablePage {
         header: ColumnLayout {
             width: list.width
             spacing: Kirigami.Units.smallSpacing
+            // the header grows when the bundles arrive (and changes with the filters): a list
+            // that is already showing rows would leave it above the visible area
+            onHeightChanged: Qt.callLater(list.positionViewAtBeginning)
 
             Kirigami.Heading {
                 level: 3

@@ -114,6 +114,8 @@ elif a[:1] == ["apps"] and ("--dry-run" in a):
           "  $ sudo pacman -S --needed --noconfirm htop\n(dry run: nothing changed)")
 elif a[:1] == ["apps"]:
     import tomllib
+    if a[1:2] == ["bundles"]:   # may arrive after the list, as on a busy machine
+        time.sleep(float(os.environ.get("FAKE_BUNDLES_DELAY", "0")))
     index = pathlib.Path(os.environ.get("TMPDIR", "/tmp")) / "gui-apps-index.json"
     names = set()
     for f in ("garuda-setup-wizard.toml", "samurai.toml"):

@@ -39,7 +39,7 @@ run_case() {   # $1 name, $2 delay of the fake CLI, then toolbox arguments
     shift 2
     su tester -c "cd /tmp && QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
         QT_QPA_PLATFORMTHEME=kde XDG_CURRENT_DESKTOP=KDE LANG=C.UTF-8 QT_FORCE_STDERR_LOGGING=1 \
-        FAKE_SAMURAI_DELAY=$delay FAKE_SAMURAI_NO_DB=${NO_DB:-} timeout 60 /tmp/build/samurai-toolbox $* \
+        FAKE_SAMURAI_DELAY=$delay FAKE_SAMURAI_NO_DB=${NO_DB:-} FAKE_BUNDLES_DELAY=${LATE_BUNDLES:-0} timeout 60 /tmp/build/samurai-toolbox $* \
         --cli /src/tests/gui/fake-samurai --pkexec /tmp/pkexec --grab /tmp/shots" \
         >"/tmp/$name.log" 2>&1 || rc=$?
     cp "/tmp/$name.log" /out/
@@ -59,6 +59,8 @@ done
 # a fresh offline install: the apps page must say why nothing is installable
 NO_DB=1 shot=apps run_case apps-no-databases 0 --page apps
 mv /tmp/shots/apps.png /tmp/shots/apps-no-databases.png
+LATE_BUNDLES=1.5 shot=apps run_case apps-late-bundles 0 --page apps
+mv /tmp/shots/apps.png /tmp/shots/apps-late-bundles.png
 run_case apps 0 --page apps
 # leave each page while its queries are still running: late answers must not hit a destroyed page
 for page in $pages; do
