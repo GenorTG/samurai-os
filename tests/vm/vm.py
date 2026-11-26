@@ -314,9 +314,13 @@ class VM:
     def resume_after_restart(self) -> None:
         """Reset and run a VM paused by its own restart request."""
         self.reboot()
-        reply = self.qmp_command("cont")
-        if "error" in reply:
-            raise RuntimeError(f"cont failed: {reply['error']}")
+        # the reset is processed after the command returns; until then QEMU refuses cont
+        for _ in range(40):
+            time.sleep(0.5)
+            reply = self.qmp_command("cont")
+            if "error" not in reply:
+                return
+        raise RuntimeError(f"cont failed: {reply['error']}")
 
     # --- keyboard and pointer (graphical tests) ---
     def key(self, *qcodes: str) -> None:
