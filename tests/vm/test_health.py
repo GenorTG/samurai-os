@@ -58,6 +58,16 @@ def installed_vm(mirror):
         vm.stop()
 
 
+def _need_sync_dbs(ga) -> None:
+    """An offline install has no package databases until its first update, so anything that
+    installs a package updates the whole system first (never a bare -Sy)."""
+    _, out = ga.exec(
+        "test -s /var/lib/pacman/sync/core.db && echo rc=0 || "
+        "{ pacman -Syu --noconfirm >/tmp/first-syu.log 2>&1; echo rc=$?; tail -5 /tmp/first-syu.log; }",
+        timeout=2400, check=False)
+    assert "rc=0" in out, f"the first full update failed: {out}"
+
+
 def _health(ga, *args: str) -> tuple[int, dict]:
     _, out = ga.exec(f"samurai health --json {' '.join(args)}; echo HEALTH-RC=$?", check=False)
     body, _, rc = out.rpartition("HEALTH-RC=")
@@ -291,6 +301,7 @@ def test_clean_previews_refuses_non_root_and_frees_space(installed_vm):
     assert "cleaned  journal" in out and out.strip().endswith("rc=0"), out
 
     # package cache: trim everything, then nothing for installed packages remains
+    _need_sync_dbs(ga)
     _, before = ga.exec("ls /var/cache/pacman/pkg/*.pkg.tar.zst 2>/dev/null | wc -l", check=False)
     _, out = ga.exec("samurai clean pkgcache --keep 0; echo rc=$?", timeout=300, check=False)
     assert "cleaned  pkgcache" in out and out.strip().endswith("rc=0"), out
@@ -299,8 +310,7 @@ def test_clean_previews_refuses_non_root_and_frees_space(installed_vm):
 
     # orphans: never automatic. Make a real one, check it is listed, declined without --yes, removed with it
     _, out = ga.exec("pacman -S --asdeps --noconfirm tree >/tmp/tree.log 2>&1; echo rc=$?; pacman -Qdtq | grep -x tree", timeout=300, check=False)
-    if "rc=0" not in out:
-        pytest.skip(f"could not install a test orphan (repo sync db unavailable?): {out[-300:]}")
+    assert "rc=0" in out, f"could not install a test orphan: {out[-300:]}"
     assert "tree" in _clean_preview(ga, "orphans")["orphans"]["items"]
     _, out = ga.exec("samurai clean orphans; echo rc=$?; pacman -Q tree", check=False)
     assert "declined orphans" in out and "rc=1" in out and "tree " in out, f"orphans must need confirmation: {out}"
@@ -356,6 +366,7 @@ def test_fix_lock_keyring_dkms_and_age_checks(installed_vm):
     _, after = ga.exec("snapper -c root list --columns number | wc -l", check=False)
     assert int(after.strip()) == int(before.strip()) + 1, (before, after)
     # the rebuilt keyring really verifies signatures: install a package through it
+    _need_sync_dbs(ga)
     _, out = ga.exec("pacman -S --noconfirm --needed tree >/tmp/tree2.log 2>&1; echo rc=$?; tail -2 /tmp/tree2.log", timeout=300, check=False)
     assert "rc=0" in out, f"signature-checked install failed after the keyring reset: {out}"
     ga.exec("pacman -Rns --noconfirm tree >/dev/null 2>&1", check=False)
@@ -434,6 +445,7 @@ def test_zz_boot_entries_follow_kernels_and_the_machine_boots(installed_vm):
     # a foreign entry must survive everything below
     ga.exec(f"printf '\\n/Keep Me\\n    protocol: efi_chainload\\n    path: boot():/EFI/none.efi\\n' >> {conf}", check=False)
     # installing a kernel: the pacman hook adds its entry
+    _need_sync_dbs(ga)
     _, out = ga.exec("pacman -S --noconfirm linux-lts >/tmp/lts.log 2>&1; echo rc=$?; grep -i 'boot entr' /tmp/lts.log; tail -5 /tmp/lts.log", timeout=1200, check=False)
     assert "rc=0" in out and "Updating Samurai OS boot entries" in out, out
     _, menu = ga.exec(f"cat {conf}", check=False)
