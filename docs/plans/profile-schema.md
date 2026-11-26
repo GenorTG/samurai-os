@@ -148,13 +148,17 @@ and both firewalls. Anything else a profile asks for (other browsers, AI CLIs, O
 is **deferred**: the install succeeds and writes the exact command to
 `/var/lib/samurai/firstboot-notes` (also shown in `/etc/motd`). A front-end should mark those as
 "installs after first boot" when offline: `samurai-profile-plan --json` flags them with
-`"offline": false`.
+`"offline": false`. With `--offline` the planner moves such choices into `deferred` itself.
 
 ## `samurai-profile-plan --json`
 ```json
 {"packages": [{"name": "steam", "group": "gaming", "offline": true}],
  "services": ["docker.socket"],
+ "user_services": [],
  "user_groups": ["docker"],
  "deferred": [{"id": "aider", "command": "samurai apps install aider", "reason": "per-user installer"}]}
 ```
-Options: `--nvidia`, `--amd` (GPU-dependent packages), `--catalog DIR`.
+Options: `--offline`, `--nvidia`, `--amd` (GPU-dependent packages), `--catalog DIR`.
+`--list browsers|ai-cli` prints the selectable catalog ids with names; `--offline-closure` prints
+the packages the offline ISO carries for these choices. `"offline"` says whether the offline medium
+carries a package (extra `packages.install` names are assumed to be on it).
