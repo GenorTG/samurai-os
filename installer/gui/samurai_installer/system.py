@@ -15,6 +15,7 @@ ZONEINFO = pathlib.Path("/usr/share/zoneinfo")
 LOCALE_GEN = pathlib.Path("/etc/locale.gen")
 KEYMAPS = pathlib.Path("/usr/share/kbd/keymaps")
 KBD_MODEL_MAP = pathlib.Path("/usr/share/systemd/kbd-model-map")
+XKB_SYMBOLS = pathlib.Path("/usr/share/X11/xkb/symbols")
 FLAVOR_FILE = pathlib.Path("/etc/samurai-iso-flavor")
 LIVE_MOUNT = "/run/archiso/bootmnt"
 LSBLK_COLUMNS = "NAME,PATH,SIZE,TYPE,MODEL,TRAN,RM,RO,FSTYPE,LABEL,PARTTYPENAME,MOUNTPOINTS"
@@ -192,11 +193,14 @@ def parse_xkb_map(model_map: str) -> dict[str, tuple[str, str]]:
 
 
 def xkb_for(keymap: str) -> tuple[str, str] | None:
+    """The same mapping samurai-postinstall applies to the installed system."""
     try:
         table = parse_xkb_map(KBD_MODEL_MAP.read_text())
     except OSError:
         table = {}
-    return table.get(keymap)
+    if keymap in table:
+        return table[keymap]
+    return (keymap, "") if (XKB_SYMBOLS / keymap).is_file() else None
 
 
 def iso_flavor() -> str:

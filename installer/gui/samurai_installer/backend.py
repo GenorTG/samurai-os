@@ -159,6 +159,10 @@ class Backend(QObject):
             return "This desktop is downloaded during the install: connect to a network."
         return ""
 
+    @Slot(str, result=bool)
+    def hasGraphicalLayout(self, keymap: str) -> bool:
+        return "live" not in self._facts or system.xkb_for(keymap) is not None
+
     @Slot(str)
     def applyKeyboard(self, keymap: str) -> None:
         """Switch the live session to the chosen layout, so passwords typed here match

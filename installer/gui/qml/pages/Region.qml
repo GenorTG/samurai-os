@@ -44,6 +44,13 @@ ColumnLayout {
             }
         }
     }
+    Notice {
+        Layout.rightMargin: 12
+        visible: !installer.hasGraphicalLayout(installer.choices.keyboard)
+        kind: "warning"
+        text: "“" + installer.choices.keyboard + "” is a console-only layout: the login screen and "
+              + "desktop would use US. Passwords with other symbols may not work there."
+    }
     TextField {
         Layout.fillWidth: true
         Layout.rightMargin: 12

@@ -212,6 +212,28 @@ done
 
 ### desktop (spec 14: files and defaults come from samurai-settings-kde) ###
 log "desktop: $DESKTOP"
+# The login screen and the desktop follow the chosen keyboard too (vconsole.conf
+# only covers the console): without this a password typed in another layout at
+# install time cannot be typed at the first login.
+if [ "$DESKTOP" != none ]; then
+    XKB_LAYOUT=""; XKB_VARIANT=""
+    read -r XKB_LAYOUT XKB_VARIANT < <(awk -v k="$KB" '$1==k {print $2, $4; exit}' \
+        /usr/share/systemd/kbd-model-map 2>/dev/null) || true
+    # names the table does not list ("pl") match an XKB layout of the same name
+    [ -n "$XKB_LAYOUT" ] || [ ! -f "/usr/share/X11/xkb/symbols/$KB" ] || XKB_LAYOUT=$KB
+    [ "$XKB_VARIANT" != - ] || XKB_VARIANT=""
+    if [ -n "$XKB_LAYOUT" ]; then
+        install -d -m 755 /etc/X11/xorg.conf.d /etc/xdg
+        printf 'Section "InputClass"\n    Identifier "system-keyboard"\n    MatchIsKeyboard "on"\n    Option "XkbLayout" "%s"\n    Option "XkbVariant" "%s"\nEndSection\n' \
+            "$XKB_LAYOUT" "$XKB_VARIANT" > /etc/X11/xorg.conf.d/00-keyboard.conf
+        printf '[Layout]\nLayoutList=%s\nVariantList=%s\nUse=true\n' \
+            "$XKB_LAYOUT" "$XKB_VARIANT" > /etc/xdg/kxkbrc
+        chmod 644 /etc/X11/xorg.conf.d/00-keyboard.conf /etc/xdg/kxkbrc
+        log "keyboard: graphical layout $XKB_LAYOUT ${XKB_VARIANT}"
+    else
+        log "WARNING: keyboard: no graphical layout known for keymap $KB (login screen stays us)"
+    fi
+fi
 if [ "$DESKTOP" = kde ]; then
     samurai-kde-defaults apply --theme "$KDE_THEME" --effects "$KDE_EFFECTS" --widgets "$KDE_WIDGETS" \
         || fatal "cannot apply the KDE defaults" 16
