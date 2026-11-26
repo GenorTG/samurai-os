@@ -73,7 +73,7 @@ def test_offline_install(mirror):
         code, out = ga2.exec(
             "systemctl is-active sddm; "
             "pacman -Q plasma-meta sddm networkmanager linux-cachyos linux-zen 2>&1; "
-            "grep LookAndFeelPackage /etc/skel/.config/kdeglobals; "
+            "sed -n '/^\\[KDE\\]/,/^$/p' /etc/xdg/kdeglobals; "
             "systemctl --failed --no-legend | wc -l; "
             "findmnt -no FSTYPE /; "
             "pacman -Q linux 2>/dev/null | wc -l"

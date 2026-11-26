@@ -19,6 +19,30 @@ guided installer and CLI/toolbox. VM validation runs on genorbox1. Site: <https:
 - 2026-11-26: samurai-tools **0.4.0-15** (adds `boot get/set`) on testing (VM upgrade 14->15 passed) and stable;
   base packages unchanged (published files reused). ISO release v0.0.1.75 still carries 0.4.0-14 live tools.
 
+## Defaults lane (branch `feat/defaults`, 2026-11-26; pushed, not merged, not published)
+- New packages: `samurai-base`, `-desktop-base`, `-desktop-kde`, `-settings-{system,shell,dev,kde}`,
+  `-wine`, `-proton-ge` (11-14), `-python310…313`, `-miniforge`. Upstream checksums pinned.
+  `ci/build-packages.sh` is shared by `build-repo.sh` (signed) and `build-pkgs.sh` (unsigned tests).
+- Profile schema `docs/plans/profile-schema.md`; selection logic only in `installer/samurai-profile-plan`;
+  one pacman transaction in postinstall; Chaotic-AUR enabled with pinned key; offline ISO ≈6.7 GB
+  (was ≈4.6). Inventory: `docs/plans/defaults-inventory.md`.
+- Light-theme bug (seen by the GUI lane): main's postinstall puts `LookAndFeelPackage` under
+  `[General]` in skel; KDE reads `[KDE]`. Fixed here (system `/etc/xdg/kdeglobals` only). **main and
+  `feat/gui` still carry the bug** until this branch is merged; on conflict keep this postinstall.
+- Verified 2026-11-26 on `build/defaults-2` offline ISO (HEAD 260487d, sha256 `f6dd45e4…`):
+  unit 184 passed, 2 skipped (no shellcheck on host); `test_defaults.py` PASS (12m49s, no package overlay, ColorScheme=BreezeDark);
+  `test_attended.py` PASS (4m18s). Not re-run on this branch: smoke, update, rollback, daily, kde, offline,
+  channel, health, toolbox_pkg, update_archive; online flavor not buildable before publishing.
+- **Release order (required):** bump `samurai-tools` pkgrel (catalog changed), publish the repo, then
+  build ISOs. Until the new packages are published, online installs of this branch fail.
+- Existing installs do not get the new defaults by `samurai update`: they lack `[chaotic-aur]` and
+  nothing depends on the new metas (needs an update intervention).
+- Gaps: Otto/Scratchy (no licence on KDE Store), Miniconda (Anaconda terms), ArtCraft launcher (brand
+  licence), gpu-unlock/chwd/CUDA toggle, Plymouth + samurai-branding, Firefox policy/security
+  settings (spec 09), welcome app, version-bump CI for repackages, `samurai-gaming` meta (not made:
+  the installer installs items individually), Heroic system-wide Proton unverified, Aider/Cursor CLI
+  are first-boot notes only.
+
 ## State (2026-11-22)
 - Specs 00–14 and ADR-0001…0008 remain the product source of truth.
 - M0–M4 complete (ISO identity; LUKS2/btrfs installer; update/notifier; rescue rollback; guided installer).

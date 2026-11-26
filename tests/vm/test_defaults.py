@@ -185,7 +185,7 @@ def test_default_kde_system(mirror):
 
         # KDE system defaults (spec 14)
         c.run("kde-files", "samurai-kde-defaults status; cat /etc/xdg/kwinrc /etc/xdg/kdeglobals /etc/xdg/baloofilerc "
-              "/etc/xdg/konsolerc /etc/skel/.config/kdeglobals; ls /usr/lib/sddm/sddm.conf.d/",
+              "/etc/xdg/konsolerc; ls /usr/lib/sddm/sddm.conf.d/",
               ["blurEnabled=false", "AnimationDurationFactor=0", "org.kde.breezedark.desktop",
                "only basic indexing=true", "DefaultProfile=Samurai.profile", "10-samurai-kde.conf"])
 
@@ -231,8 +231,8 @@ def test_default_kde_system(mirror):
         c.run("effects-live", env + " qdbus6 org.kde.KWin /Effects org.kde.kwin.Effects.loadedEffects",
               ["overview"], absent=["blur", "slidingpopups", "squash"])
         c.run("session-health", "systemctl --failed --no-legend | wc -l; "
-              f"pgrep -u {USER} -x kwin_wayland >/dev/null && echo KWIN-OK; "
-              "wpctl --version >/dev/null; echo", ["KWIN-OK"])
+              f"pgrep -u {USER} -x kwin_wayland >/dev/null && echo KWIN-OK", ["KWIN-OK"])
+        c.run("audio", env + " wpctl status | head -4", ["PipeWire"], timeout=60)
         c.ga.exec("sleep 10", timeout=40)
         vm.screendump("defaults-01-desktop")
         # started by the user's systemd manager: the real session environment
