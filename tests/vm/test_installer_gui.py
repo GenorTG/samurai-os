@@ -147,10 +147,15 @@ def test_graphical_install():
                               "stat -c '%a %U' /var/lib/samurai/install-profile.toml; "
                               "grep -c password_hash /var/lib/samurai/install-profile.toml; "
                               "tail -n 1 /var/log/samurai/install.log; "
-                              "ls /usr/lib/samurai-installer 2>/dev/null | wc -l; "
+                              "echo LIVE-ONLY-FILES=$(ls /usr/lib/samurai-installer /usr/local/bin/samurai-installer* "
+                              "2>/dev/null | wc -l); "
+                              "stat -c 'MODE-%n-%a' /home /usr /etc /var/log; "
+                              "cat /etc/xdg/kxkbrc; "
                               "systemctl --failed --no-legend")
         print(installed)
-        for text in ("samurai\n", "/bin/fish", "btrfs", "LUKS-OK", "active", "600 root"):
+        for text in ("samurai\n", "/bin/fish", "btrfs", "LUKS-OK", "active", "600 root",
+                     "LIVE-ONLY-FILES=0", "LayoutList=us", "MODE-/home-755", "MODE-/usr-755",
+                     "MODE-/etc-755", "MODE-/var/log-755"):
             assert text in installed, f"{text!r} missing:\n{installed}"
         verify = guest(vm, f"h=$(getent shadow {USER} | cut -d: -f2); salt=$(echo \"$h\" | cut -d'$' -f3); "
                            f"[ \"$(echo {PASSWORD} | openssl passwd -6 -salt \"$salt\" -stdin)\" = \"$h\" ] "
