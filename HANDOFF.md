@@ -1,9 +1,7 @@
 # HANDOFF — samurai-os
-
 ## Mission
 Personal Arch-based distro: upstream Arch repos unchanged, CachyOS below Arch, signed Samurai repo,
 guided installer and CLI/toolbox. VM validation runs on genorbox1. Site: <https://genortg.github.io/samurai-os/>.
-
 ## Released (2026-11-25)
 - Packages: `x86_64` (stable) and `x86_64-testing` on `GenorTG/samurai-repo`, built from 562ee45+ and published
   locally with `ci/build-repo.sh build/repo` + `ci/publish-repo.sh build/repo <channel>` (stable = the exact
@@ -14,8 +12,7 @@ guided installer and CLI/toolbox. VM validation runs on genorbox1. Site: <https:
   `release-iso.sh` needs `gh` on PATH (pass `--setenv=PATH` under systemd-run).
   All 4 ISO asset digests match the signed SHA256SUMS (checked via the GitHub API).
 - Website live (Genor OK 2026-11-26): <https://genortg.github.io/samurai-os/>, Pages from `pages.yml` on changes under
-  `site/`. Keep its claims true (feature list, `samurai help`, VM test count, signing) whenever a release ships.
-
+  `site/` (washi look from Krzy-Kut website). Keep its claims true (feature list, `samurai help`, VM test count, signing) whenever a release ships.
 - 2026-11-26: samurai-tools **0.4.0-15** (adds `boot get/set`) on testing (VM upgrade 14->15 passed) and stable;
   base packages unchanged (published files reused). ISO release v0.0.1.75 still carries 0.4.0-14 live tools.
 
@@ -44,8 +41,7 @@ guided installer and CLI/toolbox. VM validation runs on genorbox1. Site: <https:
   are first-boot notes only.
 
 ## State (2026-11-22)
-- Specs 00–14 and ADR-0001…0008 remain the product source of truth.
-- M0–M4 complete (ISO identity; LUKS2/btrfs installer; update/notifier; rescue rollback; guided installer).
+- Specs 00–14 and the ADRs remain the product source of truth. M0–M4 complete (ISO identity; LUKS2/btrfs installer; update/notifier; rescue rollback; guided installer).
 - **Two ISO flavors** (`SAMURAI_ISO_FLAVOR=offline|online ci/build-iso.sh <fresh-abs-dir>`), renamed
   `samurai-os-<date>-<flavor>-x86_64.iso`. Online ≈1.3 GB (netinstall). Offline bakes a **local pacman
   repo** (`/usr/share/samurai/pkg-cache/samurai-offline.db` + packages, `repo-add` at build time).
@@ -63,12 +59,11 @@ guided installer and CLI/toolbox. VM validation runs on genorbox1. Site: <https:
   catalog; online installs apply them, offline installs write a first-boot note. 51 unit tests in
   `tests/unit/`. Packaged in samurai-tools 0.2.0 (`ci/build-repo.sh` stages it + catalogs).
 - **Security default**: firewalld on (zone public, only dhcpv6-client; ssh only with ssh_server).
+  NetworkManager desktops no longer also enable systemd-networkd.
 - KDE day-one set adds firefox, PipeWire, spectacle, noto fonts/emoji, flatpak, power-profiles-daemon,
   bluez. `[multilib]` enabled in `iso/pacman.conf` (copied to targets).
-- NetworkManager desktops no longer also enable systemd-networkd.
 - Release tooling: `ci/release-iso.sh <online.iso> <offline.iso> [--publish]` → `dist/v<VERSION>/`
   (offline split in 1900 MiB parts, SHA256SUMS incl. joined ISO, notes; `--publish` tags + uploads).
-- Site: `site/` (washi look from Krzy-Kut website), deployed by `.github/workflows/pages.yml`.
 - New VM scenario `tests/vm/test_daily.py`: Plasma autologin session, Dolphin/Konsole/Kate,
   ark zip round trip, network/HTTPS, firewall, PipeWire, snapshot, full `samurai update`, app
   install, reboot with zero failed units. `test_offline.py` forces NVIDIA and asserts DKMS for both kernels.
@@ -76,26 +71,22 @@ guided installer and CLI/toolbox. VM validation runs on genorbox1. Site: <https:
 ## Verification status
 - r15 ISOs + published stable repo (2026-11-25): live-ISO CLI, published-channel update (testing and stable,
   `tests/vm/test_channel.py`), smoke, update, rollback, daily, attended, kde, offline PASS.
-- r15 offline FAILED once under host load ~11-25 (no login 300 s after the post-install reboot; squashfs
-  errors in the log are just the ejected live disc); cause not captured. Then 2/2 PASS at lower load. The test
-  now waits 600 s and screendumps `offline-boot-failed` if it recurs. Never run a QMP watcher beside the
-  harness: QMP takes one client and `makefile()` keeps it open (blocked a run).
-- r14 ISOs (installer ee802dd, 2026-11-24): smoke, update, rollback, attended, daily, kde, offline PASS (`.tmp/regress.sh`).
-- r13 ISOs (installer 7573e08): offline, daily, kde, attended, update, rollback, smoke, archive PASS.
-- smoke: PASS (2 passed, 8m12s) after the mirrorlist assertion fix. All r13 scenarios are now green.
-- archive (test_update_archive, Arch 2026/08/15 snapshot): PASS on re-run (14m16s). Earlier rc=1 did not reproduce (likely transient archive/mirror fetch); test now keeps /tmp/install.log and dumps its tail on failure.
+- r15 offline failed once under load (then 2/2 PASS; waits 600 s). No QMP watcher beside the harness.
+- r13/r14 ISOs (2026-11-22…24): all scenarios PASS, including `test_update_archive` on re-run.
 
-## Graphical installer (feat/installer-gui, 2026-11-26)
-- Live ISO boots Plasma (user `live`, SDDM autologin, NetworkManager+iwd; tty2/serial keep root autologin;
-  boot entry "terminal only"). Desktop icons: graphical install, terminal install, rescue.
-- `installer/gui` (PySide6/QML, ADR-0009, needs Genor's OK: replaces Calamares) writes only the profile;
+## Graphical installer (branch `feat/installer-gui`, 2026-11-26; pushed, not merged, not published)
+- Live ISO boots Plasma (user `live`, Wayland SDDM autologin, NetworkManager+iwd; tty2/serial keep root;
+  "terminal only" boot entry). Desktop icons: graphical install, terminal install, rescue.
+- `installer/gui` (PySide6/QML; ADR-0009 replaces Calamares, **needs Genor's OK**) writes only the profile;
   root helper runs `samurai-install --profile --yes`, passphrase on stdin. Live files in
   `/usr/lib/samurai-installer/` (copied by `ci/build-iso.sh`).
-- Backend changes: secrets read verbatim (`IFS= read`); desktop installs now set the login-screen/Plasma
-  keyboard layout from the console keymap.
-- Tests: `tests/unit/test_gui_installer.py`, `tests/gui/*.py` (Arch container), `tests/vm/test_installer_gui.py`.
-- Not done: Expert mode, geo-IP, size estimate, chwd/CUDA/gpu-unlock page, alongside/manual disk layouts,
-  UI translation, NVIDIA live boot entry, `sshd` toggle in a live menu.
+- Backend: secrets read verbatim (`IFS= read`); desktop installs set the login-screen/Plasma keyboard
+  layout from the console keymap (only `us` verified in a VM; mapping tested in a container).
+- Verified on a zstd-compressed local-package offline test ISO (`build/gui-2`, installer code = f99e636):
+  `test_installer_gui.py` PASS (8m12s), `test_smoke.py` + `test_attended.py` 3 passed (10m07s).
+- Open: Expert mode, geo-IP, size estimate, chwd/CUDA/gpu-unlock, dual-boot/manual disks, translations,
+  NVIDIA live entry, browser on the live medium. Online ISO has Plasma now: watch the 2 GiB asset cap.
+  `site/index.html` still announces Calamares (change with the release).
 
 ## Next
 1. M5 (Rust CLI): `toolbox/` workspace (`samurai-core` lib, `samurai-cli` bin, std-only; 141 tests, clippy+fmt clean). samurai-tools **0.4.0-15** is `arch=x86_64`, `build()` runs cargo (build-repo.sh stages `toolbox/`, installs `rust`), `options=(!debug)`; `/usr/local/bin/samurai` is the Rust binary, executors stay shell. Native in Rust: dispatcher, `status`, `health`, `diag`, `clean`, `fix`, `mirrors`, `boot sync`, `kernel`. Shared `health::system::System` trait (read/exists/list_dir/run) + `Fake` for unit tests; all commands are fixed-argv (no shell).
