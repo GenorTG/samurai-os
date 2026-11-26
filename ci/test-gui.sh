@@ -34,21 +34,33 @@ chmod +x /tmp/pkexec
 useradd -m tester
 mkdir -p /tmp/shots && chown tester /tmp/shots
 failed=0
-for page in overview health apps cleanup kernels updates snapshots diagnostics; do
-    rc=0
+run_case() {   # $1 name, $2 delay of the fake CLI, then toolbox arguments
+    local name=$1 delay=$2 rc=0
+    shift 2
     su tester -c "cd /tmp && QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
         QT_QPA_PLATFORMTHEME=kde XDG_CURRENT_DESKTOP=KDE LANG=C.UTF-8 QT_FORCE_STDERR_LOGGING=1 \
-        timeout 60 /tmp/build/samurai-toolbox --page $page --cli /src/tests/gui/fake-samurai \
-        --pkexec /tmp/pkexec --grab /tmp/shots" >"/tmp/$page.log" 2>&1 || rc=$?
-    cp "/tmp/$page.log" /out/
+        FAKE_SAMURAI_DELAY=$delay timeout 60 /tmp/build/samurai-toolbox $* \
+        --cli /src/tests/gui/fake-samurai --pkexec /tmp/pkexec --grab /tmp/shots" \
+        >"/tmp/$name.log" 2>&1 || rc=$?
+    cp "/tmp/$name.log" /out/
     # Kirigami's PageRow creates every pushed page under a non-visual parent and warns once
-    grep -v 'Created graphical object was not placed in the graphics scene' "/tmp/$page.log" \
-        >"/tmp/$page.filtered" || true
-    if [ "$rc" != 0 ] || grep -E 'qrc:|\.qml:[0-9]+|TypeError|ReferenceError' "/tmp/$page.filtered"; then
-        echo "FAIL $page (exit $rc)"; cat "/tmp/$page.log"; failed=1
+    grep -v 'Created graphical object was not placed in the graphics scene' "/tmp/$name.log" \
+        >"/tmp/$name.filtered" || true
+    if [ "$rc" != 0 ] || grep -E 'qrc:|\.qml:[0-9]+|TypeError|ReferenceError' "/tmp/$name.filtered"; then
+        echo "FAIL $name (exit $rc)"; cat "/tmp/$name.log"; failed=1
     else
-        echo "ok   $page"
+        echo "ok   $name"
     fi
+}
+pages="overview health apps cleanup kernels updates snapshots diagnostics"
+for page in $pages; do
+    run_case "$page" 0 --page "$page"
+done
+# leave each page while its queries are still running: late answers must not hit a destroyed page
+for page in $pages; do
+    next=health
+    [ "$page" != health ] || next=overview
+    run_case "$page-$next" 1.2 --page "$page" --then "$next"
 done
 cp /tmp/shots/*.png /out/ || true
 lint=/usr/lib/qt6/bin/qmllint

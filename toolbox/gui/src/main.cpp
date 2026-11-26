@@ -70,7 +70,9 @@ int main(int argc, char **argv)
     const QCommandLineOption cli(QStringLiteral("cli"), {}, QStringLiteral("path"));
     const QCommandLineOption pkexec(QStringLiteral("pkexec"), {}, QStringLiteral("path"));
     const QCommandLineOption grab(QStringLiteral("grab"), {}, QStringLiteral("dir"));
-    parser.addOptions({cli, pkexec, grab});
+    // switch to another page while the first one is still waiting for its answers
+    const QCommandLineOption then(QStringLiteral("then"), {}, QStringLiteral("name"));
+    parser.addOptions({cli, pkexec, grab, then});
 #endif
     parser.process(app);
 
@@ -104,7 +106,14 @@ int main(int argc, char **argv)
     if (parser.isSet(grab)) {
         auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().constFirst());
         const QDir dir(parser.value(grab));
-        const QString name = parser.value(page);
+        QString name = parser.value(page);
+        if (parser.isSet(then)) {
+            const QString next = parser.value(then);
+            name += QLatin1Char('-') + next;
+            QTimer::singleShot(300, window, [window, next] {
+                window->setProperty("currentPage", next);
+            });
+        }
         QTimer::singleShot(3500, &app, [window, dir, name] {
             const bool ok = window && window->grabWindow().save(dir.filePath(name + ".png"));
             QCoreApplication::exit(ok ? 0 : 1);

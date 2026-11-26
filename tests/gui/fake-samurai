@@ -10,10 +10,12 @@ import os
 import pathlib
 import subprocess
 import sys
+import time
 
 HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parents[1]
 a = sys.argv[1:]
+time.sleep(float(os.environ.get("FAKE_SAMURAI_DELAY", "0")))
 
 
 def out(obj, code=0):
