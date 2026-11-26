@@ -85,8 +85,8 @@ guided installer and CLI/toolbox. VM validation runs on genorbox1. Site: <https:
 - Verified on a zstd-compressed local-package offline test ISO (`build/gui-2`, installer code = f99e636):
   `test_installer_gui.py` PASS (8m12s), `test_smoke.py` + `test_attended.py` 3 passed (10m07s).
 - Open: Expert mode, geo-IP, size estimate, chwd/CUDA/gpu-unlock, dual-boot/manual disks, translations,
-  NVIDIA live entry, browser on the live medium. Online ISO has Plasma now: watch the 2 GiB asset cap.
-  `site/index.html` still announces Calamares (change with the release).
+  NVIDIA live entry, live browser, `site/` still says Calamares. xz ISOs with Plasma: online 1.73 GiB
+  (2 GiB asset cap), offline 7.18 GiB.
 
 ## Next
 1. M5 (Rust CLI): `toolbox/` workspace (`samurai-core` lib, `samurai-cli` bin, std-only; 141 tests, clippy+fmt clean). samurai-tools **0.4.0-15** is `arch=x86_64`, `build()` runs cargo (build-repo.sh stages `toolbox/`, installs `rust`), `options=(!debug)`; `/usr/local/bin/samurai` is the Rust binary, executors stay shell. Native in Rust: dispatcher, `status`, `health`, `diag`, `clean`, `fix`, `mirrors`, `boot sync`, `kernel`. Shared `health::system::System` trait (read/exists/list_dir/run) + `Fake` for unit tests; all commands are fixed-argv (no shell).
