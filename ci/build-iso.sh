@@ -132,7 +132,7 @@ sed -i "s|^ParallelDownloads.*|ParallelDownloads = 2|" /etc/pacman.conf
 # CachyOS keyring: the package cannot vouch for itself, so it is fetched over
 # HTTPS from the four mirrors and its PRIMARY key fingerprint is pinned.
 CACHYOS_FPR=882DCFE48E2051D48E2562ABF3B607488DB35A47
-for s in nl aur mirror build; do
+for s in mirror aur build nl; do
     curl -fsSL --retry 4 -o /tmp/ck.db "https://$s.cachyos.org/repo/x86_64/cachyos/cachyos.db" || continue
     kr=$(bsdtar -tf /tmp/ck.db | grep -o "^cachyos-keyring-[^/]*" | head -1) || continue
     curl -fsSL --retry 4 -o /tmp/ck.pkg.tar.zst "https://$s.cachyos.org/repo/x86_64/cachyos/$kr-any.pkg.tar.zst" && break
@@ -168,10 +168,10 @@ cat >> /etc/pacman.conf <<REPOS
 Include = /etc/pacman.d/mirrorlist
 
 [cachyos]
-Server = https://nl.cachyos.org/repo/\$arch/\$repo
 Server = https://aur.cachyos.org/repo/\$arch/\$repo
 Server = https://mirror.cachyos.org/repo/\$arch/\$repo
 Server = https://build.cachyos.org/repo/\$arch/\$repo
+Server = https://nl.cachyos.org/repo/\$arch/\$repo
 
 [chaotic-aur]
 Include = /etc/pacman.d/chaotic-mirrorlist
@@ -276,7 +276,7 @@ if compgen -G "/out/offline-pkgs/cachyos-keyring-*.pkg.tar.zst" >/dev/null; then
 else
     # online flavor: no offline cache, fetch the keyring through the same
     # 4-server fallback the offline download uses
-    for s in nl aur mirror build; do
+    for s in mirror aur build nl; do
         curl -fsSL --retry 4 -o /tmp/ck.db "https://$s.cachyos.org/repo/x86_64/cachyos/cachyos.db" || continue
         kr=$(bsdtar -tf /tmp/ck.db | grep -o "^cachyos-keyring-[^/]*" | head -1) || continue
         curl -fsSL --retry 4 -o /tmp/ck.pkg.tar.zst "https://$s.cachyos.org/repo/x86_64/cachyos/$kr-any.pkg.tar.zst" && break
