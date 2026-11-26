@@ -79,3 +79,5 @@ See `docs/specs/01-ARCHITECTURE.md` "Source layout". Today only `docs/`, `script
   `/usr/local/bin/samurai-*` into the installed system.
 - VM tests must keep draining the serial socket: with nobody reading, the guest blocks on the serial
   console (PID 1 hung in `tty_wait_until_sent` mid-reboot, `systemctl` timing out).
+- Plasma autologin needs `DisplayServer=wayland` in SDDM: with the default X11 server, stopping it right
+  after the autologin kills the new session. Live keyboard changes need `kwriteconfig6 --notify`.
