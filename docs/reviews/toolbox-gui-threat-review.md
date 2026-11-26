@@ -10,7 +10,7 @@ samurai-toolbox (user)  --read-->  /usr/local/bin/samurai ... --json          (n
                                       └─ validate ─ execv /usr/local/bin/samurai <fixed argv>
 ```
 - The GUI never runs as root (it refuses to start with uid 0).
-- `gui-helper` is the only program the toolbox runs through pkexec. About 300 lines of C++, standard
+- `gui-helper` is the only program the toolbox runs through pkexec. About 490 lines of C++ (`helper/` + `common/`), standard
   library only (no Qt), PIE + BIND_NOW from Arch's build flags.
 - One table (`common/operations.cpp`) lists every operation: verb, argument validator, fixed argv.
 - One polkit action per verb (`org.samurai.toolbox.<verb>`), selected by pkexec's
