@@ -472,6 +472,20 @@ def test_zz_boot_entries_follow_kernels_and_the_machine_boots(installed_vm):
     assert "now the default" in out and "rc=0" in out, out
     _, menu = ga.exec(f"cat {conf}", check=False)
     assert next(l for l in menu.splitlines() if l.startswith("/")) == "/Samurai OS (linux-zen)", menu
+    # boot settings: refused for root parameters and normal users; applied ones show up after reboot
+    _, out = ga.exec("samurai boot get; echo rc=$?", check=False)
+    assert "bootloader: Limine" in out and "default kernel: linux-zen" in out and "rc=0" in out, out
+    _, before = ga.exec(f"sha256sum < {conf}", check=False)
+    for bad in ("add root=/dev/null", "remove rd.luks.uuid", "add 'a b'"):
+        _, out = ga.exec(f"samurai boot set param {bad} 2>&1; echo rc=$?", check=False)
+        assert "rc=1" in out, (bad, out)
+    _, out = ga.exec("su samurai -c 'samurai boot set timeout 1' 2>&1; echo rc=$?", check=False)
+    assert "needs root" in out and "rc=1" in out, out
+    _, after = ga.exec(f"sha256sum < {conf}", check=False)
+    assert before == after, "a refused change modified the menu"
+    _, out = ga.exec("samurai boot set timeout 7 && samurai boot set param add samurai.vmtest=1 && "
+                     "samurai boot set param add samurai.vmtest=2 && samurai boot get; echo rc=$?", check=False)
+    assert "timeout: 7" in out and "samurai.vmtest=2" in out and "vmtest=1" not in out and "rc=0" in out, out
     ga.exec("sync", check=False)   # vm.reboot() is a hard reset
     ga.close()
     vm.reboot()
@@ -479,6 +493,10 @@ def test_zz_boot_entries_follow_kernels_and_the_machine_boots(installed_vm):
     ga = vm.qga()
     _, out = ga.exec("uname -r; systemctl --failed --no-legend | head -5", check=False)
     assert "zen" in out.splitlines()[0], f"did not boot the chosen default kernel: {out}"
+    _, cmdline = ga.exec("cat /proc/cmdline", check=False)
+    assert "samurai.vmtest=2" in cmdline.split(), f"parameter did not reach the kernel: {cmdline}"
+    _, out = ga.exec("samurai boot set param remove samurai.vmtest; samurai boot get", check=False)
+    assert "samurai.vmtest" not in out, out
     # now that zen runs, lts can go; zen (running) cannot
     _, out = ga.exec("samurai kernel remove linux-zen 2>&1; echo rc=$?", check=False)
     assert "running kernel" in out and "rc=1" in out, out

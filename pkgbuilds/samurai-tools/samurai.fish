@@ -127,7 +127,9 @@ complete -c samurai -n '__fish_seen_subcommand_from keyring' -l yes -d 'approve 
 complete -c samurai -n '__fish_seen_subcommand_from mirrors' -a 'status refresh'
 
 # boot
-complete -c samurai -n '__fish_seen_subcommand_from boot' -a 'sync'
+complete -c samurai -n '__fish_seen_subcommand_from boot; and not __fish_seen_subcommand_from sync get set' -a 'sync get set'
+complete -c samurai -n '__fish_seen_subcommand_from set; and not __fish_seen_subcommand_from timeout param' -a 'timeout param'
+complete -c samurai -n '__fish_seen_subcommand_from param; and not __fish_seen_subcommand_from add remove' -a 'add remove'
 complete -c samurai -n '__fish_seen_subcommand_from sync' -l check -d 'report only'
 
 # kernel

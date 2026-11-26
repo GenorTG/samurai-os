@@ -1,4 +1,4 @@
-//! `samurai boot sync`: keep the boot menu in step with the installed kernels.
+//! `samurai boot`: keep the boot menu in step with the installed kernels.
 //!
 //! The installer writes entries once. Without this, a kernel installed later has no entry and a
 //! removed one leaves a dead (possibly default) entry. A pacman hook runs `sync` after every
@@ -12,6 +12,8 @@
 //! - the previous Limine config is kept as `.bak`.
 
 use crate::health::system::System;
+
+pub mod settings;
 
 pub const LIMINE_CONF: &str = "/boot/limine/limine.conf";
 pub const SD_LOADER: &str = "/boot/loader/loader.conf";
@@ -430,30 +432,48 @@ pub fn set_default(sys: &dyn System, kernel: &str) -> Result<String, String> {
     Err("choosing the default is only supported for Limine and systemd-boot".into())
 }
 
-pub const USAGE: &str = "usage: samurai boot sync [--check]
+pub const USAGE: &str = "usage: samurai boot <sync|get|set> ...
 
-Make the boot menu match the installed kernels (Limine, systemd-boot or GRUB). A pacman hook
-runs this after kernel transactions. Only Samurai OS entries are touched.
+  sync [--check]            make the boot menu match the installed kernels (a pacman hook runs
+                            this after kernel transactions); --check only reports, exit 1 if stale
+  get                       bootloader, menu timeout, default kernel, kernel parameters
+  set timeout <seconds>     menu timeout, 0 to 60
+  set param add <p>         add a kernel parameter (replaces the same name; console= repeats)
+  set param remove <p>      remove it (name removes all values, name=value only that one)
 
-  --check     report what would change; exit 1 when the menu is out of sync
+Only Samurai OS entries are touched, previous files are kept as .bak, and parameters that find or
+unlock the root filesystem are refused. `set` works with Limine and systemd-boot. Needs root.
 
-Exit codes: 0 in sync or updated, 1 failed or (--check) out of sync, 2 usage error.
+Exit codes: 0 ok, 1 failed or (sync --check) out of sync, 2 usage error.
 ";
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Cmd {
     Sync { check: bool },
+    Get,
+    Set(settings::Change),
     Help,
 }
 
 pub fn parse_args(args: &[String]) -> Result<Cmd, String> {
+    use settings::Change;
     let words: Vec<&str> = args.iter().map(String::as_str).collect();
     match words.as_slice() {
         ["sync"] => Ok(Cmd::Sync { check: false }),
         ["sync", "--check"] => Ok(Cmd::Sync { check: true }),
-        ["-h" | "--help"] | ["sync", "-h" | "--help"] => Ok(Cmd::Help),
-        [] => Err("a command is required: sync".into()),
-        ["sync", other, ..] => Err(format!("unexpected argument: {other}")),
+        ["get"] => Ok(Cmd::Get),
+        ["set", "timeout", n] => n
+            .parse()
+            .map(|t| Cmd::Set(Change::Timeout(t)))
+            .map_err(|_| format!("not a number of seconds: {n}")),
+        ["set", "param", "add", p] => Ok(Cmd::Set(Change::Add((*p).into()))),
+        ["set", "param", "remove", p] => Ok(Cmd::Set(Change::Remove((*p).into()))),
+        ["-h" | "--help"] | ["sync" | "get" | "set", "-h" | "--help"] => Ok(Cmd::Help),
+        [] => Err("a command is required: sync, get or set".into()),
+        ["set", ..] => {
+            Err("expected: set timeout <seconds> | set param add|remove <parameter>".into())
+        }
+        ["sync" | "get", other, ..] => Err(format!("unexpected argument: {other}")),
         [other, ..] => Err(format!("unknown command: {other}")),
     }
 }

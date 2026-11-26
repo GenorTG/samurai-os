@@ -247,6 +247,23 @@ fn argument_parsing() {
         Ok(Cmd::Sync { check: true })
     );
     assert_eq!(parse_args(&a(&["--help"])), Ok(Cmd::Help));
+    assert_eq!(parse_args(&a(&["get"])), Ok(Cmd::Get));
+    assert_eq!(
+        parse_args(&a(&["set", "timeout", "5"])),
+        Ok(Cmd::Set(settings::Change::Timeout(5)))
+    );
+    assert_eq!(
+        parse_args(&a(&["set", "param", "add", "quiet"])),
+        Ok(Cmd::Set(settings::Change::Add("quiet".into())))
+    );
+    for bad in [
+        &["set"][..],
+        &["set", "timeout", "x"],
+        &["set", "param", "quiet"],
+        &["get", "x"],
+    ] {
+        assert!(parse_args(&a(bad)).is_err(), "{bad:?}");
+    }
     for bad in [
         &[][..],
         &["nope"],

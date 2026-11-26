@@ -31,7 +31,7 @@ commands
   clean       free disk space (preview first): samurai clean --help
   fix         targeted repairs: lock, keyring, dkms (samurai fix --help)
   mirrors     show or refresh the Arch mirrorlist (samurai mirrors --help)
-  boot        sync boot entries with installed kernels (samurai boot --help)
+  boot        boot entries, menu timeout, kernel parameters (samurai boot --help)
   kernel      list, install, remove, choose the default (samurai kernel --help)
   version     print the samurai-tools version
   help        this text

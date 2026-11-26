@@ -83,7 +83,7 @@ _samurai() {
             fi
             ;;
         boot)
-            mapfile -t COMPREPLY < <(compgen -W "sync --check --help" -- "$cur")
+            mapfile -t COMPREPLY < <(compgen -W "sync get set timeout param add remove --check --help" -- "$cur")
             ;;
         mirrors)
             mapfile -t COMPREPLY < <(compgen -W "status refresh --help" -- "$cur")

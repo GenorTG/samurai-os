@@ -215,17 +215,42 @@ fn run_kernel(args: &[String]) -> ExitCode {
 }
 
 fn run_boot(args: &[String]) -> ExitCode {
-    let check = match boot::parse_args(args) {
-        Ok(boot::Cmd::Help) => {
-            print!("{}", boot::USAGE);
-            return ExitCode::SUCCESS;
-        }
-        Ok(boot::Cmd::Sync { check }) => check,
+    use health::system::System;
+    let cmd = match boot::parse_args(args) {
+        Ok(c) => c,
         Err(e) => {
             eprintln!("samurai boot: {e}\n");
             eprint!("{}", boot::USAGE);
             return ExitCode::from(2);
         }
+    };
+    let report = |r: Result<String, String>| match r {
+        Ok(text) => {
+            println!("{}", text.trim_end());
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("samurai boot: {e}");
+            ExitCode::from(1)
+        }
+    };
+    let check = match cmd {
+        boot::Cmd::Help => {
+            print!("{}", boot::USAGE);
+            return ExitCode::SUCCESS;
+        }
+        boot::Cmd::Get => return report(boot::settings::get(&RealSystem)),
+        boot::Cmd::Set(change) => {
+            if RealSystem
+                .run("id", &["-u"])
+                .is_none_or(|o| o.stdout.trim() != "0")
+            {
+                eprintln!("samurai boot: set needs root (try: sudo samurai boot set ...)");
+                return ExitCode::from(1);
+            }
+            return report(boot::settings::set(&RealSystem, &change));
+        }
+        boot::Cmd::Sync { check } => check,
     };
     match boot::sync(&RealSystem, !check) {
         Ok(boot::Outcome::InSync) => {

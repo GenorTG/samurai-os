@@ -311,7 +311,7 @@ fn boot_usage_and_help() {
     }
     let o = run(&d, &["boot", "--help"]);
     assert_eq!(o.status.code(), Some(0));
-    assert!(out(&o).starts_with("usage: samurai boot sync"));
+    assert!(out(&o).starts_with("usage: samurai boot <sync|get|set>"));
 }
 
 #[test]
