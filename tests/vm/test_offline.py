@@ -37,7 +37,7 @@ def _offline_profile(mirror) -> None:
 
 def test_offline_install(mirror):
     _offline_profile(mirror)
-    vm = VM("offline-inst", iso=str(find_iso()), disk_size="20G", ram="6144", smp="4")
+    vm = VM("offline-inst", iso=str(find_iso()), disk_size="48G", ram="6144", smp="4")
     vm.start()
     try:
         vm.serial_connect()

@@ -48,6 +48,14 @@ def password_hash() -> str:  # not a test: helper returning the throwaway hash
     return out.stdout.strip()
 
 
+def without_software(profile: str) -> str:
+    """Drop the software choices ([kde], [gaming], [development], [network] and
+    browsers): CLI scenarios stay lean, and several of them need a desktop."""
+    out, n = re.subn(r"(?ms)^\[(?:kde|gaming|development|network)\]\n.*?(?=^\[|\Z)", "", profile)
+    assert n == 4, f"profile-default.toml lost a software section ({n}/4 found)"
+    return re.sub(r"(?m)^browsers = .*\n", "", out)
+
+
 class Mirror:
     """Serves tests/vm/assets/ to the VM at http://10.0.2.2:8966/."""
 
@@ -94,6 +102,7 @@ def mirror():
         # the plain linux kernel
         profile = _re.sub(r'kernels = \["linux-cachyos", "linux-zen"\]', 'kernels = ["linux"]', profile)
         assert 'kernels = ["linux"]' in profile, "conftest lost its kernels override"
+        profile = without_software(profile)
         tomllib.loads(profile)  # must parse: belt and braces against duplicate tables
         m.dir.mkdir(parents=True, exist_ok=True)
         (m.dir / "profile-test.toml").write_text(with_test_autokey(profile))

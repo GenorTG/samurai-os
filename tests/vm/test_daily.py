@@ -53,7 +53,7 @@ def _step(ga, name: str, cmd: str, expect: list[str], timeout: float = 300) -> s
 
 def test_daily_driver(mirror):
     _profile(mirror)
-    vm = VM("daily", iso=str(find_iso()), disk_size="24G", ram="6144", smp="4")
+    vm = VM("daily", iso=str(find_iso()), disk_size="48G", ram="6144", smp="4")
     vm.start()
     try:
         vm.serial_connect()

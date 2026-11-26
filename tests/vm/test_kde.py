@@ -34,7 +34,7 @@ def _kde_profile(mirror) -> str:
 
 def test_kde_install(mirror):
     _kde_profile(mirror)
-    vm = VM("kde-inst", iso=str(find_iso()), disk_size="20G", ram="6144", smp="4")
+    vm = VM("kde-inst", iso=str(find_iso()), disk_size="48G", ram="6144", smp="4")
     vm.start()
     try:
         vm.serial_connect()

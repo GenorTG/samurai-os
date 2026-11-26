@@ -678,7 +678,12 @@ PACSTAT=1
 # version installable without network). Other desktops use the network.
 OFFLINE_CONF=/etc/samurai-offline-pacman.conf      # inside the target
 OFFLINE_MNT=/var/cache/samurai-offline             # inside the target
-if { [ "$DESKTOP" = kde ] || [ "$DESKTOP" = none ]; } && [ -f "$OFFLINE_DIR/samurai-offline.db" ]; then
+# A pinned Arch mirror on a system without a desktop asks for that snapshot's
+# packages, so it installs from the network.
+OFFLINE_WANTED=0
+[ "$DESKTOP" = kde ] && OFFLINE_WANTED=1
+[ "$DESKTOP" = none ] && [ "$ARCH_MIRROR" = auto ] && OFFLINE_WANTED=1
+if [ "$OFFLINE_WANTED" = 1 ] && [ -f "$OFFLINE_DIR/samurai-offline.db" ]; then
     log "offline install: local repository on the medium — resolving from it (no network)"
     mkdir -p /mnt/var/lib/pacman /mnt/etc/pacman.d/gnupg /mnt/tmp "/mnt$OFFLINE_MNT"
     # pre-init the target keyring: archlinux/cachyos-keyring run --populate

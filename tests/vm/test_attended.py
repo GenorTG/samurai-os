@@ -73,7 +73,18 @@ def test_attended_install(mirror):
         vm.send("2\n")                                   # fish
         _answer(vm, "User password (Enter = generate):", PASS)
         _answer(vm, "again:", PASS)
+        # software pages (spec 08 pages 9-11; no desktop = no browser/gaming
+        # questions): Enter keeps every default
+        _answer(vm, "Python numbers [none]:", "3")        # 3.12
+        _answer(vm, "Conda choice [1]:", "")              # Miniforge
+        _answer(vm, "Docker choice [1]:", "2")            # rootless
+        _answer(vm, "AI CLI numbers [none]:", "")
+        _answer(vm, "Local AI (Ollama) [y/N]:", "")
+        _answer(vm, "e.g. '@office vlc' [none]:", "")
         _answer(vm, "Firewall (firewalld, deny inbound) [Y/n]:", "")   # default: firewalld on
+        _answer(vm, "Tailscale [Y/n]:", "")
+        _answer(vm, "Reverse proxy choice [1]:", "2")     # Caddy
+        _answer(vm, "SSH server (key-only login) [y/N]:", "")
         vm.wait_for("Write this profile and continue?")  # summary block + prompt
         vm.screendump("attended-03-summary")
         vm.send("yes\n")
@@ -98,6 +109,11 @@ def test_attended_install(mirror):
         assert "password_hash = " in profile, profile
         assert 'firewall = "firewalld"' in profile, profile
         assert PASS not in profile, "plaintext password must never reach the profile"
+        for line in ('python = ["3.12"]', 'conda = "miniforge"', 'docker = "rootless"',
+                     "ai_clis = []", "ollama = false", "tailscale = true",
+                     'reverse_proxy = "caddy"', "ssh_server = false", "enabled = false",
+                     "chaotic_aur = true"):
+            assert line in profile, f"{line!r} missing:\n{profile}"
         ga.close()  # the QGA chardev accepts ONE host client: free the slot
 
         vm.screendump("attended-04-install-done")
@@ -155,6 +171,25 @@ def test_attended_install(mirror):
         assert 'bootloader = "grub"' in out, out[-800:]
         assert "LUKS-OK" in out, out[-800:]
         assert "install complete" in out or "DONE" in out, out[-800:]
+
+        ga2 = vm.qga(timeout=120)
+        _, soft = ga2.exec(
+            "pacman -Q samurai-python312 samurai-miniforge docker docker-rootless-extras tailscale caddy; "
+            "python3.12 -c 'import ssl, sys; print(\"PY\", sys.version_info[:2])'; "
+            "/opt/miniforge/bin/conda config --show auto_activate_base; "
+            "echo GROUPS $(id -nG samurai); "
+            "test -L /home/samurai/.config/systemd/user/sockets.target.wants/docker.socket && echo ROOTLESS-UNIT-OK; "
+            "echo ROOTFUL=$(systemctl is-enabled docker.socket) TS=$(systemctl is-enabled tailscaled) "
+            "CADDY=$(systemctl is-enabled caddy)", check=False,
+        )
+        ga2.close()
+        print(soft)
+        for text in ("samurai-python312 ", "samurai-miniforge ", "docker-rootless-extras ", "caddy ",
+                     "PY (3, 12)", "ROOTLESS-UNIT-OK", "ROOTFUL=disabled", "TS=enabled", "CADDY=disabled"):
+            assert text in soft, f"{text!r} missing:\n{soft[-2000:]}"
+        groups = soft.split("GROUPS", 1)[1].splitlines()[0].split()
+        assert "docker" not in groups, groups
+        assert "False" in soft, soft[-1500:]
 
         vm.stop()
     except BaseException:
