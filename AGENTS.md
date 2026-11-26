@@ -52,3 +52,9 @@ See `docs/specs/01-ARCHITECTURE.md` "Source layout". Today only `docs/`, `script
 - Limine boots the FIRST entry in `limine.conf`. Any code editing the menu must decide who is first (2026-11-25: removing the default kernel entry made a foreign entry the default; VM screendump showed the panic). When a VM reboot test hangs, take a QMP `screendump` before the timeout kills the VM: bootloader errors never reach the serial log.
 - Never `pkill -f <pattern>` from an exec command that contains the pattern: it kills its own shell. Stop the systemd unit instead.
 - A published package file name never changes bytes: pacman caches by name and verifies the db checksum; makepkg is not reproducible. `ci/build-repo.sh` reuses the stable file when contents match and fails with "bump pkgrel" when they differ (2026-11-26: a release nearly overwrote three unchanged base packages).
+- Toolbox GUI: any new privileged action goes into `toolbox/gui/common/operations.cpp` (validator + fixed
+  argv) AND `data/org.samurai.toolbox.policy` (unit test enforces the pair); never `*_keep`, never a path
+  argument. Dynamic text in QML is `Plain`/`Text.PlainText`. Run `ci/test-gui.sh` after QML edits.
+- GUI VM tests read the screen with tesseract: set `OMP_THREAD_LIMIT=1` (OpenMP spins for minutes next to a
+  busy VM), click dialog buttons relative to Cancel, and expect small grey text to be missed.
+- `samurai apps` must never spawn pacman once per package name (55 calls = 31 s in a VM).

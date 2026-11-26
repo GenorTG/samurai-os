@@ -163,6 +163,12 @@ rules at the top of `samurai.toml`), installed by `samurai-tools` to `/usr/share
 All documents carry `"schema": 1` (health, clean, apps, kernel, boot, mirrors, snap, update).
 
 ## GUI shape
+Built so far (`samurai-toolbox-gui`, `toolbox/gui/`): Overview · Health (with repairs) · Applications ·
+Cleanup · Kernels & boot · Updates (with mirrors) · Snapshots · Diagnostics, the log console, "copy as
+command" and a confirmation showing the exact command before every change. Root actions go through
+`pkexec` and `/usr/lib/samurai/gui-helper` until the D-Bus helper exists
+(`docs/reviews/toolbox-gui-threat-review.md`). The rest of this list is the target.
+
 - Pages: Home/Status · Update · Maintenance · Health · Diagnostics · Snapshots · Kernels · Boot ·
   Hardware · Network · Components · Settings & Tweaks · Security · Gaming · Repos · Logs.
 - An embedded log console under every action, fed by the task's log signal. A "copy as command"

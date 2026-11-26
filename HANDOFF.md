@@ -49,6 +49,25 @@ guided installer and CLI/toolbox. VM validation runs on genorbox1. Site: <https:
   ark zip round trip, network/HTTPS, firewall, PipeWire, snapshot, full `samurai update`, app
   install, reboot with zero failed units. `test_offline.py` forces NVIDIA and asserts DKMS for both kernels.
 
+## Lane B: toolbox GUI (branch `feat/gui`, 2026-11-26; unmerged, unpublished)
+- `samurai-toolbox-gui` 0.1.0-1: `toolbox/gui/` (C++/QML Kirigami), pages overview, health+repairs, apps,
+  cleanup, kernels & boot, updates, snapshots, diagnostics. No system logic: CLI `--json` only.
+- Privilege: `pkexec /usr/lib/samurai/gui-helper <verb>`; allowlist in `common/operations.cpp`; one polkit
+  action per verb. Review + deferred D-Bus helper: `docs/reviews/toolbox-gui-threat-review.md`.
+- CLI changes (in samurai-tools): `kernel list --json`, `boot get --json`, `mirrors status --json`,
+  `snap list --json`, `status --report`, health `fixable`, clean `description`, `diag bundle --out -`,
+  apps `db_age_days`; apps index 42 s -> 4 s (one `pacman -Si`); bundle redacts the machine id.
+- **Merge needs:** bump samurai-tools pkgrel to >= 16 (GUI depends on `>=0.4.0-16`; sha256sums already
+  updated); add `samurai-toolbox-gui` to the KDE package set and offline ISO closure (not done: lane A files).
+- Tests: `tests/unit/test_gui_helper.py` (helper + policy, host g++), `ci/test-gui.sh` (offscreen, fake CLI),
+  `tests/vm/test_toolbox_gui.py` (Plasma VM, screen+mouse+password).
+- Not done: D-Bus helper/queue, welcome/setup assistant, tray, command palette, i18n, spec 04 pages without
+  a CLI yet (hardware, network, components, settings, security, gaming, repos), GUI for `fix reinstall-all`,
+  `snap diff/restore-file/rollback`. Not VM-exercised from the GUI: fix-* repairs, mirrors refresh,
+  boot param add/remove, apps upgrade-and-install, news acknowledgement.
+- **Bug found (not fixed):** `samurai snap rollback` fails on a normal install (`mv: cannot stat '/@'`) and
+  leaves `/@.rollback-stage` behind; `rescue rollback` is the working path (the GUI points there).
+
 ## Verification status
 - r15 ISOs + published stable repo (2026-11-25): live-ISO CLI, published-channel update (testing and stable,
   `tests/vm/test_channel.py`), smoke, update, rollback, daily, attended, kde, offline PASS.
@@ -74,8 +93,8 @@ guided installer and CLI/toolbox. VM validation runs on genorbox1. Site: <https:
    - **Root hardening rules (keep them):** `RealSystem` resolves programs only from `TRUSTED_PATH` with a scrubbed environment (never the caller's `$PATH`); under sudo, `diag bundle --out` must resolve inside the caller's home; under sudo, user-file targets run via `System::run_as` (uid/gid of the caller; std drops supplementary groups). VM harness HTTP mirror binds 127.0.0.1 only.
    - Installer enables `btrfs-scrub@-.timer` (spec 06); released in v0.0.1.75. The live ISO now builds and ships the Rust CLI.
    VM-verified on 0.4.0-14 (`test_health.py` 9 passed, 9m43s) (full install, then `pacman -U` of the local pkg): `tests/vm/test_toolbox_pkg.py` (live ISO) + `tests/vm/test_health.py` (9 tests; also fix lock/keyring/dkms, age checks, sudo hardening, mirrors, kernel swap + reboot: baseline, break/detect/repair, timer+sandbox, notifier, `--fix` snapshot-first, initramfs rebuild, btrfs timers, diag with planted user/IP/MAC/email/password, clean incl. orphan confirmation). Run: `SAMURAI_TEST_TOOLS_PKG=<pkg> SAMURAI_TEST_ISO=<iso> SAMURAI_VM_RUN_ID=<id> pytest -q -s tests/vm/test_health.py`.
-   Not done: needs-confirm health fixes, ~15 more spec-05 checks, `fix audio|pacman|reinstall-all`, `hw`, `queue`, helper+polkit (D-Bus), GUI.
-2. Qt toolbox GUI as a client of `samurai apps --json` / `samurai update --json`.
+   Not done: needs-confirm health fixes, ~15 more spec-05 checks, `fix audio|pacman|reinstall-all`, `hw`, `queue`, D-Bus helper (GUI uses a pkexec helper, lane B).
+2. Merge lane B (see its section); fix `samurai snap rollback`.
 3. Firewall presets (KDE Connect, Steam, Sunshine), Secure Boot (sbctl), TPM2 unlock (spec 09, M8).
 4. Optional automation: `samurai-testing` environment secrets (signing subkey + fine-grained repo token,
    docs/KEYS.md) so `publish-testing-repo.yml` publishes on push; needs Genor. Until then publish locally.
