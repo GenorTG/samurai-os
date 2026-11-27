@@ -76,7 +76,7 @@ guided installers and CLI/GUI toolbox. VM validation runs on genorbox1. Site: <h
    translations, NVIDIA live entry. Defaults: Plymouth/branding, Firefox policy (spec 09), welcome app.
 3. CLI/GUI: more spec-05 checks, `fix audio|pacman|reinstall-all`, `hw`, `queue`, D-Bus helper.
 4. Firewall presets, Secure Boot (sbctl), TPM2 unlock (spec 09, M8).
-5. CI publish secrets (docs/KEYS.md, needs Genor); signing-key backup still TODO.
+- Signing key backup: Vaultwarden, restore-tested 2026-11-27 (docs/KEYS.md).
 
 ## Commands
 - `bash scripts/install-hooks.sh` once per clone (per-commit BUILD bump).

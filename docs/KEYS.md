@@ -10,7 +10,7 @@ This file is the operational procedure. Keep it in sync with reality.
 | Primary key (certify only, never expires) | `DFE8C148C042AA3C199AAEA08436E12731EDD3FA` |
 | Signing subkey (ed25519, sign, expires **2027-11-17**) | on the primary's keyring |
 | UID | `Samurai OS Build Key <build@smart-samurai.pl>` |
-| Offline keyring location | genorbox1 `~/samurai-keys/gnupg` (0700) |
+| Keyring location | genorbox1 `~/samurai-keys/gnupg` (0700); backup in Vaultwarden (below) |
 | Revocation certificate | genorbox1 `~/samurai-keys/gnupg/openpgp-revocs.d/DFE8C148…DD3FA.rev` |
 | Fingerprint copy | genorbox1 `~/samurai-keys/primary-fingerprint.txt` |
 | Public export (shipped) | `pkgbuilds/samurai-keyring/build-key.asc` (committed to GitHub) |
@@ -56,11 +56,14 @@ date/run-number `pkgrel`, ensuring pacman sees changed update executors as upgra
 or committing generated version bumps. The release script creates the `x86_64-testing` rolling
 release on its first publish; no testing release currently exists.
 
-## Backup (TODO: do once, then verify)
+## Backup
 
-1. Copy `~/samurai-keys/` to two USB sticks.
-2. Store one off-site.
-3. Verify: restore the copy into a scratch GNUPGHOME and sign a test file.
+- **Vaultwarden (done 2026-11-27, restore-tested):** item `genorbox1: Samurai OS signing keys (~/samurai-keys)`,
+  collection "Smart Knife ops", attachment `samurai-signing-keys.tar.gz` (full secret key, public key,
+  ownertrust, revocation certificate, `RESTORE.txt`). A copy downloaded from the vault imported into a scratch
+  GNUPGHOME and signed a file that verified against the shipped public key.
+- Redo this after rotating the subkey.
+- Optional second medium: a copy of `~/samurai-keys/` on an offline USB stick.
 
 ## Rotate the signing subkey (yearly, or on suspicion)
 
