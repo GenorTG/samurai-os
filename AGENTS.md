@@ -94,3 +94,14 @@ See `docs/specs/01-ARCHITECTURE.md` "Source layout". Today only `docs/`, `script
   console (PID 1 hung in `tty_wait_until_sent` mid-reboot, `systemctl` timing out).
 - Plasma autologin needs `DisplayServer=wayland` in SDDM: with the default X11 server, stopping it right
   after the autologin kills the new session. Live keyboard changes need `kwriteconfig6 --notify`.
+- Redirect sysctls: the kernel ORs `conf/all` with the interface value, so set `all`, `default` and `*`
+  (`all = 0` alone changed nothing, 2026-11-28). Assert the per-interface `/proc/sys` values.
+- Never call `firewall-cmd` (or anything polkit-guarded) from an unprivileged login-time path: it can
+  raise a password dialog. `samurai welcome` and non-root `samurai security status` must not.
+- VM tests that rebuild their check object after a reboot must carry earlier failures over (a failed
+  pre-reboot check passed silently, 2026-11-28).
+- The installed system's serial login shell is fish: it waits 10 s for terminal queries and swallows
+  typed input; wait that out, then `exec bash --norc` and wait for its prompt.
+- Run VM tests as `systemd-run --user` units: `nohup`/background from an agent shell gets reaped.
+- AppArmor on Arch kernels needs `lsm=...,apparmor,...` on the command line; the installer adds it
+  when `samurai-settings-security` is installed.

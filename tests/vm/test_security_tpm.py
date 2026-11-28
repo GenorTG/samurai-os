@@ -62,9 +62,13 @@ def shell_login(vm: VM) -> None:
     vm.send(USER + "\n")
     vm.wait_for("Password:", timeout=60)
     vm.send(TEST_USER_PASSWORD + "\n")
-    vm.serial_read(max_wait=4.0)
+    # the login shell is fish, which waits up to 10 s for answers to terminal queries that a raw
+    # serial line never gives; anything typed meanwhile is lost
+    for _ in range(14):
+        vm.serial_read(max_wait=1.0)
     vm.send("exec bash --norc\n")
-    vm.serial_read(max_wait=3.0)
+    vm.wait_for("bash-5", timeout=60)
+    vm.serial_read(max_wait=2.0)
 
 
 def typed(vm: VM, command: str, answers: list[tuple[str, str]], timeout: float = 180) -> str:
