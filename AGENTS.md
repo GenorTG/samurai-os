@@ -121,4 +121,10 @@ See `docs/specs/01-ARCHITECTURE.md` "Source layout". Today only `docs/`, `script
   typed input; wait that out, then `exec bash --norc` and wait for its prompt.
 - Run VM tests as `systemd-run --user` units: `nohup`/background from an agent shell gets reaped.
 - AppArmor on Arch kernels needs `lsm=...,apparmor,...` on the command line; the installer adds it
-  when `samurai-settings-security` is installed.
+  when `samurai-settings-security` is installed, `samurai adopt` adds it through `samurai boot`.
+- `ProtectKernelModules=yes` hides `/usr/lib/modules` in USER units too (systemd 262 VM, 2026-11-28):
+  never set it on a unit that looks at installed kernels.
+- pacman does not report a file conflict for an unowned file listed in the new package's `backup=`: the
+  user's file stays and ours lands as `.pacnew` (checked in a container, 2026-11-28).
+- `nl.cachyos.org` stopped resolving (2026-11-28); v0.0.1.75 installs list it first with fallbacks.
+  VM tests must not fail on a mirror's error line alone.

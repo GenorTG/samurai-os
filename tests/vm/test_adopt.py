@@ -173,8 +173,8 @@ def _scenario(g: Guest, names: list[str]) -> None:
     snapshot = re.search(r"snapshot #(\d+) created", out).group(1)
     _assert_adopted(g, user_files)
     if EXTRA:
-        assert "failed" not in out.lower().replace("fallback", ""), out
-        g.ok("grep -c 'cmdline:.*lsm=landlock,lockdown,yama,integrity,apparmor,bpf' /boot/limine.conf")
+        assert "could not" not in out.split("adopted:")[1], out
+        g.ok("grep -c 'cmdline:.*lsm=landlock,lockdown,yama,integrity,apparmor,bpf' /boot/limine/limine.conf")
         g.ok(f"test -s {POLICY}.pacnew")
     assert g.sh("pacman -Qq kate")[0] != 0 and g.sh("pacman -Qq samurai-desktop-kde")[0] != 0
     assert g.sh("pacman -Qq steam")[0] != 0
