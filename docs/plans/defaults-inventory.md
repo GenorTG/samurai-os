@@ -91,7 +91,6 @@ Status: done 35, gap 10, optional 7. `done` = installed/configured by default or
 
 | App | Packages (source) | Offered |
 |---|---|---|
-| `craft-launcher` | **artcraft-launcher-appimage: not found** | yes |
 | `photocraft` | photocraft `chaotic-aur` | yes |
 | `vectorcraft` | vectorcraft `chaotic-aur` | yes |
 | `filmcraft` | filmcraft `chaotic-aur` | yes |
@@ -144,7 +143,9 @@ Status: done 35, gap 10, optional 7. `done` = installed/configured by default or
 
 ## Whole catalog (Garuda + samurai)
 
-212 apps; 207 resolve fully. Unresolved: 5, of which offered to users: 1.
+211 apps; 207 resolve fully. Unresolved: 4, of which offered to users: 0 (`ci/check-catalog.sh`).
+`craft-launcher` was removed on 2026-11-28: no repository carries `artcraft-launcher-appimage`. The
+`gpu-unlock` toggle went with it (`samurai-gpu-unlock` is not built yet; re-add it with the package).
 
 | App | Missing | Offered |
 |---|---|---|
@@ -152,4 +153,3 @@ Status: done 35, gap 10, optional 7. `done` = installed/configured by default or
 | `wire` | wire-desktop | no (hidden) |
 | `nitroshare` | nitroshare | no (hidden) |
 | `bauh` | bauh | no (hidden) |
-| `craft-launcher` | artcraft-launcher-appimage | shown as not available |
