@@ -125,8 +125,12 @@ def test_tpm_pin_unlock_and_recovery(mirror):
         log = typed(vm, "sudo samurai security tpm enroll",
                     [("password for", TEST_USER_PASSWORD), ("[y/N]", "y"), ("passphrase", PASSPHRASE),
                      ("PIN", PIN), ("PIN", PIN)])
+        # the header as cryptsetup records it, whatever the command reported
+        run(vm, f"cryptsetup luksDump --dump-json-metadata {DEVICE} | python3 -c 'import json,sys; "
+                "d=json.load(sys.stdin); print(sorted(d[\"keyslots\"]), [(t[\"type\"], t[\"keyslots\"], "
+                "t.get(\"tpm2-pin\")) for t in d[\"tokens\"].values()])'")
         assert "TYPED-RC=0" in log and "enrolled" in log, log[-1500:]
-        out = run(vm, f"cryptsetup luksDump {DEVICE}; samurai security status | grep disk.")
+        out = run(vm, f"cryptsetup luksDump {DEVICE} | grep -a systemd-tpm2; samurai security status | grep disk.")
         assert "systemd-tpm2" in out and "TPM unlock with PIN is enrolled" in out, out
         vm.send("exit\n")
 

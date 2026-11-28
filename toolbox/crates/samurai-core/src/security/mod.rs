@@ -5,6 +5,7 @@
 
 use crate::health::{json_escape, system::System};
 
+pub mod json;
 #[cfg(test)]
 mod tests;
 pub mod tpm;
@@ -175,17 +176,17 @@ fn tpm_item(sys: &dyn System, root: bool, backing: Option<String>) -> Item {
             "TPM present; enrolment needs root to read",
         );
     }
-    let Some(dump) = ok_out(sys, "cryptsetup", &["luksDump", &device]) else {
+    let Ok(header) = tpm::header(sys, &device) else {
         return item("disk.tpm", State::Unknown, "cannot read the LUKS header");
     };
-    if tpm::parse_header(&dump).tpm().is_none() {
+    let Some(pin) = header.tpm() else {
         return item(
             "disk.tpm",
             State::Skip,
             "TPM unlock is not set up (optional)",
         );
-    }
-    if tpm::parse_header(&dump).tpm() == Some(true) {
+    };
+    if pin {
         item("disk.tpm", State::Pass, "TPM unlock with PIN is enrolled")
     } else {
         item(

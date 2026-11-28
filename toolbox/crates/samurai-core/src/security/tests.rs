@@ -29,23 +29,20 @@ fn encryption_and_tpm_states() {
     assert_eq!(by_id(&items, "disk.encryption").state, State::Pass);
     assert_eq!(by_id(&items, "disk.tpm").state, State::Skip, "no TPM");
 
-    let tpm = |dump: &str| {
+    let tpm = |tokens: &str| {
+        let dump = format!(r#"{{"keyslots":{{"0":{{}},"1":{{}}}},"tokens":{{{tokens}}}}}"#);
         let sys = encrypted(root()).path("/sys/class/tpm/tpm0").cmd(
-            "cryptsetup luksDump /dev/vda2",
+            "cryptsetup luksDump --dump-json-metadata /dev/vda2",
             0,
-            dump,
+            &dump,
         );
         disk_items(&sys, true).remove(1)
     };
-    assert_eq!(tpm("Keyslots:\n 0: luks2\n").state, State::Skip);
-    assert_eq!(
-        tpm("Tokens:\n  0: systemd-tpm2\n\ttpm2-pin:   false\n").state,
-        State::Warn
-    );
-    assert_eq!(
-        tpm("Tokens:\n  0: systemd-tpm2\n\ttpm2-pin:   true\n").state,
-        State::Pass
-    );
+    let token =
+        |pin: bool| format!(r#""0":{{"type":"systemd-tpm2","keyslots":["1"],"tpm2-pin":{pin}}}"#);
+    assert_eq!(tpm("").state, State::Skip);
+    assert_eq!(tpm(&token(false)).state, State::Warn);
+    assert_eq!(tpm(&token(true)).state, State::Pass);
     let user = disk_items(
         &encrypted(Fake::default()).path("/sys/class/tpm/tpm0"),
         false,

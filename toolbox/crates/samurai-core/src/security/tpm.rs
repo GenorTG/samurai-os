@@ -5,6 +5,7 @@
 //! slot. When the TPM refuses (new firmware, changed Secure Boot keys, another board, too many
 //! wrong PINs) the boot falls back to asking for the passphrase.
 
+use super::json::{self, Json};
 use super::{is_root, root_stack};
 use crate::health::system::System;
 
@@ -24,10 +25,9 @@ pub enum Action {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Header {
-    pub luks2: bool,
     pub keyslots: Vec<u32>,
-    /// (token type, keyslot, `tpm2-pin`)
-    pub tokens: Vec<(String, Option<u32>, bool)>,
+    /// (token type, its keyslots, `tpm2-pin`)
+    pub tokens: Vec<(String, Vec<u32>, bool)>,
 }
 
 impl Header {
@@ -37,67 +37,60 @@ impl Header {
             .iter()
             .copied()
             .filter(|slot| {
-                !self.tokens.iter().any(|(kind, k, _)| {
-                    *k == Some(*slot) && HARDWARE_TOKENS.contains(&kind.as_str())
+                !self.tokens.iter().any(|(kind, slots, _)| {
+                    slots.contains(slot) && HARDWARE_TOKENS.contains(&kind.as_str())
                 })
             })
             .collect()
     }
 
+    /// `Some(pin required)` when a TPM token is enrolled; `false` if any of them needs no PIN.
     pub fn tpm(&self) -> Option<bool> {
         self.tokens
             .iter()
-            .find(|(kind, _, _)| kind == "systemd-tpm2")
+            .filter(|(kind, _, _)| kind == "systemd-tpm2")
             .map(|(_, _, pin)| *pin)
+            .reduce(|a, b| a && b)
     }
 }
 
-/// Parse `cryptsetup luksDump` of a LUKS2 header.
-pub fn parse_header(dump: &str) -> Header {
-    let mut header = Header::default();
-    let mut section = "";
-    for line in dump.lines() {
-        if !line.starts_with(char::is_whitespace) {
-            section = line.split(':').next().unwrap_or("");
-            if section == "Version" {
-                header.luks2 = line.split_whitespace().nth(1) == Some("2");
-            }
-            continue;
-        }
-        // "  0: luks2" starts an entry; deeper "\tName: value" lines belong to it
-        let entry = line
-            .strip_prefix("  ")
-            .filter(|rest| !rest.starts_with(char::is_whitespace))
-            .and_then(|rest| rest.split_once(':'))
-            .and_then(|(n, kind)| Some((n.parse::<u32>().ok()?, kind.trim())));
-        match (section, entry) {
-            ("Keyslots", Some((n, _))) => header.keyslots.push(n),
-            ("Tokens", Some((_, kind))) => header.tokens.push((kind.to_string(), None, false)),
-            ("Tokens", None) => {
-                let Some(token) = header.tokens.last_mut() else {
-                    continue;
-                };
-                let Some((name, value)) = line.trim().split_once(':') else {
-                    continue;
-                };
-                match name {
-                    "Keyslot" => token.1 = value.trim().parse().ok(),
-                    "tpm2-pin" => token.2 = value.trim() == "true",
-                    _ => {}
-                }
-            }
-            _ => {}
-        }
-    }
-    header
+/// Parse `cryptsetup luksDump --dump-json-metadata` (the LUKS2 JSON area, a stable format).
+pub fn parse_header(metadata: &str) -> Option<Header> {
+    let root = json::parse(metadata.trim())?;
+    let slot = |text: &str| text.parse::<u32>().ok();
+    let keyslots = root
+        .get("keyslots")?
+        .entries()
+        .iter()
+        .map(|(n, _)| slot(n))
+        .collect::<Option<Vec<_>>>()?;
+    let tokens = root
+        .get("tokens")?
+        .entries()
+        .iter()
+        .map(|(_, token)| {
+            let kind = token.get("type")?.text()?.to_string();
+            let slots = match token.get("keyslots") {
+                Some(Json::List(items)) => items
+                    .iter()
+                    .map(|i| i.text().and_then(slot))
+                    .collect::<Option<Vec<_>>>()?,
+                _ => return None,
+            };
+            let pin = token.get("tpm2-pin") == Some(&Json::Bool(true));
+            Some((kind, slots, pin))
+        })
+        .collect::<Option<Vec<_>>>()?;
+    Some(Header { keyslots, tokens })
 }
 
-fn header(sys: &dyn System, device: &str) -> Result<Header, String> {
+/// The LUKS2 header of `device`. Anything unreadable or unexpected is an error, never "empty".
+pub fn header(sys: &dyn System, device: &str) -> Result<Header, String> {
     let dump = sys
-        .run("cryptsetup", &["luksDump", device])
+        .run("cryptsetup", &["luksDump", "--dump-json-metadata", device])
         .filter(|o| o.code == 0)
-        .ok_or(format!("cannot read the LUKS header of {device}"))?;
-    Ok(parse_header(&dump.stdout))
+        .ok_or(format!("cannot read the LUKS2 header of {device}"))?;
+    parse_header(&dump.stdout).ok_or(format!("unexpected LUKS2 metadata on {device}"))
 }
 
 fn backing_device(sys: &dyn System) -> Result<String, String> {
@@ -164,9 +157,6 @@ pub fn plan(sys: &dyn System, action: Action) -> Result<Plan, String> {
     }
     let device = backing_device(sys)?;
     let head = header(sys, &device)?;
-    if !head.luks2 {
-        return Err(format!("{device} is not LUKS2"));
-    }
     if head.fallback_slots().is_empty() {
         return Err(format!(
             "{device} has no passphrase or recovery key slot: refusing to touch it"
@@ -246,22 +236,28 @@ mod tests {
     use super::*;
     use crate::health::system::fake::Fake;
 
-    const DUMP: &str = "LUKS header information\nVersion:       \t2\nEpoch:         \t7\n\nData segments:\n  0: crypt\n\toffset: 16777216 [bytes]\n\nKeyslots:\n  0: luks2\n\tKey:        512 bits\n\tPriority:   normal\n  1: luks2\n\tKey:        512 bits\nTokens:\n  0: systemd-tpm2\n\ttpm2-hash-pcrs:   7\n\ttpm2-pin:         true\n\tKeyslot:    1\nDigests:\n  0: pbkdf2\n\tHash:       sha256\n";
+    const PASS_SLOT: &str = r#""0":{"type":"luks2","kdf":{"salt":"AAAA"}},"#;
+    const DUMP: &str = r#"{"keyslots":{"0":{"type":"luks2","kdf":{"salt":"AAAA"}},"1":{"type":"luks2"}},"tokens":{"0":{"type":"systemd-tpm2","keyslots":["1"],"tpm2-blob":"x","tpm2-pin":true}},"segments":{},"digests":{},"config":{}}"#;
+    const LUKSDUMP: &str = "cryptsetup luksDump --dump-json-metadata /dev/vda2";
 
     #[test]
     fn header_parsing_finds_the_way_back_in() {
-        let h = parse_header(DUMP);
-        assert!(h.luks2);
+        let h = parse_header(DUMP).unwrap();
         assert_eq!(h.keyslots, [0, 1]);
         assert_eq!(h.fallback_slots(), [0]);
         assert_eq!(h.tpm(), Some(true));
-        let only_tpm = parse_header(&DUMP.replace(
-            "  0: luks2\n\tKey:        512 bits\n\tPriority:   normal\n",
-            "",
-        ));
+        let only_tpm = parse_header(&DUMP.replace(PASS_SLOT, "")).unwrap();
         assert!(only_tpm.fallback_slots().is_empty());
-        let recovery = parse_header(&DUMP.replace("systemd-tpm2", "systemd-recovery"));
+        let recovery = parse_header(&DUMP.replace("systemd-tpm2", "systemd-recovery")).unwrap();
         assert_eq!(recovery.fallback_slots(), [0, 1]);
+        let no_pin = DUMP.replace("\"tpm2-pin\":true", "\"tpm2-pin\":false");
+        assert_eq!(parse_header(&no_pin).unwrap().tpm(), Some(false));
+        assert_eq!(parse_header("LUKS header information"), None);
+        assert_eq!(
+            parse_header("{}"),
+            None,
+            "no keyslots object is not an empty header"
+        );
     }
 
     fn system(dump: &str) -> Fake {
@@ -273,7 +269,7 @@ mod tests {
                 0,
                 "/dev/mapper/luks-1 crypt\n/dev/vda2 part\n",
             )
-            .cmd("cryptsetup luksDump /dev/vda2", 0, dump)
+            .cmd(LUKSDUMP, 0, dump)
             .file(TPM_VERSION, "2\n")
             .file("/proc/cmdline", "root=UUID=x rd.luks.uuid=y\n")
             .path(TOKEN_PLUGIN)
@@ -307,15 +303,9 @@ mod tests {
             let e = plan(&sys, Action::Enroll).unwrap_err();
             assert!(e.contains(needle), "{e}");
         };
-        let no_slot = DUMP.replace(
-            "  0: luks2\n\tKey:        512 bits\n\tPriority:   normal\n",
-            "",
-        );
+        let no_slot = DUMP.replace(PASS_SLOT, "");
         refuse(system(&no_slot), "no passphrase");
-        refuse(
-            system(&DUMP.replace("Version:       \t2", "Version: 1")),
-            "not LUKS2",
-        );
+        refuse(system("not json"), "unexpected LUKS2 metadata");
         refuse(Fake::default().cmd("id -u", 0, "1000\n"), "needs root");
         // the first scripted answer of a command wins, so build the variants from scratch
         let base = || {
@@ -327,7 +317,7 @@ mod tests {
                     0,
                     "/dev/mapper/luks-1 crypt\n/dev/vda2 part\n",
                 )
-                .cmd("cryptsetup luksDump /dev/vda2", 0, DUMP)
+                .cmd(LUKSDUMP, 0, DUMP)
         };
         refuse(base(), "no TPM 2.0");
         refuse(
@@ -352,13 +342,10 @@ mod tests {
 
     #[test]
     fn a_vanished_passphrase_slot_is_an_error() {
-        let gone = DUMP.replace(
-            "  0: luks2\n\tKey:        512 bits\n\tPriority:   normal\n",
-            "",
-        );
+        let gone = DUMP.replace(PASS_SLOT, "");
         let sys = system(DUMP)
-            .cmd("cryptsetup luksDump /dev/vda2", 0, DUMP)
-            .cmd("cryptsetup luksDump /dev/vda2", 0, &gone)
+            .cmd(LUKSDUMP, 0, DUMP)
+            .cmd(LUKSDUMP, 0, &gone)
             .cmd("systemd-cryptenroll --wipe-slot=tpm2 /dev/vda2", 0, "");
         let p = plan(&sys, Action::Remove).unwrap();
         assert!(apply(&sys, Action::Remove, &p)
