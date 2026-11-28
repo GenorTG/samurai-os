@@ -8,14 +8,22 @@ guided installers and CLI/GUI toolbox. VM validation runs on genorbox1. Site: <h
 - Built: `samurai-settings-security` 0.1.0 (in `BASE_PACKAGES`; installer adds `lsm=...apparmor...`),
   `samurai security status|tpm enroll/remove|recovery-key`, `samurai firewall`, `samurai welcome` +
   toolbox Welcome page and login autostart. samurai-tools 0.4.0-18, samurai-toolbox-gui 0.1.0-2.
-- Docs: `docs/security/hardening.md` (what each default can break), `docs/security/secure-boot.md`.
+- Docs: `docs/security/hardening.md` (breakage notes, TPM recovery table), `docs/security/secure-boot.md`.
+- Verified (QEMU, all PASS): `test_security.py` (existing install), `test_security_tpm.py` (swtpm: PIN,
+  forgotten PIN, replaced TPM, removal, recovery key), `test_security_install.py` (new KDE install:
+  release offline ISO 2026-11-26 with the branch's packages and installer scripts injected). Unit 320
+  passed 3 skipped; Rust 172, clippy + fmt clean; `ci/test-gui.sh` OK. After the VM runs only the TPM
+  enrolment message changed.
+- Not verified: an ISO built from this branch, real hardware/TPM, Steam or a Proton game (userns,
+  bubblewrap, Flatpak, Firefox sandbox and system Wine were run), `toolbox_gui` VM tests (changed only
+  to pre-mark the welcome window), `firewall zone` on a NetworkManager-managed interface.
 - **No boot entry has a file hash**: Limine verifies nothing today (spec 09 / ADR-0003 claim it does).
   Secure Boot setup is deliberately not built.
 - Release: publish settings-security + tools + toolbox-gui before any online ISO of this branch.
   A user's own `/etc/firefox/policies/policies.json` makes the first package install conflict.
-- VM: `tests/vm/test_security.py`, `test_security_tpm.py` (`SAMURAI_TEST_SEC_PKGS`,
-  `SAMURAI_TEST_BASE_DISK`, base from `tests/vm/base_disk.py`). `toolbox_gui` tests now pre-mark the
-  welcome window as shown; not rerun.
+- Open: KDE's Welcome Center opens on top of `samurai welcome` at first login. Existing installs need
+  the package (lane D) plus `samurai boot set param add lsm=...`.
+- VM env: `SAMURAI_TEST_SEC_PKGS=<ci/build-pkgs.sh output>`, optional `SAMURAI_TEST_BASE_DISK`.
 
 ## Released (2026-11-26): desktop release, owner-approved
 - ISOs: GitHub release `v0.0.1.90` (latest, tag at e8e3c06): online ISO, offline ISO in 4 parts, signed
