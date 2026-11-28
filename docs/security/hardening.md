@@ -48,3 +48,19 @@ password for local `wheel` users (Flatpak system installs) are left as upstream 
 Installing the package applies the kernel, sudo, Firefox and firewall files. AppArmor additionally
 needs the kernel parameter:
 `sudo samurai boot set param add lsm=landlock,lockdown,yama,integrity,apparmor,bpf`, then reboot.
+
+## TPM unlock (`samurai security tpm enroll`, optional)
+Adds one keyslot bound to PCR 7 and a PIN; the passphrase slot is never touched, and a key-file
+system, a header without a passphrase or recovery slot, or an initramfs without the TPM plugin is
+refused. Proven with an emulated TPM (`tests/vm/test_security_tpm.py`):
+
+| Situation | What the boot does |
+|-----------|--------------------|
+| right PIN | unlocks |
+| forgotten PIN | asks again (three PIN prompts), then asks for the passphrase |
+| different or reset TPM | one PIN prompt, then the passphrase |
+| after `tpm remove` | passphrase prompt only |
+
+Not covered: real TPM hardware, its dictionary-attack lockout timing, a PCR 7 change by a firmware
+update on real firmware. With Secure Boot off, PCR 7 does not change when the boot loader is
+replaced: a tampered loader could capture the PIN.

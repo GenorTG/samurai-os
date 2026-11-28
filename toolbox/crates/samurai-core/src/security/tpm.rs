@@ -218,7 +218,7 @@ pub fn apply(sys: &dyn System, action: Action, plan: &Plan) -> Result<String, St
     }
     match (action, after.tpm()) {
         (Action::Enroll, Some(true)) => Ok(
-            "TPM unlock with PIN is enrolled. Reboot to use it; the passphrase still works (empty PIN or wait for the prompt).\nIf it ever stops working: boot with the passphrase, then run this command again."
+            "TPM unlock with PIN is enrolled. Reboot to use it.\nForgot the PIN, or the TPM refuses? Answer the PIN prompt (three times at most): the boot then asks for your passphrase, which still works.\nAfter booting that way, run this command again to re-enrol."
                 .into(),
         ),
         (Action::Enroll, _) => Err("the header shows no TPM token with a PIN".into()),
