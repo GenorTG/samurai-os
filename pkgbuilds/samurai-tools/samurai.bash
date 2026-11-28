@@ -15,7 +15,7 @@ _samurai() {
     sub="${COMP_WORDS[2]:-}"
 
     if [ "$COMP_CWORD" -eq 1 ]; then
-        mapfile -t COMPREPLY < <(compgen -W "update adopt apps snap rescue status health diag clean fix mirrors boot kernel hw version help" -- "$cur")
+        mapfile -t COMPREPLY < <(compgen -W "update adopt apps snap rescue status health diag clean fix mirrors boot kernel hw security firewall welcome version help" -- "$cur")
         return 0
     fi
 
@@ -81,6 +81,26 @@ _samurai() {
         clean)
             mapfile -t COMPREPLY < <(compgen -W "pkgcache journal coredumps thumbnails orphans cache all \
                 --preview --json --yes --keep --help" -- "$cur")
+            ;;
+        welcome)
+            mapfile -t COMPREPLY < <(compgen -W "--text --json --help" -- "$cur")
+            ;;
+        security)
+            mapfile -t COMPREPLY < <(compgen -W "status tpm recovery-key enroll remove --json --online --dry-run --help" -- "$cur")
+            ;;
+        firewall)
+            if [ "$COMP_CWORD" -eq 2 ]; then
+                mapfile -t COMPREPLY < <(compgen -W "status presets open close zone --help" -- "$cur")
+                return 0
+            fi
+            case "$sub" in
+                open|close)
+                    mapfile -t COMPREPLY < <(compgen -W "kdeconnect steam-remote-play steam-transfer \
+                        sunshine localsend syncthing samba ssh minecraft ollama web-dev web \
+                        --zone --dry-run --yes" -- "$cur") ;;
+                zone) mapfile -t COMPREPLY < <(compgen -W "--dry-run --yes" -- "$cur") ;;
+                *) mapfile -t COMPREPLY < <(compgen -W "--json" -- "$cur") ;;
+            esac
             ;;
         kernel)
             if [ "$COMP_CWORD" -eq 2 ]; then

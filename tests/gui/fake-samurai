@@ -28,7 +28,16 @@ def finding(i, cat, sev, risk, status, summary="", details="", evidence=(), fixa
             "summary": summary, "details": details, "evidence": list(evidence), "fixable": fixable}
 
 
-if a == ["version"]:
+if a == ["welcome", "--json"]:
+    s = lambda i, t, summary, command="", page="", done=False: {
+        "id": i, "title": t, "done": done, "summary": summary, "command": command, "page": page}
+    out({"schema": 1, "release_notes": "https://github.com/GenorTG/samurai-os/releases", "steps": [
+        s("update", "Update the system", "Takes a snapshot first.", "samurai update", "updates"),
+        s("deferred-1", "Finish an installer choice", "<b>needs network</b> <img src=http://example.org/x>",
+          "samurai apps install " + "very-long-application-name-" * 8),
+        s("tailscale", "Connect Tailscale", "Tailscale is connected.", done=True),
+        s("tpm", "Unlock the disk with the TPM and a PIN", "Optional.", "sudo samurai security tpm enroll")]})
+elif a == ["version"]:
     print("samurai 0.4.0-16 (samurai-tools)")
 elif a[:2] == ["status", "--json"] or a[:2] == ["status", "--check"]:
     out({"schema": 1, "checked": "2026-11-26T09:14:02+01:00", "arch": 14, "samurai": 1,

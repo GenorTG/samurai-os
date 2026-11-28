@@ -1,0 +1,5 @@
+# Samurai OS (spec 09). Who may use sudo is decided elsewhere (10-wheel); these are defaults only.
+# Re-ask for the password after 5 minutes.
+Defaults timestamp_timeout=5
+# Commands run in their own pseudo-terminal, so they cannot type into the calling shell.
+Defaults use_pty

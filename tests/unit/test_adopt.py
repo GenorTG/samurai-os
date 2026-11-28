@@ -131,7 +131,8 @@ def test_old_install_gets_the_defaults_without_optional_sets(adopt, planner, pla
     profile, _ = adopt.target_profile(OLD_PROFILE, OLD_KDE_INSTALLED, set(), planner, plan_catalog)
     got = planned(planner, plan_catalog, profile)
     assert {"samurai-base", "samurai-settings-system", "samurai-settings-shell", "samurai-settings-dev",
-            "samurai-desktop-base", "samurai-desktop-kde", "firewalld", "plasma-firewall"} == got
+            "samurai-desktop-base", "samurai-desktop-kde", "firewalld", "plasma-firewall",
+            "samurai-settings-security"} == got
     # installer-time package list, browsers and gaming never come back by themselves
     assert not got & {"qemu-guest-agent", "firefox", "steam", "tailscale"}
 

@@ -1,0 +1,56 @@
+# Maintainer: Samurai OS <build@smart-samurai.pl>
+# Spec: docs/specs/09-SECURITY.md (standard profile). What each setting can break:
+# docs/security/hardening.md.
+pkgname=samurai-settings-security
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Samurai OS security defaults: sysctl hardening, sudo defaults, AppArmor, core dumps, Firefox policy, firewall presets"
+arch=(any)
+url="https://github.com/GenorTG/samurai-os"
+license=('PolyForm-Noncommercial-1.0.0')
+depends=(systemd sudo apparmor arch-audit)
+optdepends=('firewalld: firewall presets and the tailnet zone' 'firefox: enterprise policy')
+backup=(etc/sudoers.d/50-samurai-security etc/firefox/policies/policies.json)
+install=samurai-settings-security.install
+source=(
+    80-samurai-security.conf
+    50-samurai-coredump.conf
+    50-samurai-resolved.conf
+    50-samurai-security.sudoers
+    policies.json
+    samurai-sunshine.xml
+    samurai-localsend.xml
+    samurai-ollama.xml
+    samurai-web-dev.xml
+    samurai-tailnet.xml
+    LICENSE
+)
+sha256sums=(
+    'b5f17aeb069ab72a95bcdb685c029716d7815707d8575b1341a74aa0f65e0e8d'
+    '74fbe5ee6f509e84bd4d8aff2cfea15ae7c13045615c8ad31b3a56fc6fa58af7'
+    '54e8c1926a2a0a237256cf8fca15dd55d52d358a84e1a1f26079c1adcdc36a0f'
+    'ae2348c9ad3fb43141f796fcfc6cf40b9968283e43feabc6acf6f4dc244d7b6a'
+    '0db324c63b3e539798c8d225968430ce435daed430dc0c1fddc7994e963fcd5f'
+    'b96fe059b739331a3df8cc678638c430b14b63e4105357539c1f41adbce377c3'
+    '411c0f8f495cec532acded00a2367f66c99a2e3b40f9eceacb042fcb196bf172'
+    '873708d5c95b9bbee968a2e17ff7d03a8552079f0bda56720948b939c148f44a'
+    '59db84154d600c3cca91811b1350c7fb593499f2fa20c971daf71fcfcafd514e'
+    '7454fc1dd65afb39f07acbac075ce9d6715fc041157c915c605e07c174f09fad'
+    '1be06492345bb03a60d13d23d744d979cc7cf1ce154da5227651f8dd78f25017'
+)
+
+package() {
+    cd "$srcdir"
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+    install -Dm644 80-samurai-security.conf "$pkgdir/usr/lib/sysctl.d/80-samurai-security.conf"
+    install -Dm644 50-samurai-coredump.conf "$pkgdir/usr/lib/systemd/coredump.conf.d/50-samurai.conf"
+    install -Dm644 50-samurai-resolved.conf "$pkgdir/usr/lib/systemd/resolved.conf.d/50-samurai.conf"
+    install -dm750 "$pkgdir/etc/sudoers.d"
+    install -m440 50-samurai-security.sudoers "$pkgdir/etc/sudoers.d/50-samurai-security"
+    install -Dm644 policies.json "$pkgdir/etc/firefox/policies/policies.json"
+    local service
+    for service in samurai-sunshine samurai-localsend samurai-ollama samurai-web-dev; do
+        install -Dm644 "$service.xml" "$pkgdir/usr/lib/firewalld/services/$service.xml"
+    done
+    install -Dm644 samurai-tailnet.xml "$pkgdir/usr/lib/firewalld/zones/samurai-tailnet.xml"
+}

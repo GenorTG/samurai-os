@@ -6,12 +6,15 @@
 pub mod boot;
 pub mod clean;
 pub mod diag;
+pub mod firewall;
 pub mod fix;
 pub mod health;
 pub mod hw;
 pub mod kernel;
 pub mod mirrors;
+pub mod security;
 pub mod status;
+pub mod welcome;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -36,6 +39,9 @@ commands
   boot        boot entries, menu timeout, kernel parameters (samurai boot --help)
   kernel      list, install, remove, choose the default (samurai kernel --help)
   hw          hardware and driver profiles: detect, list, apply (samurai hw --help)
+  security    security state of this machine: samurai security status
+  firewall    zones, ports and one-step presets (samurai firewall --help)
+  welcome     first steps on a new system
   version     print the samurai-tools version
   help        this text
 
@@ -69,6 +75,12 @@ pub enum Action {
     Kernel,
     /// `samurai hw`: hardware detection and driver profiles.
     Hw,
+    /// `samurai security`: read-only security report.
+    Security,
+    /// `samurai firewall`: firewalld zones, ports and presets.
+    Firewall,
+    /// `samurai welcome`: first steps on a new system.
+    Welcome,
     Version,
     Help,
     Unknown(String),
@@ -105,6 +117,9 @@ pub fn parse(cmd: &str) -> Action {
         "boot" => Action::Boot,
         "kernel" => Action::Kernel,
         "hw" => Action::Hw,
+        "security" => Action::Security,
+        "firewall" => Action::Firewall,
+        "welcome" => Action::Welcome,
         "version" | "--version" | "-V" => Action::Version,
         "help" | "--help" | "-h" => Action::Help,
         other => Action::Unknown(other.to_string()),
@@ -178,6 +193,9 @@ mod tests {
         assert_eq!(parse("boot"), Action::Boot);
         assert_eq!(parse("kernel"), Action::Kernel);
         assert_eq!(parse("hw"), Action::Hw);
+        assert_eq!(parse("security"), Action::Security);
+        assert_eq!(parse("firewall"), Action::Firewall);
+        assert_eq!(parse("welcome"), Action::Welcome);
         for v in ["version", "--version", "-V"] {
             assert_eq!(parse(v), Action::Version);
         }

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Samurai Welcome
+Comment=First steps on a new system
+Exec=samurai welcome --autostart
+Icon=help-about
+Terminal=false
+NoDisplay=true

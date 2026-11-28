@@ -1,7 +1,7 @@
 # fish completion for samurai (shipped by samurai-tools; fish is the default shell)
 
 function __samurai_no_cmd
-    not __fish_seen_subcommand_from update adopt apps snap rescue status health diag clean fix mirrors boot kernel hw version help
+    not __fish_seen_subcommand_from update adopt apps snap rescue status health diag clean fix mirrors boot kernel hw security firewall welcome version help
 end
 
 function __samurai_apps_ids
@@ -30,6 +30,9 @@ complete -c samurai -n __samurai_no_cmd -a mirrors -d 'show or refresh the mirro
 complete -c samurai -n __samurai_no_cmd -a boot    -d 'sync boot entries with installed kernels'
 complete -c samurai -n __samurai_no_cmd -a kernel  -d 'list, install, remove, choose kernels'
 complete -c samurai -n __samurai_no_cmd -a hw      -d 'hardware and driver profiles'
+complete -c samurai -n __samurai_no_cmd -a security -d 'security state of this machine'
+complete -c samurai -n __samurai_no_cmd -a firewall -d 'zones, ports and presets'
+complete -c samurai -n __samurai_no_cmd -a welcome -d 'first steps on a new system'
 complete -c samurai -n __samurai_no_cmd -a version -d 'print the samurai-tools version'
 complete -c samurai -n __samurai_no_cmd -a help    -d 'usage'
 
@@ -158,3 +161,22 @@ complete -c samurai -n "$hw; and __fish_seen_subcommand_from apply remove" -l no
 complete -c samurai -n "$hw; and __fish_seen_subcommand_from apply remove" -l yes -d 'no confirmation'
 complete -c samurai -n "$hw; and __fish_seen_subcommand_from fingerprint" -l check -d 'update the notice (root)'
 complete -c samurai -n "$hw; and __fish_seen_subcommand_from fingerprint" -l accept -d 'accept the present hardware (root)'
+
+# welcome
+complete -c samurai -n '__fish_seen_subcommand_from welcome' -l text -d 'print here'
+complete -c samurai -n '__fish_seen_subcommand_from welcome' -l json -d 'machine-readable'
+
+# security
+complete -c samurai -n '__fish_seen_subcommand_from security; and not __fish_seen_subcommand_from status tpm recovery-key' -a 'status tpm recovery-key'
+complete -c samurai -n '__fish_seen_subcommand_from security; and __fish_seen_subcommand_from tpm' -a 'enroll remove'
+complete -c samurai -n '__fish_seen_subcommand_from security; and __fish_seen_subcommand_from tpm recovery-key' -l dry-run -d 'show, change nothing'
+complete -c samurai -n '__fish_seen_subcommand_from security' -l json -d 'machine-readable'
+complete -c samurai -n '__fish_seen_subcommand_from security' -l online -d 'ask arch-audit too'
+
+# firewall
+set -l fw '__fish_seen_subcommand_from firewall'
+complete -c samurai -n "$fw; and not __fish_seen_subcommand_from status presets open close zone" -a 'status presets open close zone'
+complete -c samurai -n "$fw; and __fish_seen_subcommand_from open close" -a 'kdeconnect steam-remote-play steam-transfer sunshine localsend syncthing samba ssh minecraft ollama web-dev web'
+complete -c samurai -n "$fw; and __fish_seen_subcommand_from open close" -l zone -r -d 'firewalld zone'
+complete -c samurai -n "$fw; and __fish_seen_subcommand_from open close zone" -l dry-run -d 'show, change nothing'
+complete -c samurai -n "$fw; and __fish_seen_subcommand_from open close zone" -l yes -d 'do not ask'

@@ -1,0 +1,14 @@
+# shellcheck shell=bash
+# Enabled on first install only: a later upgrade never re-enables a unit the user turned off.
+# AppArmor needs lsm=...,apparmor,... on the kernel command line (the installer adds it).
+post_install() {
+    systemctl enable apparmor.service >/dev/null 2>&1 || echo "warning: could not enable apparmor.service"
+    systemctl try-restart systemd-resolved.service >/dev/null 2>&1 || true
+    if ! grep -qw apparmor /sys/kernel/security/lsm 2>/dev/null; then
+        echo "samurai-settings-security: AppArmor is not active on this boot; see: samurai security status"
+    fi
+}
+
+post_upgrade() {
+    systemctl try-restart systemd-resolved.service >/dev/null 2>&1 || true
+}

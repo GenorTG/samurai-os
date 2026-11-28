@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<service>
+  <short>Ollama API</short>
+  <description>Ollama has no authentication: anyone who can reach this port can use the models and the API.</description>
+  <port protocol="tcp" port="11434"/>
+</service>
