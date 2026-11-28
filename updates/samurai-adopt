@@ -53,6 +53,8 @@ ABOVE_CHAOTIC = ("core", "extra", "multilib", "cachyos")
 DESKTOP_CORE = {"kde": "plasma-workspace", "gnome": "gnome-shell", "xfce": "xfce4-session",
                 "lxqt": "lxqt-session"}
 OPT_IN = ("gaming", "tailscale", "chaotic")
+# what trusting Chaotic-AUR installs before the transaction; harmless without the repository
+CHAOTIC_PACKAGES = {"chaotic-keyring", "chaotic-mirrorlist"}
 USERNAME_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
 SECTION_RE = re.compile(r"^\s*\[([^\]]+)\]\s*$")
 ALPM_RE = re.compile(r"\[ALPM\] (installed|reinstalled|upgraded|downgraded|removed) (\S+) \(")
@@ -734,10 +736,12 @@ def apply(a: Adoption, no_snapshot: bool) -> int:
     if failure:
         log.say(f"\nsamurai adopt FAILED: {failure}")
         # only the chaotic bootstrap packages may have landed: then the old config is safe
-        if changed_conf and not new - {"chaotic-keyring", "chaotic-mirrorlist"}:
+        if changed_conf and not new - CHAOTIC_PACKAGES:
             write_conf(original)
-            log.say("no new software was installed; pacman.conf restored. The package databases may "
-                    "be newer than the system: run `sudo samurai update` before installing anything.")
+            kept = f" besides {' and '.join(sorted(new))}" if new else ""
+            log.say(f"no new software was installed{kept}; pacman.conf restored. The package databases "
+                    "may be newer than the system: run `sudo samurai update` before installing "
+                    "anything.")
         elif new:
             log.say(f"{len(new)} package(s) were installed before the failure.")
         log.say(undo_hint(snapshot))

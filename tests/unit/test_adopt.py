@@ -354,6 +354,18 @@ def test_failed_transaction_restores_the_configuration(adopt, machine, capsys):
     assert not adopt.STATE_PATH.exists()
 
 
+def test_failure_after_the_keyring_names_what_stayed(adopt, machine, capsys, monkeypatch):
+    def fake_stream(self, cmd):
+        if cmd[0] == "bash":
+            machine["installed"] |= {"chaotic-keyring", "chaotic-mirrorlist"}
+        return 1 if cmd[0] == "pacman" else 0
+
+    monkeypatch.setattr(adopt.Log, "stream", fake_stream)
+    assert adopt.apply(adoption(adopt, bootstrap=True), no_snapshot=False) == 1
+    assert machine["conf"].read_text() == OLD_CONF
+    assert "besides chaotic-keyring and chaotic-mirrorlist; pacman.conf restored" in capsys.readouterr().out
+
+
 def test_no_snapshot_means_no_change(adopt, machine):
     machine["snapshot_rc"] = 1
     with pytest.raises(adopt.Refused, match="nothing changed"):
