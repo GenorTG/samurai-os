@@ -72,3 +72,11 @@ def test_chwd_package_never_syncs_the_database():
     pkgbuild = (REPO / "pkgbuilds" / "samurai-chwd" / "PKGBUILD").read_text(encoding="utf-8")
     assert "! grep -qF -- '-Sy' scripts/chwd" in pkgbuild
     assert re.search(r"^_commit=[0-9a-f]{40}", pkgbuild, re.M)
+
+
+def test_the_health_service_can_read_the_kernel_module_trees():
+    """ProtectKernelModules=yes hides /usr/lib/modules (systemd.exec(5)): the daily run would skip the
+    module checks and report a pending reboot that is not there."""
+    unit = (REPO / "updates" / "samurai-health.service").read_text(encoding="utf-8")
+    assert "\nProtectKernelModules=" not in unit
+    assert "CapabilityBoundingSet=~CAP_SYS_MODULE" in unit and "SystemCallFilter=~@module" in unit

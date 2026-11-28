@@ -94,3 +94,10 @@ See `docs/specs/01-ARCHITECTURE.md` "Source layout". Today only `docs/`, `script
   console (PID 1 hung in `tty_wait_until_sent` mid-reboot, `systemctl` timing out).
 - Plasma autologin needs `DisplayServer=wayland` in SDDM: with the default X11 server, stopping it right
   after the autologin kills the new session. Live keyboard changes need `kwriteconfig6 --notify`.
+- chwd: never call `chwd --force`/`-r` (they `pacman -Rdd` DKMS and headers first) and keep
+  `packages = '...'` to `[A-Za-z0-9- ]` (the Lua helper cuts the list at other characters). It offers
+  the open NVIDIA modules to every NVIDIA card, pre-Turing included. Read the source at the pinned
+  tag: master's profiles/ids differ (2026-11-28: Kepler lost `nouveau` on tag 1.25.0).
+- Hardware logic is tested without hardware by `ci/test-hw.sh [--e2e]` (fake `/sys/bus/pci` mounted
+  into an unprivileged container). Never make that container privileged: package hooks could load
+  modules into the host kernel.

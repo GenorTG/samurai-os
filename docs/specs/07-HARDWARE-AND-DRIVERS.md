@@ -11,6 +11,10 @@ What we change (checked against the chwd source, 2026-10-27):
   `/var/lib/chwd/scripts/chwd`. We split it into two packages: our `chwd` package builds the binary +
   scripts from CachyOS's tag, and `samurai-hardware` installs **our** profile set into the db dir. No
   patching of chwd itself.
+  As built (2026-11-28): the package is **`samurai-chwd`** (`provides`/`conflicts` `chwd`), because
+  `[samurai]` sits below `[cachyos]`, which ships its own `chwd` with CachyOS's profiles. It carries
+  one packaging patch: the helper script ran `pacman -Sy` before its first install (a partial
+  upgrade); the build fails if upstream changes that line.
 - Our profiles start from CachyOS's set with CachyOS-only packages removed (e.g.
   `cachyos-drm-awaiter`, unless the CachyOS repo provides it). Kernel module packages are chosen
   per installed kernel: CachyOS's prebuilt `linux-cachyos-nvidia-open` for `linux-cachyos`, Arch's
@@ -39,6 +43,25 @@ standard repository driver packages.
 | Network | Broadcom `broadcom-wl` where the open driver fails, Realtek out-of-tree only where needed |
 | Laptops/handhelds | chassis-based power profile defaults; CachyOS's handheld profiles (Steam Deck, ROG Ally, Legion Go) kept |
 | Not PCI/USB | handled by `samurai hw` itself, not chwd: CPU microcode (`intel-ucode`/`amd-ucode`), firmware packages, `sof-firmware` for Intel audio DSPs, fingerprint readers (`fprintd`) and Wacom tablets by USB id, printers via the setup assistant |
+
+## `samurai hw` safety rules (as built)
+- `apply` previews first; it needs `--yes` or a typed `y`, takes a snapper snapshot (or
+  `--no-snapshot`), downloads every package before changing anything, verifies the `nvidia` module for
+  every installed kernel and puts the previous driver packages back when a step fails.
+- chwd is only called as `chwd -i`. Its `--force` and `-r` paths remove packages with `pacman -Rdd`
+  (DKMS and kernel headers included) before a replacement exists, so they are never used.
+- Refused: unknown NVIDIA generation; a branch the card does not support; an NVIDIA driver samurai
+  does not manage (470xx, closed, beta, gpu-unlock); a branch switch without `--switch-driver`;
+  a boot display that would lose its driver; removing the profile of a present device.
+- Mixed NVIDIA generations: chwd would pick the open modules for an RTX 3090 + GTX 1070 and leave the
+  1070 without a driver; `samurai hw` takes the branch that runs every card (580xx here).
+- A working module package is kept: `apply` does not swap a prebuilt module for DKMS (or back)
+  unless a kernel lacks the module or `--reinstall` asks.
+- The installer's `auto` installs the open modules only when no pre-Turing NVIDIA card is present
+  (`nvidia-utils` blacklists nouveau, so an older card would be left without a driver).
+- Not built yet: `samurai-hw-firstboot.service` (nothing installs drivers unattended; the daily health
+  check reports `drivers.profile`), the installer's chwd step, handheld/Framework/T2/fingerprint
+  profiles, `diag gpu` chwd output, `samurai hw gpu`, the weekly upstream profile diff.
 
 ## When detection runs
 1. **Installer**: the installer's chwd step applies profiles into the target system,
@@ -122,10 +145,10 @@ package** in `[samurai]` or on the ISO. Instead:
   card may run slightly warmer under tensor loads (normal power and thermal limits still apply).
 
 ## Testing
-- **Profile matching**: unit tests run chwd against recorded `lspci -nnmm` / `lsusb` dumps of real
-  machines in `tests/hw-fixtures/` (fan-dragon, stealth-dragon, genorbox1, plus common laptops).
-  They check which profile is selected, without installing anything. Adding a machine means
-  capturing one dump.
+- **Profile matching**: `ci/test-hw.sh` runs the real chwd and `samurai hw detect` in an unprivileged
+  container against fake `/sys/bus/pci` + DMI trees built from `tests/hw-fixtures/*.hw` (genorbox1's
+  IDs are real; the other machines are synthetic; fan-dragon and stealth-dragon are not captured yet).
+  `--e2e` also runs a real `apply`, branch switch and failed-switch restore with the real packages.
 - **Install path**: VM tests cover the QEMU profile and the fingerprint-change flow (spec 11; QEMU can
   add or remove emulated PCI devices between boots).
 - **Real GPUs**: tested only on real hardware from a live USB (spec 11, hardware checklist). No GPU

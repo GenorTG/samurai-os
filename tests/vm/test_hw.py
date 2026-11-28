@@ -136,6 +136,12 @@ def test_detect_apply_and_health_on_the_qemu_profile(installed):
         plan = detect(ga)
         assert plan["steps"][0]["status"] == "ok" and not plan["changes"], plan
         assert drivers(ga)["drivers.profile"] == "ok"
+        # the sandboxed daily run sees the kernels too (it must not hide /usr/lib/modules)
+        out = run(ga, "systemctl start samurai-health.service; cat /var/lib/samurai/health.json")
+        daily = {r["id"]: r["status"] for r in json.loads(out[out.index('{"schema"'):])["results"]}
+        assert daily["drivers.profile"] == "ok", daily
+        assert daily["boot.pending-reboot"] == "ok", daily
+        assert daily["boot.initramfs"] == "ok", daily
         # a present device's profile cannot be removed
         out = run(ga, "samurai hw remove qemu --yes", ok=(1,))
         assert "present device" in out and "nothing was changed" in out
