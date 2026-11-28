@@ -161,7 +161,9 @@ def test_security_baseline(mirror):
               ["parsed OK", "440 root /etc/sudoers.d/50-samurai-security", "750 root /etc/sudoers.d"],
               absent=["syntax error"])
         before = c.status("status-before-reboot")
-        c.expect_status(before, {"apps.apparmor": "fail"})   # the kernel parameter is still missing
+        # an older install lacks the kernel parameter; an install from this release already has it
+        booted = c.run("cmdline-before", "cat /proc/cmdline", [f"root=UUID"])
+        c.expect_status(before, {"apps.apparmor": "pass" if f"lsm={LSM}" in booted else "fail"})
         c.run("lsm-param", f"samurai boot set param add lsm={LSM} && grep -c 'lsm={LSM}' /boot/limine/limine.conf && echo PARAM-OK",
               ["PARAM-OK"])
         c.run("firewall-reload", "firewall-cmd --reload && samurai firewall open localsend --yes && echo OPEN-OK",
