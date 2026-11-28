@@ -237,9 +237,15 @@ def test_a_removed_program_expands_the_meta_around_it(adopt):
     assert s.skipped["editor"] == "you removed it"
 
 
-def test_a_removed_dependency_drops_ordinary_packages(adopt):
+def test_a_removed_library_is_not_a_choice(adopt):
+    # `pacman -Rns something` takes libraries along: they come back with what needs them
     s = resolver(adopt, removed=["codec"]).select(["player", "editor"])
-    assert s.targets == ["editor"] and "codec" in s.skipped["player"]
+    assert s.targets == ["player", "editor"] and "codec" in s.new and not s.skipped
+
+
+def test_a_removed_listed_package_blocks_what_needs_it(adopt):
+    s = resolver(adopt, removed=["codec"]).select(["player", "codec", "editor"])
+    assert s.targets == ["editor"] and "codec: you removed it" in s.skipped["player"]
 
 
 def test_ignorepkg_is_a_choice(adopt):
@@ -269,6 +275,7 @@ def test_versioned_conflicts_of_installed_packages_do_not_block(adopt):
 
 def test_the_resolved_transaction_is_checked_again(adopt):
     r = resolver(adopt, removed=["codec"])
+    r.select(["codec"])
     r.check({"editor"})
     with pytest.raises(adopt.Refused, match="codec"):
         r.check({"editor", "codec"})

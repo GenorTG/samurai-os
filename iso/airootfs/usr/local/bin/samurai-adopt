@@ -236,6 +236,7 @@ class Resolver:
         self.sync, self.local = sync, local
         self.explicit, self.removed, self.ignored = explicit, removed, ignored
         self.satisfied = satisfied                     # dependency string -> bool (local db)
+        self.choices: set[str] = set()                 # filled by select()
         self.providers: dict[str, list[str]] = {}
         self.groups: dict[str, list[str]] = {}
         for pkg in sync.values():
@@ -267,8 +268,24 @@ class Resolver:
         replaced = {dep_name(r) for r in pkg.replaces}
         return [o for o in found if o != name and o not in replaced]
 
+    def offered(self, wanted: list[str]) -> set[str]:
+        """The names a user sees as software they can drop: what the plan lists and what
+        the meta packages and groups in it list. Anything deeper is a plain dependency:
+        `pacman -Rns` removes those along the way, which says nothing about a choice."""
+        found: set[str] = set()
+        todo = list(wanted)
+        while todo:
+            name = todo.pop()
+            if name in found:
+                continue
+            found.add(name)
+            todo += self.groups.get(name, []) if name not in self.sync else []
+            if name in self.sync and (name.startswith("samurai-") or name.endswith("-meta")):
+                todo += [dep_name(d) for d in self.sync[name].depends]
+        return found
+
     def why_blocked(self, name: str) -> str | None:
-        if name in self.removed:
+        if name in self.removed and name in self.choices:
             return "you removed it"
         if name in self.ignored:
             return "it is in IgnorePkg"
@@ -315,6 +332,7 @@ class Resolver:
         result = Selection()
         visited: set[str] = set()
         preferred = set(wanted)
+        self.choices = self.offered(wanted)
 
         def visit(name: str) -> None:
             if name in visited:

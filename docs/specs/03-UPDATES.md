@@ -79,7 +79,8 @@ asked. It is an executor in `samurai-tools` (`updates/samurai-adopt`); an old in
   re-added.
 - **User choices win:** a package whose last `pacman.log` action is a removal, one in `IgnorePkg`, or one
   conflicting with a package the user installed is left out. A Samurai meta or settings package that
-  needs it is replaced by its other dependencies. A desktop that was removed gets no desktop defaults. A
+  needs it is replaced by its other dependencies. A removal counts for packages the plan, a meta package
+  or a group lists; plain libraries (which `pacman -Rns` takes along) come back with what needs them. A desktop that was removed gets no desktop defaults. A
   removed `[chaotic-aur]` stays removed (`--with chaotic`). A conflicting package installed only as a
   dependency (for example `jack2`) is replaced, and the preview says so.
 - **Order:** preview (databases synced into a temporary directory, nothing changed) → confirmation →
