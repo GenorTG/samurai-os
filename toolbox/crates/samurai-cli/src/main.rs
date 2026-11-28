@@ -15,6 +15,7 @@ use samurai_core::kernel;
 use samurai_core::mirrors;
 use samurai_core::security;
 use samurai_core::status;
+use samurai_core::welcome;
 use samurai_core::{
     parse, parse_pacman_q, read_version_file, resolve_tool, version_line, Action,
     FALLBACK_TOOL_DIR, TOOLS_VERSION_FILE, USAGE,
@@ -448,6 +449,63 @@ fn firewall_command(sys: &RealSystem, cmd: firewall::Cmd) -> Result<String, Stri
     }
 }
 
+/// The toolbox window on the Welcome page, replacing this process. Returns only when it cannot.
+fn open_welcome_window() -> std::io::Error {
+    Command::new("/usr/bin/samurai-toolbox")
+        .args(["--page", "welcome"])
+        .exec()
+}
+
+fn run_welcome(args: &[String]) -> ExitCode {
+    use health::system::System;
+    let mode = match welcome::parse_args(args) {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!("samurai welcome: {e}\n");
+            eprint!("{}", welcome::USAGE);
+            return ExitCode::from(2);
+        }
+    };
+    let sys = RealSystem;
+    let graphical = ["WAYLAND_DISPLAY", "DISPLAY"]
+        .iter()
+        .any(|v| std::env::var_os(v).is_some_and(|s| !s.is_empty()));
+    let window = graphical && sys.exists("/usr/bin/samurai-toolbox");
+    match mode {
+        welcome::Mode::Help => print!("{}", welcome::USAGE),
+        welcome::Mode::Json => print!("{}", welcome::render_json(&welcome::collect(&sys))),
+        welcome::Mode::Autostart => {
+            let marker = welcome::marker(
+                std::env::var("XDG_STATE_HOME").ok().as_deref(),
+                std::env::var("HOME").ok().as_deref(),
+            );
+            let Some(marker) = marker.filter(|m| window && welcome::should_autostart(&sys, m))
+            else {
+                return ExitCode::SUCCESS;
+            };
+            // marked first: a window that cannot be recorded must not come back at every login
+            let recorded = Path::new(&marker)
+                .parent()
+                .map_or(Ok(()), std::fs::create_dir_all)
+                .and_then(|()| std::fs::write(&marker, "shown\n"));
+            if let Err(e) = recorded {
+                eprintln!("samurai welcome: cannot write {marker}: {e}");
+                return ExitCode::from(1);
+            }
+            eprintln!("samurai welcome: {}", open_welcome_window());
+            return ExitCode::from(1);
+        }
+        welcome::Mode::Auto if window => {
+            eprintln!("samurai welcome: {}", open_welcome_window());
+            return ExitCode::from(1);
+        }
+        welcome::Mode::Auto | welcome::Mode::Text => {
+            print!("{}", welcome::render_text(&welcome::collect(&sys)));
+        }
+    }
+    ExitCode::SUCCESS
+}
+
 fn run_mirrors(args: &[String]) -> ExitCode {
     use health::system::System;
     let cmd = match mirrors::parse_args(args) {
@@ -801,6 +859,7 @@ fn main() -> ExitCode {
         Action::Kernel => run_kernel(&rest),
         Action::Security => run_security(&rest),
         Action::Firewall => run_firewall(&rest),
+        Action::Welcome => run_welcome(&rest),
         Action::Version => {
             let v = read_version_file(Path::new(TOOLS_VERSION_FILE)).or_else(pacman_version);
             println!("{}", version_line(v.as_deref()));

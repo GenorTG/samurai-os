@@ -15,7 +15,7 @@ _samurai() {
     sub="${COMP_WORDS[2]:-}"
 
     if [ "$COMP_CWORD" -eq 1 ]; then
-        mapfile -t COMPREPLY < <(compgen -W "update apps snap rescue status health diag clean fix mirrors boot kernel security firewall version help" -- "$cur")
+        mapfile -t COMPREPLY < <(compgen -W "update apps snap rescue status health diag clean fix mirrors boot kernel security firewall welcome version help" -- "$cur")
         return 0
     fi
 
@@ -74,6 +74,9 @@ _samurai() {
         clean)
             mapfile -t COMPREPLY < <(compgen -W "pkgcache journal coredumps thumbnails orphans cache all \
                 --preview --json --yes --keep --help" -- "$cur")
+            ;;
+        welcome)
+            mapfile -t COMPREPLY < <(compgen -W "--text --json --help" -- "$cur")
             ;;
         security)
             mapfile -t COMPREPLY < <(compgen -W "status tpm recovery-key enroll remove --json --online --dry-run --help" -- "$cur")

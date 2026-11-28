@@ -4,7 +4,7 @@
 # this file as gui/ (see ci/build-repo.sh).
 pkgname=samurai-toolbox-gui
 pkgver=0.1.0
-pkgrel=1
+pkgrel=2
 pkgdesc="Samurai Toolbox: Qt/Kirigami front end of the samurai command (updates, health, apps, cleanup, kernels, snapshots)"
 arch=(x86_64)
 url="https://github.com/GenorTG/samurai-os"
@@ -18,7 +18,7 @@ depends=(
     qqc2-desktop-style   # Plasma look of the controls
     qt6-base
     qt6-declarative
-    'samurai-tools>=0.4.0-16'   # the JSON outputs the pages read
+    'samurai-tools>=0.4.0-18'   # the JSON outputs the pages read
 )
 makedepends=(cmake ninja)
 options=(!debug)

@@ -54,7 +54,7 @@ def _find_ovmf() -> tuple[str, str]:
 class VM:
     def __init__(self, name: str, iso: str | None = None, disk: str | None = None,
                  disk_size: str = "40G", ram: str = "4096", smp: str = "4",
-                 pointer: bool = False, graphical: bool = False):
+                 pointer: bool = False, graphical: bool = False, tpm: bool = False):
         name = _artifact_name(name)
         self.name = name
         WORK.mkdir(parents=True, exist_ok=True)
@@ -69,6 +69,10 @@ class VM:
         self.ram, self.smp = ram, smp
         self.pointer = pointer  # absolute USB tablet, for scenarios that click in the GUI
         self.graphical = graphical   # KMS-capable display + absolute pointer for GUI tests
+        # an emulated TPM 2.0 whose state survives restarts until the test deletes it
+        self.tpm_state = WORK / f"{name}-tpm" if tpm else None
+        self.tpm_sock = str(WORK / f"{name}-tpm.sock")
+        self._swtpm: subprocess.Popen | None = None
         self.code, self.vars = _find_ovmf()
         self.vars_rw = str(WORK / f"{name}-VARS.fd")
         self.serial_sock = str(WORK / f"{name}-serial.sock")
@@ -116,8 +120,26 @@ class VM:
                     # a restart asked for inside the guest pauses the VM, so the test
                     # can eject the medium before the firmware looks at it again
                     "-action", "reboot=shutdown,shutdown=pause"]
+        if self.tpm_state is not None:
+            self._start_swtpm()
+            cmd += ["-chardev", f"socket,id=chrtpm,path={self.tpm_sock}",
+                    "-tpmdev", "emulator,id=tpm0,chardev=chrtpm", "-device", "tpm-tis,tpmdev=tpm0"]
         # pylint: disable=consider-using-with
         self.proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+
+    def _start_swtpm(self) -> None:
+        self.tpm_state.mkdir(parents=True, exist_ok=True)
+        pathlib.Path(self.tpm_sock).unlink(missing_ok=True)
+        # pylint: disable=consider-using-with
+        self._swtpm = subprocess.Popen(
+            ["swtpm", "socket", "--tpm2", "--tpmstate", f"dir={self.tpm_state}",
+             "--ctrl", f"type=unixio,path={self.tpm_sock}", "--terminate"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+        deadline = time.time() + 20
+        while not os.path.exists(self.tpm_sock):
+            if time.time() > deadline or self._swtpm.poll() is not None:
+                raise RuntimeError("swtpm did not start")
+            time.sleep(0.1)
 
     def wait_socket(self, path: str, timeout: float = 60.0) -> None:
         deadline = time.time() + timeout
@@ -410,3 +432,10 @@ class VM:
                 except subprocess.TimeoutExpired:
                     self.proc.kill()
             self.proc = None
+        if self._swtpm:
+            self._swtpm.terminate()
+            try:
+                self._swtpm.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                self._swtpm.kill()
+            self._swtpm = None

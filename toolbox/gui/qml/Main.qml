@@ -20,7 +20,8 @@ Kirigami.ApplicationWindow {
         { id: "kernels", title: "Kernels & boot", icon: "cpu", file: "KernelsPage.qml" },
         { id: "updates", title: "Updates", icon: "system-software-update", file: "UpdatesPage.qml" },
         { id: "snapshots", title: "Snapshots", icon: "document-save-all", file: "SnapshotsPage.qml" },
-        { id: "diagnostics", title: "Diagnostics", icon: "tools-report-bug", file: "DiagnosticsPage.qml" }
+        { id: "diagnostics", title: "Diagnostics", icon: "tools-report-bug", file: "DiagnosticsPage.qml" },
+        { id: "welcome", title: "Welcome", icon: "help-about", file: "WelcomePage.qml" }
     ]
 
     // ------------------------------------------------------------ helpers shared by the pages

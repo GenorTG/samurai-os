@@ -61,7 +61,7 @@ int main(int argc, char **argv)
     const QCommandLineOption page(
         QStringLiteral("page"),
         QStringLiteral("Open on a page: overview, health, apps, cleanup, kernels, updates, "
-                       "snapshots, diagnostics."),
+                       "snapshots, diagnostics, welcome."),
         QStringLiteral("name"), QStringLiteral("overview"));
     parser.addOption(page);
     Backend::Programs programs;

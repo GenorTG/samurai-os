@@ -65,7 +65,11 @@ def install_base(vm: VM) -> None:
             f"printf '[AC][Display]\\nTurnOffDisplayWhenIdle=false\\nDimDisplayWhenIdle=false\\n"
             f"[AC][SuspendAndShutdown]\\nAutoSuspendAction=0\\n' > {home}/powerdevilrc",
             f"printf '[General]\\nLastSeenVersion=99.0.0\\nShowUpdatePage=false\\n' > {home}/plasma-welcomerc",
-            f"chown -R {USER}:{USER} {home}",
+            # `samurai welcome --autostart` has already run for this user
+            f"install -d -o {USER} -g {USER} /home/{USER}/.local /home/{USER}/.local/state "
+            f"/home/{USER}/.local/state/samurai",
+            f"touch /home/{USER}/.local/state/samurai/welcome-shown",
+            f"chown -R {USER}:{USER} {home} /home/{USER}/.local",
             "sync",
         ]))
         ga.close()

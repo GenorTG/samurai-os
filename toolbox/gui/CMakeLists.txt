@@ -31,6 +31,7 @@ set(qml_files
     qml/pages/UpdatesPage.qml
     qml/pages/SnapshotsPage.qml
     qml/pages/DiagnosticsPage.qml
+    qml/pages/WelcomePage.qml
 )
 # one flat module: every file can name every other one without per-directory imports
 foreach(file IN LISTS qml_files)
@@ -60,3 +61,5 @@ install(TARGETS samurai-toolbox RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(TARGETS gui-helper RUNTIME DESTINATION ${CMAKE_INSTALL_PREFIX}/lib/samurai)
 install(FILES data/org.samurai.toolbox.policy DESTINATION ${CMAKE_INSTALL_DATADIR}/polkit-1/actions)
 install(FILES data/samurai-toolbox.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
+# the welcome window, once per user (samurai welcome --autostart records that it ran)
+install(FILES data/samurai-welcome.desktop DESTINATION /etc/xdg/autostart)
