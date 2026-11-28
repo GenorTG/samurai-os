@@ -2,7 +2,7 @@
 chwd/pacman/snapper, the `drivers.*` checks, and the hardware-change flow (a virtio GPU added and
 removed between boots). No real GPU is involved: NVIDIA paths are covered by ci/test-hw.sh.
 
-  SAMURAI_TEST_ISO=<iso> SAMURAI_TEST_TOOLS_PKG=<samurai-tools> SAMURAI_TEST_HW_PKGS=<chwd>:<hardware> \
+  SAMURAI_TEST_ISO=<iso> [SAMURAI_TEST_ISO_PREDATES_CUDA=1] SAMURAI_TEST_TOOLS_PKG=<samurai-tools> SAMURAI_TEST_HW_PKGS=<chwd>:<hardware> \
       pytest -q -s test_hw.py
 """
 from __future__ import annotations
@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import re
 import shutil
 
 import pytest
@@ -72,13 +73,18 @@ def installed(mirror):
     pkgs = _packages()
     for p in pkgs:
         shutil.copy2(p, mirror.dir / p.name)
+    # an ISO built before this branch refuses profile keys it does not know
+    profile = (mirror.dir / "profile-test.toml").read_text()
+    if os.environ.get("SAMURAI_TEST_ISO_PREDATES_CUDA"):
+        profile = re.sub(r"(?m)^cuda\s*=.*\n", "", profile)
+    (mirror.dir / "profile-hw.toml").write_text(profile)
     vm = VM("hw-inst", iso=str(find_iso()), disk_size="24G")
     vm.start()
     try:
         vm.serial_connect()
         vm.login_root(timeout=280)
         ga = vm.ensure_qga()
-        out = run(ga, "curl -fsSL http://10.0.2.2:8966/profile-test.toml -o /tmp/p.toml && "
+        out = run(ga, "curl -fsSL http://10.0.2.2:8966/profile-hw.toml -o /tmp/p.toml && "
                       "{ SAMURAI_TEST_AUTOKEY=1 SAMURAI_SERIAL_CONSOLE=1 samurai-install --profile /tmp/p.toml "
                       "--disk /dev/vda --yes >/dev/null 2>&1; rc=$?; echo INSTALL-RC=$rc; "
                       "[ $rc -eq 0 ] || tail -n 60 /var/log/samurai/install.log; }",
