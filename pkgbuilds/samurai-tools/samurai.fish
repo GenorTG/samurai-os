@@ -1,7 +1,7 @@
 # fish completion for samurai (shipped by samurai-tools; fish is the default shell)
 
 function __samurai_no_cmd
-    not __fish_seen_subcommand_from update apps snap rescue status health diag clean fix mirrors boot kernel version help
+    not __fish_seen_subcommand_from update adopt apps snap rescue status health diag clean fix mirrors boot kernel version help
 end
 
 function __samurai_apps_ids
@@ -12,6 +12,12 @@ complete -c samurai -f
 
 # top level
 complete -c samurai -n __samurai_no_cmd -a update  -d 'staged system update'
+complete -c samurai -n __samurai_no_cmd -a adopt   -d 'add the current defaults to an older install'
+complete -c samurai -n '__fish_seen_subcommand_from adopt' -l preview -d 'show what would change'
+complete -c samurai -n '__fish_seen_subcommand_from adopt' -l yes -s y -d 'do not ask'
+complete -c samurai -n '__fish_seen_subcommand_from adopt' -l with -x -a 'gaming tailscale chaotic' -d 'optional set'
+complete -c samurai -n '__fish_seen_subcommand_from adopt' -l with-upgrade -d 'include pending upgrades'
+complete -c samurai -n '__fish_seen_subcommand_from adopt' -l no-snapshot -d 'no rollback point'
 complete -c samurai -n __samurai_no_cmd -a apps    -d 'optional apps from the catalog'
 complete -c samurai -n __samurai_no_cmd -a snap    -d 'snapshot manager'
 complete -c samurai -n __samurai_no_cmd -a rescue  -d 'recovery tool (live ISO or installed system)'

@@ -74,7 +74,9 @@ class Feature:
 def load_apps_module():
     """samurai-apps owns the catalog merge: next to this script, or updates/."""
     here = pathlib.Path(__file__).resolve().parent
-    for cand in (here / "samurai-apps", here.parent / "updates" / "samurai-apps"):
+    # the last one: the packaged copy in /usr/lib/samurai that `samurai adopt` loads
+    for cand in (here / "samurai-apps", here.parent / "updates" / "samurai-apps",
+                 pathlib.Path("/usr/local/bin/samurai-apps")):
         if cand.is_file():
             loader = importlib.machinery.SourceFileLoader("samurai_apps", str(cand))
             spec = importlib.util.spec_from_loader("samurai_apps", loader)

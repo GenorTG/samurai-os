@@ -1,5 +1,7 @@
 # Maintainer: Samurai OS <build@smart-samurai.pl>
-# The build driver stages executors and interventions from updates/ and the two
+# The build driver stages executors and interventions from updates/, the install
+# planner from installer/, the Chaotic-AUR trust script and key (renamed to .pubkey:
+# makepkg takes a .asc source for a detached signature), and the two
 # catalog files from catalog/ beside this file (see ci/build-repo.sh); the shell
 # completions live beside this file. tests/unit/test_installer_apps.py checks
 # every source against its origin, so regenerate sha256sums after each change:
@@ -7,7 +9,7 @@
 pkgname=samurai-tools
 pkgver=0.4.0
 pkgrel=18
-pkgdesc="Samurai OS CLI (Rust dispatcher), updater, executors, app catalog tool, update notifier and shell completions"
+pkgdesc="Samurai OS CLI (Rust dispatcher), updater, adopt, executors, app catalog tool, update notifier and shell completions"
 arch=(x86_64)
 url="https://github.com/GenorTG/samurai-os"
 license=('PolyForm-Noncommercial-1.0.0' 'GPL-3.0-or-later')
@@ -42,6 +44,10 @@ source=(
     samurai-snap
     samurai-rescue
     samurai-apps
+    samurai-adopt
+    samurai-profile-plan
+    chaotic-bootstrap.sh
+    chaotic-key.pubkey
     samurai-notifier
     samurai-notifier.service
     samurai-notifier.timer
@@ -62,18 +68,22 @@ sha256sums=(
     '156a1462eaa40d74cc6f2f10bf7e5ad8a255acf2018b0f67c9a4f608c686ab70'
     'eeb0eb64a3d2d19792acd508e311c93c76f432bf3133bcc83a05189214151e3a'
     'da381e665bce627e5da101459bf9d3c48d62b046f305c761b83b2c8fd3aca189'
+    'b51e6f9353a85c540c8347f6dfb739a237b3e55880c98c0810ff47d3b6d6af0c'
+    '2b66eea8a12a8fe8f66c375b24fae91c42ecdd97f595ded14c2610d041c5adec'
+    'a781bb934e5d22ddf319dd3549fded544ba95c1693d513afa279c1d9f36e9cee'
+    '481a52e8389bc7ac1dbb074a1bfd3a7e384484917d383a358a8136299a0d69aa'
     'cf6d221462e27b0774de5867ec87f9283ac721709b49d23e31ddc2728ba50293'
     '6d477d89600ea6318ae20de5503954626a6d63b3c8ec939e569b1342e61829f3'
     '832e6dede8d1bf108c41c2eb9d856cc7bc565c73c280e79359e181feb2996eac'
     '7532127b6305afb2b465631ee842442f1182ea8616f6d1f5d420dadbde51e35b'
     'b6ecd99a5c8def7315492de18157c4681c575abe7ebfc8bf03a22009cdafcbc1'
     '001759df7f3395c9c66d28149d4362b44b1f8b7d40b542a8c22dd44d97046bf7'
-    '7c112013291bd6295c820171f80eff61cd277e9062dd87a9581ae8d3ebdf4192'
-    'd11db0ec0edfc3b5d7d5c9edb0be9e6998ad8a1ced065d1f6a96b13524280964'
+    '006bd7def9a43411fe64ff168bd2d5075ebf398ae816f41f68a487d35fab23e1'
+    'cdb92bfd1e65907ac9a44cbc663a324c41b15acb8c8c1b96291cc84c0b89c3c1'
     '3fbf554fe2729136489e72fe11a162bd17d25cb170fb72863c793d0664eeb877'
     '60a47ce64a90aab079c0a8d50c126ee795fd9263d0304a3b63128862066c7331'
     'c03375cb3acd7ead49fbe319a44a596b493b1e716388a10346271b33ca47fdf8'
-    'b4fd26b2e4af3dbd37e9f7df6e5a83aa641bcdaaef76d3481df7aa02e9eb659a'
+    '7a05d4503a3576683236e64df3407af08dbf222f35e9a7d7037a25901abccddd'
     'd0dfb80c5e60d29900dd6bc672d0bd8185fc8bc434f8e1f97f164e16f2d29c97'
     '1be06492345bb03a60d13d23d744d979cc7cf1ce154da5227651f8dd78f25017'
 )
@@ -92,6 +102,12 @@ package() {
     install -Dm755 samurai-snap "$pkgdir/usr/local/bin/samurai-snap"
     install -Dm755 samurai-rescue "$pkgdir/usr/local/bin/samurai-rescue"
     install -Dm755 samurai-apps "$pkgdir/usr/local/bin/samurai-apps"
+    install -Dm755 samurai-adopt "$pkgdir/usr/local/bin/samurai-adopt"
+    # what `samurai adopt` needs; not /usr/local/bin: ISO installs hold an unowned
+    # planner copy there, and owning that path would break their next update
+    install -Dm755 samurai-profile-plan "$pkgdir/usr/lib/samurai/samurai-profile-plan"
+    install -Dm755 chaotic-bootstrap.sh "$pkgdir/usr/lib/samurai/chaotic-bootstrap.sh"
+    install -Dm644 chaotic-key.pubkey "$pkgdir/usr/lib/samurai/chaotic-key.asc"
     install -Dm644 garuda-setup-wizard.toml "$pkgdir/usr/share/samurai/catalog/garuda-setup-wizard.toml"
     install -Dm644 samurai.toml "$pkgdir/usr/share/samurai/catalog/samurai.toml"
     install -Dm755 samurai-notifier "$pkgdir/usr/local/bin/samurai-notifier"

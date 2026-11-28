@@ -15,11 +15,18 @@ _samurai() {
     sub="${COMP_WORDS[2]:-}"
 
     if [ "$COMP_CWORD" -eq 1 ]; then
-        mapfile -t COMPREPLY < <(compgen -W "update apps snap rescue status health diag clean fix mirrors boot kernel version help" -- "$cur")
+        mapfile -t COMPREPLY < <(compgen -W "update adopt apps snap rescue status health diag clean fix mirrors boot kernel version help" -- "$cur")
         return 0
     fi
 
     case "$cmd" in
+        adopt)
+            if [ "$prev" = "--with" ]; then
+                mapfile -t COMPREPLY < <(compgen -W "gaming tailscale chaotic" -- "$cur")
+            else
+                mapfile -t COMPREPLY < <(compgen -W "--preview --yes --with --with-upgrade --no-snapshot --help" -- "$cur")
+            fi
+            ;;
         update)
             mapfile -t COMPREPLY < <(compgen -W "--json --noconfirm --no-snapshot --skip-mirrors \
                 --skip-news --ack-news --allow-battery --skip-interventions --help --version" -- "$cur")

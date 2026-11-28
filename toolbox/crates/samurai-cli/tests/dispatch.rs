@@ -70,6 +70,10 @@ fn executors_get_args_and_exit_code_passes_through() {
     assert_eq!(out(&o), "apps:list --json\n");
     assert_eq!(o.status.code(), Some(0));
     assert_eq!(run(&d, &["update", "--check"]).status.code(), Some(7));
+    stub(&d, "adopt", 4);
+    let o = run(&d, &["adopt", "--preview"]);
+    assert_eq!(out(&o), "adopt:--preview\n");
+    assert_eq!(o.status.code(), Some(4));
 }
 
 #[test]

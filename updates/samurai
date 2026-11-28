@@ -17,6 +17,7 @@ commands
   snap        snapshot manager (spec 06): list/create/delete/diff/restore-file/repair/rollback
   rescue      recovery tool (spec 06): mount/chroot/bootloader/initramfs/kernel/rollback
   status      last update check and last update report (user session)
+  adopt       add the current defaults to an older install: samurai adopt --preview
   version     print the samurai-tools version
   help        this text
 
@@ -60,6 +61,7 @@ case "$cmd" in
     apps)    run_tool apps "$@" ;;
     snap)    run_tool snap "$@" ;;
     rescue)  run_tool rescue "$@" ;;
+    adopt)   run_tool adopt "$@" ;;
     status)  run_tool notifier --status "$@" ;;
     version|--version|-V) version ;;
     help|--help|-h) usage ;;
