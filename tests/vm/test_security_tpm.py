@@ -36,10 +36,10 @@ def run(vm: VM, command: str, timeout: float = 240) -> str:
     return out
 
 
-def unlock(vm: VM, prompts: dict[str, str], timeout: float = 300) -> list[str]:
+def unlock(vm: VM, prompts: dict[str, str], timeout: float = 300, tries: int = 8) -> list[str]:
     """Answer boot prompts until the login prompt; returns the prompts seen, in order."""
     seen: list[str] = []
-    for _ in range(8):
+    for _ in range(tries):
         matched, text = vm.wait_for_any([*prompts, " login:"], timeout=timeout)
         print(f"--- boot console\n{text[-700:]}", flush=True)
         if matched == " login:":
@@ -136,9 +136,15 @@ def test_tpm_pin_unlock_and_recovery(mirror):
 
         # --- the PIN unlocks ---------------------------------------------------------
         restart(vm)
-        seen = unlock(vm, {"PIN": PIN, "passphrase": PASSPHRASE})
-        assert seen == ["PIN"], f"expected one PIN prompt, saw {seen}"
+        seen = unlock(vm, {"token PIN": PIN, "passphrase": PASSPHRASE})
+        assert seen == ["token PIN"], f"expected one PIN prompt, saw {seen}"
         assert "UNLOCKED" in run(vm, "findmnt -no SOURCE / | grep -q mapper && echo UNLOCKED")
+
+        # --- a forgotten PIN must not lock the owner out ------------------------------
+        restart(vm)
+        seen = unlock(vm, {"token PIN": "000000", "passphrase": PASSPHRASE}, tries=14)
+        print("WRONG-PIN prompts:", seen, flush=True)
+        assert seen and seen[-1] == "passphrase", f"no way back with a forgotten PIN: {seen}"
 
         # --- a different TPM: the passphrase still gets in ---------------------------
         run(vm, "sync")
@@ -146,7 +152,7 @@ def test_tpm_pin_unlock_and_recovery(mirror):
         shutil.rmtree(vm.tpm_state)
         vm.start()
         vm.serial_connect()
-        seen = unlock(vm, {"PIN": PIN, "passphrase": PASSPHRASE})
+        seen = unlock(vm, {"token PIN": PIN, "passphrase": PASSPHRASE})
         assert seen and seen[-1] == "passphrase", f"no way back without the TPM: {seen}"
         print("RECOVERY prompts:", seen)
 
@@ -160,7 +166,7 @@ def test_tpm_pin_unlock_and_recovery(mirror):
         assert "TYPED-RC=0" in log and "recovery key added" in log, log[-1500:]
         vm.send("exit\n")
         restart(vm)
-        seen = unlock(vm, {"PIN": PIN, "passphrase": PASSPHRASE})
+        seen = unlock(vm, {"token PIN": PIN, "passphrase": PASSPHRASE})
         assert seen == ["passphrase"], seen
     finally:
         vm.stop()
