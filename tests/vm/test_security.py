@@ -75,7 +75,9 @@ def _reboot(vm: VM, c: Checks) -> Checks:
     c.run("sync", "sync")
     c.ga.close()
     vm.reboot()
-    return _boot(vm)
+    after = _boot(vm)
+    after.failures[:0] = c.failures     # a failure before the restart still fails the run
+    return after
 
 
 def _expected_sysctls() -> list[tuple[str, str]]:
@@ -160,7 +162,7 @@ def test_security_baseline(mirror):
               absent=["syntax error"])
         before = c.status("status-before-reboot")
         c.expect_status(before, {"apps.apparmor": "fail"})   # the kernel parameter is still missing
-        c.run("lsm-param", f"samurai boot set param add lsm={LSM} && grep -c 'lsm={LSM}' /boot/limine.conf && echo PARAM-OK",
+        c.run("lsm-param", f"samurai boot set param add lsm={LSM} && grep -c 'lsm={LSM}' /boot/limine/limine.conf && echo PARAM-OK",
               ["PARAM-OK"])
         c.run("firewall-reload", "firewall-cmd --reload && samurai firewall open localsend --yes && echo OPEN-OK",
               ["OPEN-OK", "53317/tcp"])

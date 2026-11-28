@@ -105,8 +105,8 @@ def test_tpm_pin_unlock_and_recovery(mirror):
                   f"printf %s {PASSPHRASE} | cryptsetup luksAddKey --key-file /etc/cryptsetup-keys.d/samurai-root.key {DEVICE} - && "
                   "samurai security tpm enroll --dry-run; echo KEYFILE-RC=$?")
         assert "key file" in out and "KEYFILE-RC=1" in out, "a key-file system must be refused"
-        out = run(vm, "sed -i -E 's/ rd\\.luks\\.key=[^ ]+//' /boot/limine.conf && "
-                  "! grep -q rd.luks.key /boot/limine.conf && echo PREP-OK")
+        out = run(vm, "sed -i -E 's/ rd\\.luks\\.key=[^ ]+//' /boot/limine/limine.conf && "
+                  "! grep -q rd.luks.key /boot/limine/limine.conf && echo PREP-OK")
         assert "PREP-OK" in out
         restart(vm)
         seen = unlock(vm, {"passphrase": PASSPHRASE})
