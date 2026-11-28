@@ -108,6 +108,11 @@ pub fn is_root(sys: &dyn System) -> bool {
     ok_out(sys, "id", &["-u"]).as_deref() == Some("0")
 }
 
+/// Whether the root filesystem sits on an encrypted device.
+pub fn root_encrypted(sys: &dyn System) -> bool {
+    matches!(root_stack(sys), Some((true, _)))
+}
+
 /// The block device behind `/` and, when it sits on LUKS, the partition holding the container.
 fn root_stack(sys: &dyn System) -> Option<(bool, Option<String>)> {
     let source = ok_out(sys, "findmnt", &["-no", "SOURCE", "/"])?;
@@ -358,7 +363,9 @@ fn words(text: &str) -> Vec<String> {
     text.split_whitespace().map(str::to_string).collect()
 }
 
-fn firewall_items(sys: &dyn System) -> Vec<Item> {
+/// firewalld's D-Bus answers an unprivileged caller with a password dialog (or a refusal), so a
+/// read-only report asks it only as root.
+fn firewall_items(sys: &dyn System, root: bool) -> Vec<Item> {
     if !active(sys, "firewalld") {
         let ufw = active(sys, "ufw");
         let fw = if ufw {
@@ -370,7 +377,10 @@ fn firewall_items(sys: &dyn System) -> Vec<Item> {
         };
         return vec![fw];
     }
-    let Some(zone) = ok_out(sys, "firewall-cmd", &["--get-default-zone"]) else {
+    let zone = root
+        .then(|| ok_out(sys, "firewall-cmd", &["--get-default-zone"]))
+        .flatten();
+    let Some(zone) = zone else {
         return vec![item(
             "net.firewall",
             State::Unknown,
@@ -659,7 +669,7 @@ pub fn collect(sys: &dyn System, online: bool) -> Vec<Item> {
     items.push(secureboot_item(sys));
     items.push(apparmor_item(sys, root));
     items.push(sysctl_item(sys));
-    items.extend(firewall_items(sys));
+    items.extend(firewall_items(sys, root));
     items.push(listening_item(sys));
     items.push(ssh_item(sys));
     items.push(docker_item(sys));

@@ -4,7 +4,7 @@
 //! same list. Steps that change the disk or the network stay commands the user runs in a terminal.
 
 use crate::health::{json_escape, system::System};
-use crate::security::{self, State};
+use crate::security;
 
 pub const USAGE: &str = "usage: samurai welcome [--json | --text | --autostart]
 
@@ -113,8 +113,6 @@ fn deferred_steps(sys: &dyn System) -> Vec<Step> {
 }
 
 pub fn collect(sys: &dyn System) -> Vec<Step> {
-    let security = security::collect(sys, false);
-    let state = |id: &str| security.iter().find(|i| i.id == id);
     let mut steps = vec![step(
         "update",
         "Update the system",
@@ -124,7 +122,8 @@ pub fn collect(sys: &dyn System) -> Vec<Step> {
     )];
     steps.extend(deferred_steps(sys));
     steps.extend(tailscale_step(sys));
-    if state("disk.encryption").is_some_and(|i| i.state == State::Pass) {
+    // only reads that never ask for a password: this runs at login
+    if security::root_encrypted(sys) {
         steps.push(step(
             "recovery-key",
             "Make a disk recovery key",

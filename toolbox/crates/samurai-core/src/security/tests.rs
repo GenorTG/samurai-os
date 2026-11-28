@@ -140,7 +140,7 @@ fn sysctls_are_compared_with_the_running_kernel_per_interface() {
 
 #[test]
 fn firewall_states() {
-    assert_eq!(firewall_items(&Fake::default())[0].state, State::Fail);
+    assert_eq!(firewall_items(&Fake::default(), true)[0].state, State::Fail);
     let sys = |zone: &str| {
         Fake::default()
             .cmd("systemctl is-active firewalld", 0, "active\n")
@@ -152,11 +152,17 @@ fn firewall_states() {
             )
             .cmd(&format!("firewall-cmd --zone={zone} --list-ports"), 0, "\n")
     };
-    assert_eq!(firewall_items(&sys("public"))[0].state, State::Pass);
-    assert_eq!(firewall_items(&sys("home"))[0].state, State::Warn);
-    assert_eq!(firewall_items(&sys("trusted"))[0].state, State::Fail);
+    assert_eq!(firewall_items(&sys("public"), true)[0].state, State::Pass);
+    assert_eq!(firewall_items(&sys("home"), true)[0].state, State::Warn);
+    assert_eq!(firewall_items(&sys("trusted"), true)[0].state, State::Fail);
     let denied = Fake::default().cmd("systemctl is-active firewalld", 0, "active\n");
-    assert_eq!(firewall_items(&denied)[0].state, State::Unknown);
+    assert_eq!(firewall_items(&denied, true)[0].state, State::Unknown);
+    let user = sys("public");
+    assert_eq!(firewall_items(&user, false)[0].state, State::Unknown);
+    assert!(
+        !user.calls().iter().any(|c| c.starts_with("firewall-cmd")),
+        "no password dialog"
+    );
     let tail = sys("public").path("/sys/class/net/tailscale0").cmd(
         "firewall-cmd --get-zone-of-interface=tailscale0",
         0,
