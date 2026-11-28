@@ -4,26 +4,19 @@
 Personal Arch-based distro: upstream Arch repos unchanged, CachyOS below Arch, signed Samurai repo,
 guided installers and CLI/GUI toolbox. VM validation runs on genorbox1. Site: <https://genortg.github.io/samurai-os/>.
 
-## Lane F security (branch `feat/security`, unpublished, 2026-11-28)
-- Built: `samurai-settings-security` 0.1.0 (in `BASE_PACKAGES`; installer adds `lsm=...apparmor...`),
-  `samurai security status|tpm enroll/remove|recovery-key`, `samurai firewall`, `samurai welcome` +
-  toolbox Welcome page and login autostart. samurai-tools 0.4.0-18, samurai-toolbox-gui 0.1.0-2.
-- Docs: `docs/security/hardening.md` (breakage notes, TPM recovery table), `docs/security/secure-boot.md`.
-- Verified (QEMU, all PASS): `test_security.py` (existing install), `test_security_tpm.py` (swtpm: PIN,
-  forgotten PIN, replaced TPM, removal, recovery key), `test_security_install.py` (new KDE install:
-  release offline ISO 2026-11-26 with the branch's packages and installer scripts injected). Unit 320
-  passed 3 skipped; Rust 172, clippy + fmt clean; `ci/test-gui.sh` OK. After the VM runs only the TPM
-  enrolment message changed.
-- Not verified: an ISO built from this branch, real hardware/TPM, Steam or a Proton game (userns,
-  bubblewrap, Flatpak, Firefox sandbox and system Wine were run), `toolbox_gui` VM tests (changed only
-  to pre-mark the welcome window), `firewall zone` on a NetworkManager-managed interface.
-- **No boot entry has a file hash**: Limine verifies nothing today (spec 09 / ADR-0003 claim it does).
-  Secure Boot setup is deliberately not built.
-- Release: publish settings-security + tools + toolbox-gui before any online ISO of this branch.
-  A user's own `/etc/firefox/policies/policies.json` makes the first package install conflict.
-- Open: KDE's Welcome Center opens on top of `samurai welcome` at first login. Existing installs need
-  the package (lane D) plus `samurai boot set param add lsm=...`.
-- VM env: `SAMURAI_TEST_SEC_PKGS=<ci/build-pkgs.sh output>`, optional `SAMURAI_TEST_BASE_DISK`.
+## Integrated on main (2026-11-28, UNRELEASED)
+- Merged `feat/adopt-defaults`, `feat/hardware`, `feat/security` (branches and worktrees removed).
+- New for the next release: `samurai adopt`, `samurai hw`, `samurai security|firewall|welcome`,
+  Hardware + Welcome toolbox pages, CUDA toggle. Packages: new `samurai-chwd`, `samurai-hardware`,
+  `samurai-settings-security`; bumped `samurai-tools` 0.4.0-18, `samurai-base` 0.1.0-2,
+  `samurai-settings-kde` 0.1.0-2, `samurai-toolbox-gui` 0.1.0-2 (22 packages, 15 unchanged).
+- Integration fixes: adopt adds the AppArmor `lsm=` parameter (previewed) and keeps a user's Firefox
+  `policies.json`; Plasma Welcome Center no longer autostarts; notifier unit saw no kernel modules
+  ("reboot pending" for ever) and failed on accounts without `~/.cache/samurai`.
+- Decisions recorded in specs (`docs/specs/OPEN-QUESTIONS.md`, last section).
+- Release records: `docs/releases/2026-11-28-verified.md` and `-new.md` (VM results are there).
+- **The release ISOs must be built fresh from main after the repo is published**: the VM-tested
+  offline ISO `build/int2-offline` predates the two notifier fixes. No online ISO was built.
 
 ## Released (2026-11-26): desktop release, owner-approved
 - ISOs: GitHub release `v0.0.1.90` (latest, tag at e8e3c06): online ISO, offline ISO in 4 parts, signed
@@ -34,11 +27,11 @@ guided installers and CLI/GUI toolbox. VM validation runs on genorbox1. Site: <h
   samurai-tools **0.4.0-17**; digests equal `docs/releases/2026-11-26-rc-packages.sha256`.
   `repo.smart-samurai.pl` fallback mirror: not checked/synced.
 - Previous release `v0.0.1.75` stays on GitHub (carries 0.4.0-14 live tools).
-- Local copies: `build/rel-online-16`, `build/rel-offline-16` (ISOs only). Keep `build/repo`: published
-  file names must keep their bytes.
+- Local copies: `build/rel-online-16` (online ISO); the released offline ISO is on GitHub only.
+  `build/repo` holds the unpublished 22-package build; published file names must keep their bytes.
 - Website: Pages from `pages.yml` on changes under `site/`; keep its claims true on each release.
 
-## Verification (QEMU/KVM, each scenario one run, all PASS)
+## Verification of v0.0.1.90 (QEMU/KVM, each scenario one run, all PASS)
 - Final offline ISO: defaults, installer_gui, offline (forced NVIDIA DKMS, dead mirror).
 - Final online ISO: smoke, attended, update, rollback (rescue + running system), daily, kde.
 - Published stable repo: `test_channel`, installing from the `v0.0.1.75` online ISO and upgrading to
@@ -49,25 +42,12 @@ guided installers and CLI/GUI toolbox. VM validation runs on genorbox1. Site: <h
   container); Rust 145 passed, clippy `-D warnings` + fmt clean; `ci/test-gui.sh` all pages OK (55
   advisory qmllint warnings); repo no-shadowing / no-epoch OK.
 
-## Branch `feat/adopt-defaults` (2026-11-28, unreleased)
-- `samurai adopt` (`updates/samurai-adopt`, spec 03): opt-in move of an older install to the current
-  defaults. samurai-tools **0.4.0-18** ships it with the planner and the Chaotic-AUR trust script under
-  `/usr/lib/samurai/`. Publish the repo before telling users; they run `samurai update`, then `adopt`.
-- VM PASS (`tests/vm/test_adopt.py`, 23 min, v0.0.1.75 online ISO, KDE, new package from a local repo):
-  preview changes nothing, failing transaction restores `pacman.conf`, removed Kate stays removed,
-  `jack2` -> `pipewire-jack`, user files unchanged, second run no-op, reboot, update, snapshot rollback,
-  full desktop meta on the second adoption. Run on the commit before a message-only wording fix.
-- Not verified: adopting from the offline ISO or from v0.0.1.90, `--with gaming|tailscale` beyond preview,
-  non-KDE desktops, non-Limine, the effective Plasma theme for a user without own settings.
-- Not adopted: installer-only steps (graphical keyboard files, motd, panel layout for existing users).
-- Catalog: `craft-launcher` and the `gpu-unlock` toggle removed (no repository carries the package);
-  `ci/check-catalog.sh` (CI job) fails on any offered entry that resolves nowhere.
-- Release notes: `ci/release-iso.sh --publish` needs `--verified FILE` (`docs/releases/README.md`).
-- ADR-0009 accepted.
-
 ## Open / unverified
-- VM only: no real hardware, no real NVIDIA GPU, no game or Windows program launched; installer keyboard
-  layout verified for `us` only; CachyOS kernel switching, systemd-boot and GRUB covered by unit tests only.
+- VM only: no real hardware, TPM or NVIDIA GPU, no game launched; installer keyboard layout verified
+  for `us` only; CachyOS kernel switching, systemd-boot and GRUB covered by unit tests only.
+- `nl.cachyos.org` no longer resolves (2026-11-28). v0.0.1.75 installs list it first, newer configs
+  last in `installer/pacman.conf.target` and `iso/pacman.conf`: consider removing it.
+- Offline ISO build is slow because mksquashfs re-compresses the 5.5 GB package cache with xz.
 - Not run: `test_update_archive`.
 - GUI not VM-exercised: fix-* repairs, mirrors refresh, boot param add/remove, apps upgrade-and-install,
   news acknowledgement.
@@ -75,7 +55,7 @@ guided installers and CLI/GUI toolbox. VM validation runs on genorbox1. Site: <h
 - `publish-testing-repo.yml` skips publishing (no secrets); once secrets exist, a package push to main
   publishes to testing by itself.
 
-## Fixed in this release
+## Fixed in v0.0.1.90
 - `samurai snap rollback` works on a running system; both rollbacks restore every kernel to the ESP.
 - `rescue rollback` leaves nothing mounted and syncs the ESP (power-off left a 0-byte kernel); accepts
   early-cpio initramfs.
@@ -90,8 +70,9 @@ guided installers and CLI/GUI toolbox. VM validation runs on genorbox1. Site: <h
 - Package selection: `installer/samurai-profile-plan` only; schema `docs/plans/profile-schema.md`;
   inventory `docs/plans/defaults-inventory.md`. NVIDIA: one `NVIDIA-MODULE` provider per install.
 - Live ISO boots Plasma (user `live`); `installer/gui` writes the profile, root helper runs `samurai-install`.
-- `toolbox/`: Rust CLI (`samurai-core`, `samurai-cli`: status, health, diag, clean, fix, mirrors, boot, kernel);
-  executors stay shell. `samurai apps` = `updates/samurai-apps` (never `-Sy`, catalog `catalog/`).
+- `toolbox/`: Rust CLI (`samurai-core`, `samurai-cli`: status, health, diag, clean, fix, mirrors, boot,
+  kernel, hw, security, firewall, welcome); executors stay shell (`adopt` is Python).
+  `samurai apps` = `updates/samurai-apps` (never `-Sy`, catalog `catalog/`).
 - GUI `toolbox/gui` (Kirigami): CLI `--json` only; `pkexec` helper allowlist, one polkit action per verb
   (`docs/reviews/toolbox-gui-threat-review.md`).
 - Security default: firewalld public zone (dhcpv6-client; ssh only with ssh_server).
@@ -99,30 +80,26 @@ guided installers and CLI/GUI toolbox. VM validation runs on genorbox1. Site: <h
   sudo `diag bundle --out` stays inside the caller's home and user-file targets run via `System::run_as`;
   VM harness HTTP mirror binds 127.0.0.1.
 
-## Lane E hardware (branch `feat/hardware`, 2026-11-28, unmerged)
-- `samurai hw detect|list|apply|remove|fingerprint`, `drivers.*` checks, fingerprint service, toolbox
-  Hardware page, `[hardware] cuda`, packages `samurai-chwd` + `samurai-hardware` (new). Bumps:
-  samurai-tools 0.4.0-18, samurai-base 0.1.0-2 (depends samurai-hardware), toolbox-gui 0.1.0-2.
-  Release order: all packages to the repo first, ISO second.
-- Verification and gaps: `docs/plans/lane-e-hardware.md`. No real GPU was touched.
-
 ## Next
-1. Release `samurai-tools` 0.4.0-18 (repo first), with release-note files for the next ISO.
-2. Installer: Expert mode, geo-IP, size estimate, chwd/CUDA/gpu-unlock, manual/dual-boot disks,
-   translations, NVIDIA live entry. Defaults: Plymouth/branding, Firefox policy (spec 09), welcome app.
-3. CLI/GUI: more spec-05 checks, `fix audio|pacman|reinstall-all`, `queue`, D-Bus helper.
-4. Firewall presets, Secure Boot (sbctl), TPM2 unlock (spec 09, M8).
+1. Release (owner OK): publish the 22 packages (`build/repo`, repo first), build online + offline
+   ISOs from main, rerun smoke/attended/update/test_channel on them, release with the notes files.
+2. Installer: Expert mode, geo-IP, size estimate, chwd step, manual/dual-boot disks, translations,
+   NVIDIA live entry. Defaults: Plymouth/branding.
+3. CLI/GUI: more spec-05 checks, `fix audio|pacman|reinstall-all`, `queue`, D-Bus helper,
+   `firewall watch`.
+4. Secure Boot (`docs/security/secure-boot.md`), gpu-unlock (deferred, spec 07).
 - Signing key backup: Vaultwarden, restore-tested 2026-11-27 (docs/KEYS.md).
 
 ## Commands
 - `bash scripts/install-hooks.sh` once per clone (per-commit BUILD bump).
-- `test_adopt`: `SAMURAI_TEST_ISO=<v0.0.1.75 online iso> SAMURAI_TEST_PROFILE_REF=v0.0.1.75
-  SAMURAI_TEST_TOOLS_PKG=<new samurai-tools pkg>` (`ci/build-pkgs.sh <dir> samurai-tools`).
-- `bash scripts/install-hooks.sh` once per clone (per-commit BUILD bump). Hardware: `ci/test-hw.sh [--e2e]`.
 - Arch tooling only inside archlinux containers; never edit a running script (AGENTS.md gotchas).
-- `python3 -m pytest -q tests/unit`; `bash ci/test-gui.sh`; VM:
+- `python3 -m pytest -q tests/unit`; `bash ci/test-gui.sh`; `bash ci/test-hw.sh [--e2e]`; VM:
   `SAMURAI_TEST_ISO=<iso> SAMURAI_VM_RUN_ID=<id> pytest -q -s tests/vm/test_<x>.py` under
-  `/tmp/samurai-vm.lock` (+ `SAMURAI_TEST_TOOLS_PKG` / `SAMURAI_TEST_GUI_PKG` where needed).
+  `/tmp/samurai-vm.lock`. Host has no cargo: `.tmp/cargo.sh` (container).
+- Integration suite (local, `.tmp/`): `int2.sh` (repo + offline ISO), `int2-vm.sh <run> <scenario>...`
+  (sets every `SAMURAI_TEST_*` variable from `build/int-pkgs`, `build/int-secpkgs`).
+- `test_adopt` needs the v0.0.1.75 online ISO, `SAMURAI_TEST_PROFILE_REF=v0.0.1.75`, the new tools
+  package and `SAMURAI_TEST_EXTRA_PKGS` (the other unpublished packages).
 - `test_channel` from an old release: `SAMURAI_TEST_ISO=<old online iso>`, `SAMURAI_TEST_CHANNEL=stable`,
   `SAMURAI_TEST_TOOLS_VERSION=<new>`, `SAMURAI_TEST_PROFILE_REF=<old tag>` (download the old ISO from its
   release).
