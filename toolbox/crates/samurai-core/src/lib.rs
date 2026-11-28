@@ -8,6 +8,7 @@ pub mod clean;
 pub mod diag;
 pub mod fix;
 pub mod health;
+pub mod hw;
 pub mod kernel;
 pub mod mirrors;
 pub mod status;
@@ -33,6 +34,7 @@ commands
   mirrors     show or refresh the Arch mirrorlist (samurai mirrors --help)
   boot        boot entries, menu timeout, kernel parameters (samurai boot --help)
   kernel      list, install, remove, choose the default (samurai kernel --help)
+  hw          hardware and driver profiles: detect, list, apply (samurai hw --help)
   version     print the samurai-tools version
   help        this text
 
@@ -64,6 +66,8 @@ pub enum Action {
     Boot,
     /// `samurai kernel`: list, install, remove and choose kernels.
     Kernel,
+    /// `samurai hw`: hardware detection and driver profiles.
+    Hw,
     Version,
     Help,
     Unknown(String),
@@ -95,6 +99,7 @@ pub fn parse(cmd: &str) -> Action {
         "mirrors" => Action::Mirrors,
         "boot" => Action::Boot,
         "kernel" => Action::Kernel,
+        "hw" => Action::Hw,
         "version" | "--version" | "-V" => Action::Version,
         "help" | "--help" | "-h" => Action::Help,
         other => Action::Unknown(other.to_string()),
@@ -167,6 +172,7 @@ mod tests {
         assert_eq!(parse("mirrors"), Action::Mirrors);
         assert_eq!(parse("boot"), Action::Boot);
         assert_eq!(parse("kernel"), Action::Kernel);
+        assert_eq!(parse("hw"), Action::Hw);
         for v in ["version", "--version", "-V"] {
             assert_eq!(parse(v), Action::Version);
         }

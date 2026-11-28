@@ -1,0 +1,5 @@
+# synthetic: one kernel with a prebuilt module
+chassis 3
+virt none
+kernels linux-cachyos
+dev 0000:01:00.0 0300 10de 2204 boot

@@ -43,6 +43,9 @@ for src in /src/pkgbuilds/*/; do
         cp -a /src/updates/interventions/0001-update-mechanism-demo.sh "$pkg/"
         cp -a /src/catalog/garuda-setup-wizard.toml /src/catalog/samurai.toml "$pkg/"
     fi
+    if [ "$pkg" = samurai-chwd ]; then
+        pacman -S --noconfirm --needed rust clang git lua pciutils libusb >/dev/null
+    fi
     if [ "$pkg" = samurai-toolbox-gui ]; then
         pacman -S --noconfirm --needed cmake ninja qt6-base qt6-declarative >/dev/null
         cp -a /src/toolbox/gui "$pkg/gui"

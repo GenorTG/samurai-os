@@ -1,0 +1,5 @@
+# synthetic
+chassis 3
+virt none
+kernels linux-cachyos
+dev 0000:01:00.0 0300 10de 1b81 boot

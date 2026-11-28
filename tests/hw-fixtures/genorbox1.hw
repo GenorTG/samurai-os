@@ -1,0 +1,7 @@
+# captured read-only on genorbox1 (lspci -Dnn, chassis 3) on 2026-11-28; boot_vga assumed on 01:00.0
+chassis 3
+virt none
+kernels linux-cachyos linux-zen
+dev 0000:00:1f.6 0200 8086 15b8
+dev 0000:01:00.0 0300 10de 2204 boot
+dev 0000:02:00.0 0300 10de 1b81

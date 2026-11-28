@@ -1,0 +1,6 @@
+# synthetic: Intel graphics, Broadcom BCM4360 Wi-Fi
+chassis 10
+virt none
+kernels linux-cachyos
+dev 0000:00:02.0 0300 8086 3e92 boot
+dev 0000:03:00.0 0280 14e4 43a0
