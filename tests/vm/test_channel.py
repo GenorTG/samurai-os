@@ -30,6 +30,9 @@ def _release_profile(ref: str) -> str:
     text = re.sub(r"\[user\].*?(?=\n\[|\Z)", user, text, flags=re.S)
     text = text.replace('desktop = "kde"', 'desktop = "none"')
     text = text.replace('kernels = ["linux-cachyos", "linux-zen"]', 'kernels = ["linux"]')
+    # older releases list catalog-backed choices (browsers/apps) in their default profile;
+    # drop them: this scenario tests the upgrade path, not the app catalog of that release
+    text = re.sub(r"(?m)^(browsers|apps)\s*=.*\n", "", text)
     assert 'desktop = "none"' in text and 'kernels = ["linux"]' in text, "release profile changed shape"
     return with_test_autokey(text)
 
