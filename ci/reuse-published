@@ -29,6 +29,9 @@ payload "$pkg" "$tmp/new"
 payload "$tmp/$name" "$tmp/old"
 if ! diff -r --no-dereference "$tmp/old/files" "$tmp/new/files" >/dev/null || ! diff "$tmp/old/modes" "$tmp/new/modes" >/dev/null; then
     echo "error: $name is already published with different contents: bump pkgrel" >&2
+    # name the files, so a build that is merely not reproducible can be told from a real change
+    { diff -rq --no-dereference "$tmp/old/files" "$tmp/new/files" || true
+      diff "$tmp/old/modes" "$tmp/new/modes" || true; } 2>&1 | head -n 20 | sed "s|$tmp/||g; s/^/    /" >&2
     exit 1
 fi
 curl -fsSL --retry 4 -o "$tmp/$name.sig" "$base/${name//:/%3A}.sig" ||
