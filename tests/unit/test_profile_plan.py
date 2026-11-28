@@ -134,9 +134,9 @@ def test_line_and_json_output(tmp_path):
     base = ["python3", str(PLANNER), str(DEFAULT_PROFILE), "--catalog", str(REPO / "catalog")]
     lines = subprocess.run(base, capture_output=True, text=True, check=True).stdout.splitlines()
     assert "pkg samurai-base" in lines and "group docker" in lines
-    assert all(line.split(" ", 1)[0] in {"pkg", "service", "user-service", "group", "defer"} for line in lines)
+    assert all(line.split(" ", 1)[0] in {"pkg", "service", "user-service", "group", "defer", "note"} for line in lines)
     data = json.loads(subprocess.run(base + ["--json"], capture_output=True, text=True, check=True).stdout)
-    assert set(data) == {"packages", "services", "user_services", "user_groups", "deferred"}
+    assert set(data) == {"packages", "services", "user_services", "user_groups", "deferred", "notes"}
 
 
 def test_closure_has_no_duplicates(planner, catalog):
@@ -157,3 +157,27 @@ def test_meta_dependencies_on_samurai_packages_exist():
         listed = re.sub(r"#.*", "", depends.group(1)) if depends else ""
         for name in re.findall(r"samurai-[a-z0-9-]+", listed):
             assert (REPO / "pkgbuilds" / name / "PKGBUILD").is_file(), f"{pkgbuild.parent.name}: {name}"
+
+
+def test_cuda_needs_the_toggle_the_driver_and_a_turing_card(planner, catalog):
+    profile = default_profile()
+    assert profile["hardware"]["cuda"] is True, "spec 07: CUDA is on by default"
+    cuda = set(planner.CUDA_PACKAGES)
+    plan = planner.build_plan(profile, catalog, nvidia=True, cuda_gpu=True)
+    assert cuda <= names(plan) and plan["notes"] == []
+    # a GTX 10xx: driver without the toolkit, and the installer says why
+    plan = planner.build_plan(profile, catalog, nvidia=True)
+    assert not cuda & names(plan)
+    assert plan["notes"] == [planner.CUDA_TOO_OLD]
+    assert f"note {planner.CUDA_TOO_OLD}" in planner.plan_lines(plan)
+    assert not cuda & names(planner.build_plan(profile, catalog, cuda_gpu=True))
+    for off in ({"nvidia": "auto", "cuda": False}, {"nvidia": "auto"}):
+        profile["hardware"] = off
+        plan = planner.build_plan(profile, catalog, nvidia=True, cuda_gpu=True)
+        assert not cuda & names(plan) and plan["notes"] == []
+
+
+def test_cuda_is_not_baked_into_the_offline_iso(planner, catalog):
+    plan = planner.build_plan(default_profile(), catalog, offline=True, nvidia=True, cuda_gpu=True)
+    assert [d["id"] for d in plan["deferred"]] == ["cuda"]
+    assert plan["deferred"][0]["command"] == "sudo pacman -S --needed cuda cudnn nvtop"

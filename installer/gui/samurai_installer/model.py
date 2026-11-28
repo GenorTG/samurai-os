@@ -105,6 +105,7 @@ class Choices:
     reduced_effects: bool = True
 
     nvidia: str = "auto"
+    cuda: bool = True
 
     gaming_enabled: bool = True
     steam: bool = True
@@ -191,7 +192,7 @@ def profile_tables(c: Choices, password_hash: str = "") -> dict[str, dict]:
                              "docker": c.docker, "ai_clis": c.ai_clis, "ollama": c.ollama}
     tables["network"] = {"tailscale": c.tailscale, "reverse_proxy": c.reverse_proxy}
     tables["security"] = {"firewall": c.firewall, "ssh_server": c.ssh_server}
-    tables["hardware"] = {"nvidia": c.nvidia}
+    tables["hardware"] = {"nvidia": c.nvidia, "cuda": c.cuda}
     tables["repos"] = {"samurai": True, "cachyos": True, "chaotic_aur": True,
                        "arch_mirror": c.arch_mirror}
     return tables
@@ -242,6 +243,7 @@ def from_toml(text: str, base: Choices | None = None) -> Choices:
     take(kde, "monitor_widgets", "monitor_widgets")
     take(kde, "reduced_effects", "reduced_effects")
     take(table("hardware"), "nvidia", "nvidia")
+    c.cuda = bool(table("hardware").get("cuda", False))
     # an absent table means "do not install" (schema rule 1)
     gaming = table("gaming")
     c.gaming_enabled = bool(gaming.get("enabled", False))

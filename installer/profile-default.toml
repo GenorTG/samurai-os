@@ -93,3 +93,4 @@ ssh_server = false
 
 [hardware]
 nvidia = "auto"              # auto = install the NVIDIA stack only when an NVIDIA GPU is present
+cuda = true                  # CUDA toolkit (4-5 GiB) on Turing (RTX 20) or newer; skipped otherwise

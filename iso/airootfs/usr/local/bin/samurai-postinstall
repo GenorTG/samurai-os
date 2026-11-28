@@ -182,6 +182,10 @@ fi
 PLAN_ARGS=()
 [ "${SAMURAI_OFFLINE:-0}" = 1 ] && PLAN_ARGS+=(--offline)
 [ "$NVIDIA" = 1 ] && PLAN_ARGS+=(--nvidia)
+# CUDA (spec 07): a Turing or newer chip among the NVIDIA display controllers
+if lspci -mm -nn 2>/dev/null | awk -F'"' '$2 ~ /\[03/ && $4 ~ /\[10de\]/ && $6 ~ /^(TU|GA|AD|GH|GB)[0-9]/ {f=1} END{exit !f}'; then
+    PLAN_ARGS+=(--cuda-gpu)
+fi
 # PCI class 03xx display controller, vendor 1002 = AMD
 if lspci -mm -n 2>/dev/null | awk '{gsub(/"/,"")} $2 ~ /^03/ && $3=="1002"{f=1} END{exit !f}'; then
     PLAN_ARGS+=(--amd)
@@ -193,6 +197,9 @@ mapfile -t PLAN_SERVICES < <(plan_get service)
 mapfile -t PLAN_USER_SERVICES < <(plan_get user-service)
 mapfile -t PLAN_GROUPS < <(plan_get group)
 mapfile -t PLAN_DEFERRED < <(plan_get defer)
+while IFS= read -r note; do
+    [ -n "$note" ] && log "note: $note"
+done < <(plan_get note)
 [ "${#PLAN_PKGS[@]}" -gt 0 ] || fatal "the package plan is empty" 12
 log "packages: ${#PLAN_PKGS[@]} selected: ${PLAN_PKGS[*]}"
 pac_install "${PLAN_PKGS[@]}" || fatal "package installation failed" 16

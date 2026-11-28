@@ -84,6 +84,7 @@ ssh_server = false
 
 [hardware]                  # page 7
 nvidia = "auto"
+cuda = true
 
 [repos]                     # fixed; may be omitted
 samurai = true
@@ -105,6 +106,12 @@ arch_mirror = "auto"
 | `theme` | string | `"breeze"` | `"breeze"`. `otto`, `scratchy` are refused until their packages exist |
 | `monitor_widgets` | bool | `true` | CPU/GPU monitor widgets in the top panel |
 | `reduced_effects` | bool | `true` | speed-first KWin effects (spec 14) |
+
+`[hardware]` (page 7)
+| Key | Type | Absent | Values |
+|-----|------|--------|--------|
+| `nvidia` | string | `"auto"` | `"auto"`: the open modules when every NVIDIA card can run them (Turing or newer; an older card keeps nouveau until `samurai hw apply`); `"yes"`, `"no"` |
+| `cuda` | bool | `false` | `cuda`, `cudnn`, `nvtop` (about 4-5 GiB) when the NVIDIA stack is installed and a Turing or newer card is present (`--cuda-gpu`); otherwise the planner adds a note. Not on the offline medium: deferred offline |
 
 `[gaming]` (page 8)
 | Key | Type | Absent | Installs |
@@ -156,9 +163,10 @@ is **deferred**: the install succeeds and writes the exact command to
  "services": ["docker.socket"],
  "user_services": [],
  "user_groups": ["docker"],
- "deferred": [{"id": "aider", "command": "samurai apps install aider", "reason": "per-user installer"}]}
+ "deferred": [{"id": "aider", "command": "samurai apps install aider", "reason": "per-user installer"}],
+ "notes": []}
 ```
-Options: `--offline`, `--nvidia`, `--amd` (GPU-dependent packages), `--catalog DIR`.
+Options: `--offline`, `--nvidia`, `--cuda-gpu`, `--amd` (GPU-dependent packages), `--catalog DIR`.
 `--list browsers|ai-cli` prints the selectable catalog ids with names; `--offline-closure` prints
 the packages the offline ISO carries for these choices. `"offline"` says whether the offline medium
 carries a package (extra `packages.install` names are assumed to be on it).

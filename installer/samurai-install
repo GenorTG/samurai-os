@@ -314,6 +314,13 @@ wizard() {
 
     wizard_software
 
+    # CUDA (spec 07): asked only when a Turing or newer NVIDIA card is present
+    WIZ_CUDA=false
+    if lspci -mm -nn 2>/dev/null | awk -F'"' '$2 ~ /\[03/ && $4 ~ /\[10de\]/ && $6 ~ /^(TU|GA|AD|GH|GB)[0-9]/ {f=1} END{exit !f}'; then
+        WIZ_CUDA=true
+        if ! ask_yes "CUDA toolkit for the NVIDIA card (about 4 GB download)" y; then WIZ_CUDA=false; fi
+    fi
+
     # firewall (spec 09 / ADR-0006): firewalld on by default
     read -r -p "  Firewall (firewalld, deny inbound) [Y/n]: " fw
     case "$fw" in n|N) WIZ_FW=none ;; *) WIZ_FW=firewalld ;; esac
@@ -326,7 +333,7 @@ wizard() {
     echo "  LUKS2:   $WIZ_ENC"
     echo "  host:    $WIZ_HOST | tz: $WIZ_TZ"
     echo "  kernels:$(echo $WIZ_KERNELS) | bootloader: $WIZ_BLDR"
-    echo "  desktop: $WIZ_DESKTOP | browsers: ${WIZ_BROWSERS[*]:-none}"
+    echo "  desktop: $WIZ_DESKTOP | browsers: ${WIZ_BROWSERS[*]:-none} | CUDA: $WIZ_CUDA"
     echo "  gaming:  $WIZ_GAMING${WIZ_GAMING_OFF[*]:+ (without ${WIZ_GAMING_OFF[*]})}"
     echo "  python:  ${WIZ_PYTHON[*]:-system only} | conda: $WIZ_CONDA | docker: $WIZ_DOCKER"
     echo "  AI CLIs: ${WIZ_AI[*]:-none} | ollama: $WIZ_OLLAMA | apps: ${WIZ_APPS[*]:-none}"
@@ -352,6 +359,7 @@ wizard() {
         printf '\n[packages]\ndesktop = "%s"\nbrowsers = %s\napps = %s\ninstall = [\n    "samurai-release",\n    "samurai-mirrorlist",\n    "samurai-keyring",\n    "qemu-guest-agent",\n    "networkmanager",\n    "wpa_supplicant",\n]\n' \
             "$WIZ_DESKTOP" "$(toml_list "${WIZ_BROWSERS[@]}")" "$(toml_list "${WIZ_APPS[@]}")"
         wizard_software_toml
+        printf '\n[hardware]\nnvidia = "auto"\ncuda = %s\n' "$WIZ_CUDA"
         printf '\n[repos]\nsamurai = true\ncachyos = true\nchaotic_aur = true\narch_mirror = "auto"\n\n[security]\nfirewall = "%s"\nssh_server = %s\n' \
             "$WIZ_FW" "$WIZ_SSH"
         } > "$WIZ_PROFILE"      # redirect inside the subshell: the umask applies to the file
@@ -605,8 +613,15 @@ case "$NVIDIA_MODE" in
     yes) WANT_NVIDIA=1 ;;
     no) WANT_NVIDIA=0 ;;
     auto)
-        # PCI class 0300 (VGA) / 0302 (3D controller), vendor 10de
-        if lspci -mm -n 2>/dev/null | awk '{gsub(/"/,"")} ($2=="0300"||$2=="0302") && $3=="10de"{f=1} END{exit !f}'; then
+        # PCI class 0300 (VGA) / 0302 (3D controller), vendor 10de. The open
+        # modules drive Turing and newer only, and nvidia-utils blacklists
+        # nouveau: with an older card present they would leave it without any
+        # display driver, so such a machine keeps nouveau and `samurai hw apply`
+        # picks the legacy branch later (spec 07).
+        if lspci -mm -nn 2>/dev/null | awk -F'"' '
+                ($2 ~ /\[030[02]\]/) && $4 ~ /\[10de\]/ {
+                    n++; if ($6 ~ /^(G[0-9]|GT[0-9]|GF[0-9]|GK[0-9]|GM[0-9]|GP[0-9]|GV[0-9])/) old++ }
+                END { exit !(n && !old) }'; then
             WANT_NVIDIA=1
         else
             WANT_NVIDIA=0
@@ -642,7 +657,7 @@ if [ "$WANT_NVIDIA" -eq 1 ]; then
     fi
     log "gpu: NVIDIA stack (${NVIDIA_PKGS[*]})"
 else
-    log "gpu: no NVIDIA display controller (hardware.nvidia=$NVIDIA_MODE): Mesa/Intel stacks only"
+    log "gpu: no NVIDIA card for the open modules (hardware.nvidia=$NVIDIA_MODE): Mesa/Intel stacks only (older NVIDIA cards: samurai hw apply)"
 fi
 GPU_PKGS+=("${NVIDIA_PKGS[@]}")
 # archive-pinned installs (spec 11 update-from-archive): the profile's

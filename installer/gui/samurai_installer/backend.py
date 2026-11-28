@@ -237,7 +237,9 @@ class Backend(QObject):
         try:
             result["error"] = engine.validate(self._tools, text)
             if not result["error"]:
-                planned = engine.plan(self._tools, text, self.offlineInstall, nvidia, amd)
+                cuda_gpu = any(g.get("cuda") for g in self._facts.get("gpus", []))
+                planned = engine.plan(self._tools, text, self.offlineInstall, nvidia, amd,
+                                      cuda_gpu)
                 groups: dict[str, list[str]] = {}
                 for package in planned["packages"]:
                     groups.setdefault(package["group"], []).append(package["name"])

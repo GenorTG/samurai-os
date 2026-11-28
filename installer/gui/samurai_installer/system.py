@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import re
 import subprocess
 from dataclasses import dataclass, field
 
@@ -128,6 +129,10 @@ def memory_mib() -> int:
     return 0
 
 
+# NVIDIA chips Arch's CUDA toolkit supports: Turing and newer (spec 07)
+CUDA_CHIP = re.compile(r"^(TU|GA|AD|GH|GB)[0-9]")
+
+
 def parse_gpus(lspci_mm: str) -> list[dict]:
     """Display controllers from ``lspci -mm -nn -D``: PCI classes 0300/0302/0380."""
     gpus = []
@@ -136,7 +141,8 @@ def parse_gpus(lspci_mm: str) -> list[dict]:
         if len(parts) < 6 or not any(f"[{c}]" in parts[1] for c in ("0300", "0302", "0380")):
             continue
         gpus.append({"address": parts[0].strip(), "vendor": parts[3], "device": parts[5],
-                     "nvidia": "[10de]" in parts[3]})
+                     "nvidia": "[10de]" in parts[3],
+                     "cuda": "[10de]" in parts[3] and bool(CUDA_CHIP.match(parts[5]))})
     return gpus
 
 

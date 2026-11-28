@@ -64,11 +64,13 @@ def validate(tools: Tools, text: str) -> str:
     return reason[-1].removeprefix("VALIDATION ERROR: ") if reason else "validation failed"
 
 
-def plan(tools: Tools, text: str, offline: bool, nvidia: bool, amd: bool) -> dict:
+def plan(tools: Tools, text: str, offline: bool, nvidia: bool, amd: bool,
+         cuda_gpu: bool = False) -> dict:
     argv = [*tools.planner, "--json"]
     argv += ["--offline"] if offline else []
     argv += ["--nvidia"] if nvidia else []
     argv += ["--amd"] if amd else []
+    argv += ["--cuda-gpu"] if cuda_gpu else []
     done = _with_profile(text, argv)
     try:
         if done.returncode != 0:

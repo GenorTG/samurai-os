@@ -3,7 +3,7 @@
 # yay comes from [cachyos]/[chaotic-aur] (ADR-0007).
 pkgname=samurai-base
 pkgver=0.1.0
-pkgrel=1
+pkgrel=2
 pkgdesc="Samurai OS base system: firmware, command-line tools, snapshots, AUR helper"
 arch=(any)
 url="https://github.com/GenorTG/samurai-os"
@@ -16,6 +16,7 @@ depends=(
     networkmanager wpa_supplicant pciutils usbutils
     git github-cli base-devel micro nano btop fastfetch eza bat ripgrep fd fzf
     zoxide tldr rsync wget curl unzip zip 7zip man-db man-pages
+    samurai-hardware   # chwd profiles for `samurai hw` (spec 07)
     yay
 )
 source=(LICENSE)
