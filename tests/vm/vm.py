@@ -54,7 +54,8 @@ def _find_ovmf() -> tuple[str, str]:
 class VM:
     def __init__(self, name: str, iso: str | None = None, disk: str | None = None,
                  disk_size: str = "40G", ram: str = "4096", smp: str = "4",
-                 pointer: bool = False, graphical: bool = False, tpm: bool = False):
+                 pointer: bool = False, graphical: bool = False, tpm: bool = False,
+                 display: tuple[int, int] = (1280, 800)):
         name = _artifact_name(name)
         self.name = name
         WORK.mkdir(parents=True, exist_ok=True)
@@ -69,6 +70,7 @@ class VM:
         self.ram, self.smp = ram, smp
         self.pointer = pointer  # absolute USB tablet, for scenarios that click in the GUI
         self.graphical = graphical   # KMS-capable display + absolute pointer for GUI tests
+        self.display = display             # preferred guest resolution for graphical runs
         self.extra_args: list[str] = []   # further QEMU arguments (e.g. a hot-added device)
         # an emulated TPM 2.0 whose state survives restarts until the test deletes it
         self.tpm_state = WORK / f"{name}-tpm" if tpm else None
@@ -116,7 +118,7 @@ class VM:
         if self.iso:
             cmd += ["-drive", f"file={self.iso},media=cdrom,read-only=on"]
         if self.graphical:
-            cmd += ["-vga", "none", "-device", "virtio-vga,xres=1280,yres=800",
+            cmd += ["-vga", "none", "-device", f"virtio-vga,xres={self.display[0]},yres={self.display[1]}",
                     "-device", "qemu-xhci", "-device", "usb-tablet",
                     # a restart asked for inside the guest pauses the VM, so the test
                     # can eject the medium before the firmware looks at it again

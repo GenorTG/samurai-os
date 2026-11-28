@@ -4,6 +4,7 @@ guest agent.
 """
 from __future__ import annotations
 
+import json
 import os
 import pathlib
 import re
@@ -97,6 +98,9 @@ def install_packages(ga, mirror_dir: pathlib.Path, packages: list[pathlib.Path])
                    + " ".join(shlex.quote(n) for n in names) + " 2>&1", timeout=600)
 
 
+CONTENT_CENTRE = (760, 450)   # inside the page area, right of the sidebar
+SCROLL_STEPS = 6
+
 class Desktop:
     def __init__(self, vm: VM, ga):
         self.vm, self.ga = vm, ga
@@ -152,8 +156,24 @@ class Desktop:
                 break
         return sorted(hits, key=lambda p: (p[1], p[0]))
 
+    def wheel(self, clicks: int, direction: str = "down") -> None:
+        """Scroll the content under the pointer (QEMU rel wheel events)."""
+        png = self.shot("ocr")
+        w, h = self.size(png)
+        self.vm.move(int(w * 0.55), int(h * 0.55), w, h)
+        button = "wheel-down" if direction == "down" else "wheel-up"
+        for _ in range(clicks):
+            self.vm._input({"type": "btn", "data": {"down": True, "button": button}},
+                           {"type": "btn", "data": {"down": False, "button": button}})
+            time.sleep(0.12)
+        time.sleep(0.4)
+
     def wait_text(self, phrase: str, timeout: float = 60) -> list[tuple[int, int]]:
+        """Wait for `phrase`. Pages scroll: when it is not on screen, scroll down and
+        back up before giving up (the kernel list pushes the boot settings below the
+        fold, and a click on a control the tester never scrolled to used to fail)."""
         deadline = time.time() + timeout
+        scrolled = 0
         while True:
             hits = self.find(phrase)
             if hits:
@@ -161,6 +181,9 @@ class Desktop:
             if time.time() > deadline:
                 self.shot("missing-text")
                 raise AssertionError(f"the screen never showed {phrase!r}")
+            if time.time() > deadline - timeout + 6 and scrolled < SCROLL_STEPS:
+                self.wheel(4, "down")
+                scrolled += 1
             time.sleep(2)
 
     # ------------------------------------------------------------ doing
@@ -202,6 +225,30 @@ class Desktop:
         self.shot(name)
         self.vm.type_text(TEST_USER_PASSWORD)
         self.vm.key("ret")
+
+    def roomier_screen(self) -> str:
+        """Ask Plasma for the largest mode the virtual card offers.
+
+        The pages grew past an 800-pixel screen (six kernels push the boot settings below the
+        fold) and the OCR finder only sees what is on screen. Best effort: when no bigger mode
+        exists the caller falls back to scrolling."""
+        out = run(self.ga, "kscreen-doctor -j 2>/dev/null", check=False)
+        try:
+            data = json.loads(out[out.index("{"):])
+        except (ValueError, IndexError):
+            return "kscreen-doctor: no JSON"
+        best = None
+        for output in data.get("outputs", []):
+            for mode in output.get("modes", []):
+                wh = (mode.get("width", 0), mode.get("height", 0))
+                if wh[0] >= 1600 and wh[1] >= 1000 and (best is None or wh > best[0]):
+                    best = (wh, output.get("name", ""), mode.get("id", ""))
+        if not best:
+            return "kscreen-doctor: no larger mode"
+        (w, h), name, mode_id = best
+        run(self.ga, f"kscreen-doctor output.{name}.mode.{mode_id} output.{name}.scale.1", check=False)
+        time.sleep(3)
+        return f"kscreen-doctor: {name} {w}x{h}"
 
     def open_toolbox(self, page: str = "overview") -> None:
         self.close_toolbox()

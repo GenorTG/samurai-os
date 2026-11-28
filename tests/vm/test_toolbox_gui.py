@@ -68,7 +68,9 @@ def desktop(mirror):
         ga = vm.qga(timeout=900)
         wait_for_plasma(ga)
         print(install_packages(ga, mirror.dir, packages)[-800:])
-        yield Desktop(vm, ga)
+        d = Desktop(vm, ga)
+        print(d.roomier_screen())   # taller page; the finder only sees what is on screen
+        yield d
         ga.close()
     finally:
         vm.stop()
