@@ -238,8 +238,12 @@ def test_default_kde_system(mirror):
         c.run("plasma-welcome", env + " kreadconfig6 --file plasma-welcomerc --group General --key ShowUpdatePage; "
               f"pgrep -u {USER} -x plasma-welcome || echo NO-PLASMA-WELCOME", ["false", "NO-PLASMA-WELCOME"])
         # the sandboxed user unit sees the running kernel's modules: no false reboot notice
-        c.run("notifier", env + " systemctl --user start samurai-notifier.service; "
-              f"cat /home/{USER}/.local/state/samurai/update-check", ["reboot=0"], timeout=240)
+        # behind the dead mirror the check itself fails, but the unit must get as far as running it
+        c.run("notifier", f"rm -rf /home/{USER}/.cache/samurai; " + env + " systemctl --user start samurai-notifier.service; "
+              + env + " systemctl --user show -p ExecMainStatus samurai-notifier.service; "
+              f"cat /home/{USER}/.local/state/samurai/update-check; ls -d /home/{USER}/.cache/samurai; "
+              f"journalctl _SYSTEMD_USER_UNIT=samurai-notifier.service --no-pager | tail -5",
+              ["reboot=0", f"/home/{USER}/.cache/samurai"], absent=["ExecMainStatus=226"], timeout=240)
         vm.screendump("defaults-01-desktop")
         # started by the user's systemd manager: the real session environment
         c.run("terminal", env + " systemd-run --user --collect --quiet konsole; sleep 10; "

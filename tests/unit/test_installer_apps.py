@@ -150,6 +150,13 @@ def test_license_files_present():
     assert body in text, "LICENSE must carry the unmodified PolyForm text"
 
 
+def test_notifier_unit_creates_the_directories_it_writes():
+    """ReadWritePaths= on a missing directory fails the unit (226/NAMESPACE) on a fresh account."""
+    lines = (REPO / "updates" / "samurai-notifier.service").read_text().splitlines()
+    assert "StateDirectory=samurai" in lines and "CacheDirectory=samurai" in lines
+    assert not [line for line in lines if line.startswith("ReadWritePaths=")]
+
+
 @pytest.mark.parametrize("unit", ["samurai-notifier.service", "samurai-health.service"])
 def test_units_that_read_kernel_modules_can_see_them(unit):
     """ProtectKernelModules= hides /usr/lib/modules: the notifier reported "reboot pending" forever

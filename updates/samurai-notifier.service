@@ -13,7 +13,12 @@ IOSchedulingClass=idle
 NoNewPrivileges=yes
 RestrictSUIDSGID=yes
 ProtectSystem=strict
-ReadWritePaths=%S/samurai %C/samurai
+# systemd creates both (writable) before the sandbox is set up: naming them in ReadWritePaths= failed
+# the unit on every account that did not have them yet
+StateDirectory=samurai
+StateDirectoryMode=0700
+CacheDirectory=samurai
+CacheDirectoryMode=0700
 PrivateTmp=yes
 ProtectKernelTunables=yes
 # not ProtectKernelModules=yes: in a user unit it hides /usr/lib/modules too, and every check
