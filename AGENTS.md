@@ -94,3 +94,13 @@ See `docs/specs/01-ARCHITECTURE.md` "Source layout". Today only `docs/`, `script
   console (PID 1 hung in `tty_wait_until_sent` mid-reboot, `systemctl` timing out).
 - Plasma autologin needs `DisplayServer=wayland` in SDDM: with the default X11 server, stopping it right
   after the autologin kills the new session. Live keyboard changes need `kwriteconfig6 --notify`.
+- A PKGBUILD source ending in `.asc`/`.sig` is taken as a detached signature by makepkg (build fails with
+  "PGP signatures could not be verified"): ship key files under another source name.
+- Never make a package start owning a `/usr/local/bin/samurai-*` path that existing installs hold as an
+  unowned ISO copy (`samurai-profile-plan`): their next `samurai update` fails with a file conflict. New
+  library-like files go under `/usr/lib/samurai/`.
+- `samurai adopt` selects nothing itself (the planner does); a default added by a new release must be in
+  the planner or a meta package, or adopt will not bring it to old installs.
+- `ci/build-pkgs.sh` output that a queued VM test reads must be replaced file by file, never `rm -rf`ed:
+  the test may take the VM lock at any moment.
+
