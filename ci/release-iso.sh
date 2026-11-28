@@ -2,6 +2,7 @@
 # Package built ISOs as a GitHub release (spec 08: installers).
 #
 # Usage: ci/release-iso.sh <online.iso> <offline.iso> [--sign] [--publish]
+#                           [--verified FILE] [--new FILE]
 #
 # Writes dist/<tag>/:
 #   samurai-os-<date>-online-x86_64.iso          (fits GitHub's 2 GiB asset limit)
@@ -9,6 +10,11 @@
 #   SHA256SUMS                                   (every asset AND the joined offline ISO)
 #   SHA256SUMS.sig                               (--sign: detached signature by the build subkey)
 #   RELEASE-NOTES.md
+# --verified FILE  markdown body of the notes' "Verified" section: what was really
+#           tested for THIS release, and what was not. Required by --publish: the
+#           script holds no verification claim of its own.
+# --new FILE       markdown body of the "New in this release" section (left out
+#           when not given).
 # --sign    signs SHA256SUMS with the signing subkey in $GNUPGHOME (default
 #           ~/samurai-keys/gnupg, docs/KEYS.md); users verify it with the public
 #           key shipped in pkgbuilds/samurai-keyring/build-key.txt.
@@ -20,14 +26,26 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 online="${1:?online ISO path}"; offline="${2:?offline ISO path}"; shift 2
-publish=0; sign=0
-for arg in "$@"; do
-    case "$arg" in
+publish=0; sign=0; verified_file=""; new_file=""
+while [ $# -gt 0 ]; do
+    case "$1" in
         --publish) publish=1 ;;
         --sign) sign=1 ;;
-        *) echo "error: unknown argument $arg (--sign | --publish)" >&2; exit 2 ;;
+        --verified) verified_file="${2:?--verified needs a file}"; shift ;;
+        --new) new_file="${2:?--new needs a file}"; shift ;;
+        *) echo "error: unknown argument $1 (--sign | --publish | --verified FILE | --new FILE)" >&2; exit 2 ;;
     esac
+    shift
 done
+for f in "$verified_file" "$new_file"; do
+    [ -z "$f" ] && continue
+    { [ -f "$f" ] && grep -q '[^[:space:]]' "$f"; } ||
+        { echo "error: release notes file $f is missing or empty" >&2; exit 2; }
+done
+if [ "$publish" -eq 1 ] && [ -z "$verified_file" ]; then
+    echo "error: --publish needs --verified FILE (what was tested for this release)" >&2
+    exit 2
+fi
 version="$(tr -d '[:space:]' < "$repo_root/VERSION")"
 case "$version" in
     *[!0-9.]*|"") echo "error: VERSION '$version' is not dotted digits" >&2; exit 2 ;;
@@ -107,8 +125,8 @@ cat > "$dist/RELEASE-NOTES.md" <<EOF
 Arch Linux underneath, a thin signed layer on top. KDE Plasma, \`linux-cachyos\` + \`linux-zen\`,
 LUKS2 + btrfs, staged updates with snapshots and a rescue rollback.
 
-> Early, personal release. Every feature listed here passes its VM scenario on QEMU/KVM; no
-> physical-hardware guarantee yet. Back up before installing on a real machine.
+> Early, personal release. What was tested is listed under "Verified"; there is no physical-hardware
+> guarantee. Back up before installing on a real machine.
 
 ### Pick an installer
 
@@ -131,33 +149,17 @@ $verify_block
 Write either ISO to a USB stick (\`sudo dd if=<iso> of=/dev/sdX bs=4M status=progress oflag=sync\`, or
 copy it onto a Ventoy stick) and boot it. The live system is a KDE Plasma desktop with icons for the
 graphical installer, the terminal installer (\`samurai-install\`) and rescue.
-
-### New in this release
-- **Graphical installer** over the same install engine as the terminal one (ADR-0009).
-- **Samurai Toolbox**, a KDE app: health and repairs, apps, cleanup, kernels and boot settings, updates,
-  snapshots, diagnostics. Changes ask for the administrator password.
-- **Preinstalled by default** on KDE: command-line tools, fonts, KDE apps, performance settings, Breeze
-  Dark with a two-panel layout, PipeWire, Docker, and a gaming set (Steam, Heroic, GameMode, MangoHud,
-  gamescope, GE-Proton, Proton-CachyOS, Wine). Each choice can be changed in the installer.
-- **Optional at install**: browsers, Python 3.10-3.13, Miniforge, AI command-line tools, Ollama, Tailscale,
-  a reverse proxy. **Chaotic-AUR** is enabled, below Arch, with signature checking.
-- Fixed: \`samurai snap rollback\` failed on a running system, and a rescue rollback could leave an empty
-  kernel on the boot partition.
-
-Existing installs get the new tools with \`samurai update\`, but not the new preinstalled software.
-
-### Verified (QEMU/KVM, OVMF)
-- Graphical install of an encrypted KDE system from the offline ISO, then boot and login.
-- Offline install behind a dead mirror (NVIDIA DKMS modules built for both default kernels), default KDE
-  software and settings, guided terminal install, daily use with a full update.
-- Toolbox actions through the real password dialog, health detect and repair, both rollback paths.
-- Upgrade of an installed system to these packages from the published repository.
-
-Not verified: physical hardware, any real GPU, running games or Windows programs, CachyOS kernel
-switching, boot entry management on GRUB or systemd-boot, keyboard layouts other than US.
-
-Source, specs and VM tests: <https://github.com/GenorTG/samurai-os>. Website: <https://genortg.github.io/samurai-os/>.
 EOF
+# per-release text comes from files: inserted verbatim, never expanded by the shell
+{
+    if [ -n "$new_file" ]; then printf '\n### New in this release\n'; cat -- "$new_file"; fi
+    if [ -n "$verified_file" ]; then
+        printf '\n### Verified\n'; cat -- "$verified_file"
+    else
+        echo "warning: no --verified file: these notes cannot be published" >&2
+    fi
+    printf '\nSource, specs and VM tests: <https://github.com/GenorTG/samurai-os>. Website: <https://genortg.github.io/samurai-os/>.\n'
+} >> "$dist/RELEASE-NOTES.md"
 
 echo "==> dist ready: $dist"
 ls -lh "$dist"
