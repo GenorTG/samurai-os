@@ -304,6 +304,28 @@ fn an_installed_provider_of_the_same_branch_is_kept() {
     assert_eq!(plan.steps[0].status, Status::Extras);
     assert_eq!(plan.steps[0].install, words(&["libva-nvidia-driver"]));
     assert!(plan.steps[0].remove.is_empty());
+    assert!(plan.steps[0].keep_provider);
+    // chwd would add a second, conflicting module package: pacman installs the rest
+    let sys = sys
+        .cmd("pacman -Sw --noconfirm libva-nvidia-driver", 0, "")
+        .cmd("pacman -S --needed --noconfirm libva-nvidia-driver", 0, "")
+        .cmd(OPEN_T, 127, "nvidia-open-dkms\ndkms\n");
+    let plan = built(&sys, &Request::default());
+    apply::apply(&sys, &plan, SnapshotPolicy::Skip).expect("extras installed");
+    assert!(!sys.calls().iter().any(|c| c.starts_with("chwd -i")));
+    // --reinstall takes the profile's own provider instead
+    let redo = built(
+        &sys,
+        &Request {
+            reinstall: true,
+            ..Request::default()
+        },
+    );
+    assert!(!redo.steps[0].keep_provider);
+    assert!(redo.steps[0]
+        .install
+        .contains(&"nvidia-open-dkms".to_string()));
+    assert_eq!(redo.steps[0].remove, words(&["linux-cachyos-nvidia-open"]));
 }
 
 #[test]

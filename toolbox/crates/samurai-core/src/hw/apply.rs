@@ -186,6 +186,10 @@ fn run_step(sys: &dyn System, step: &Step) -> Result<(), String> {
             }
         }
     }
+    if step.keep_provider {
+        pacman(sys, &["-S", "--needed", "--noconfirm"], &step.install)?;
+        return verify(sys, step);
+    }
     drop_record(sys, &step.profile)?;
     match sys.run_visible("chwd", &["-i", &step.profile]) {
         Some(0) => verify(sys, step),
@@ -214,7 +218,7 @@ fn restore(sys: &dyn System, before: &[String], saved: &Saved, snapshot: Option<
             }
             let gone: Vec<String> = previous
                 .iter()
-                .filter(|p| !now.contains(p) || !added.is_empty())
+                .filter(|p| !now.contains(p))
                 .cloned()
                 .collect();
             if !gone.is_empty() {

@@ -69,6 +69,7 @@ class VM:
         self.ram, self.smp = ram, smp
         self.pointer = pointer  # absolute USB tablet, for scenarios that click in the GUI
         self.graphical = graphical   # KMS-capable display + absolute pointer for GUI tests
+        self.extra_args: list[str] = []   # further QEMU arguments (e.g. a hot-added device)
         self.code, self.vars = _find_ovmf()
         self.vars_rw = str(WORK / f"{name}-VARS.fd")
         self.serial_sock = str(WORK / f"{name}-serial.sock")
@@ -116,6 +117,7 @@ class VM:
                     # a restart asked for inside the guest pauses the VM, so the test
                     # can eject the medium before the firmware looks at it again
                     "-action", "reboot=shutdown,shutdown=pause"]
+        cmd += self.extra_args
         # pylint: disable=consider-using-with
         self.proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
 

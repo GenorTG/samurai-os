@@ -258,6 +258,9 @@ pub struct Step {
     /// What must be removed first (conflicting NVIDIA packages).
     pub remove: Vec<String>,
     pub recorded: bool,
+    /// The installed module package differs from the profile's but serves every kernel: only the
+    /// other packages are installed (chwd would try to add a conflicting module package).
+    pub keep_provider: bool,
 }
 
 impl Step {
@@ -461,6 +464,7 @@ fn step_for(
         core_missing = !install.is_empty();
     }
     let mut status = None;
+    let mut keep_provider = false;
 
     if let Some(branch) = branch {
         if !packages.iter().any(|p| module_branch(p) == Some(branch)) {
@@ -478,13 +482,16 @@ fn step_for(
             }
             current => {
                 let uncovered = kernels_without_module(sys);
-                if current.is_some() && uncovered.is_empty() {
+                if current.is_some() && uncovered.is_empty() && !reinstall {
                     // every kernel has the module: keep the installed provider as it is
+                    keep_provider = packages
+                        .iter()
+                        .any(|p| module_branch(p).is_some() && !installed.contains(p));
                     install.retain(|p| {
                         module_branch(p).is_none() && p != "dkms" && !p.ends_with("-headers")
                     });
                 } else {
-                    core_missing = true;
+                    core_missing |= current.is_none() || !uncovered.is_empty();
                     // a DKMS provider and a prebuilt one cannot both provide NVIDIA-MODULE
                     let wants_dkms = packages.iter().any(|p| p.ends_with("-dkms"));
                     remove = state
@@ -527,6 +534,7 @@ fn step_for(
         install,
         remove,
         recorded,
+        keep_provider,
     })
 }
 
