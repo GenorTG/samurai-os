@@ -228,8 +228,9 @@ class Backend(QObject):
     def buildSummary(self) -> None:
         c = self._model
         text = model.to_toml(c)
-        nvidia = c.nvidia == "yes" or (c.nvidia == "auto" and
-                                       any(g["nvidia"] for g in self._facts.get("gpus", [])))
+        gpus = self._facts.get("gpus", [])
+        nvidia = c.nvidia == "yes" or (c.nvidia == "auto" and any(g["nvidia"] for g in gpus)
+                                       and not any(g.get("legacy") for g in gpus))
         amd = any("[1002]" in g["vendor"] for g in self._facts.get("gpus", []))
         result: dict = {"error": "", "groups": [], "deferred": [], "count": 0}
         disk = next((d for d in self._facts.get("disks", []) if d["path"] == c.disk), None)
@@ -237,7 +238,7 @@ class Backend(QObject):
         try:
             result["error"] = engine.validate(self._tools, text)
             if not result["error"]:
-                cuda_gpu = any(g.get("cuda") for g in self._facts.get("gpus", []))
+                cuda_gpu = any(g.get("cuda") for g in gpus)
                 planned = engine.plan(self._tools, text, self.offlineInstall, nvidia, amd,
                                       cuda_gpu)
                 groups: dict[str, list[str]] = {}

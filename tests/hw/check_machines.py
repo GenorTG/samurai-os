@@ -32,6 +32,20 @@ EXPECTED = {
 }
 
 
+# machine -> drivers.nvidia on a system without any driver: Turing+ needs one, older cards run on
+# nouveau, no NVIDIA card skips the check
+NVIDIA_CHECK = {"genorbox1": "issue", "desktop-rtx3090": "issue", "desktop-rtx3090-cachyos": "issue",
+                "desktop-rtx5080": "issue", "desktop-gtx1070": "ok", "desktop-gtx750": "ok",
+                "desktop-gtx680": "ok", "laptop-intel-rtx4060": "issue"}
+
+
+def health_problems(path: pathlib.Path, name: str) -> list[str]:
+    results = {r["id"]: r["status"] for r in json.loads(path.read_text(encoding="utf-8"))["results"]}
+    expected = {"drivers.profile": "issue", "drivers.nvidia": NVIDIA_CHECK.get(name, "skipped")}
+    return [f"{check} is {results.get(check)}, expected {status}"
+            for check, status in expected.items() if results.get(check) != status]
+
+
 def main(out: pathlib.Path) -> int:
     failures = []
     found = sorted(p.name for p in out.iterdir())
@@ -52,6 +66,7 @@ def main(out: pathlib.Path) -> int:
             problems.append(f"refusals {plan['refusals']}")
         problems += [f"missing package {p}" for p in wanted if p not in planned]
         problems += [f"unexpected package {p}" for p in unwanted if p in planned]
+        problems += health_problems(out / name / "health.json", name)
         failures += [f"{name}: {p}" for p in problems]
         print(f"{'FAIL' if problems else 'ok  '} {name:<24} {' + '.join(got)}"
               + (f"  [{'; '.join(plan['warnings'])}]" if plan["warnings"] else ""))

@@ -32,7 +32,7 @@ from vm import VM, WORK
 PAGES = {   # page id -> text that shows its content arrived
     "overview": "This system", "health": "Repairs", "apps": "Bundles", "cleanup": "Package cache",
     "kernels": "Boot settings", "updates": "Arch mirrors", "snapshots": "New snapshot",
-    "diagnostics": "Support bundle",
+    "diagnostics": "Support bundle", "hardware": "Driver profiles",
 }
 
 

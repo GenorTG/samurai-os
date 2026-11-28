@@ -23,7 +23,8 @@ PageBody {
                         + (c.monitor_widgets ? "on" : "off") + ", reduced effects "
                         + (c.reduced_effects ? "on" : "off") : c.desktop],
             ["Graphics", "NVIDIA driver: " + c.nvidia + "  ·  CUDA "
-                        + (c.cuda && c.nvidia !== "no" && window.facts.gpus.some(g => g.cuda)
+                        + (c.cuda && window.facts.gpus.some(g => g.cuda)
+                           && (c.nvidia === "yes" || (c.nvidia === "auto" && !window.facts.gpus.some(g => g.legacy)))
                            ? "on (about 4 GB)" : "off")],
             ["Gaming", gaming],
             ["Development", "Python: " + on(c.python) + "  ·  conda: " + c.conda + "  ·  Docker: " + c.docker

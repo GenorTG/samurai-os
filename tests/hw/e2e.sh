@@ -46,7 +46,9 @@ rel=$(ls /usr/lib/modules | head -1)
 modinfo -k "$rel" -F version nvidia || fail "580xx module not built"
 grep -q '^\[nvidia-dkms-580xx\]' /var/lib/chwd/local/pci/graphic_drivers/profiles.toml || fail "no chwd record"
 samurai hw detect | grep -q 'Drivers match the hardware' || fail "detect still wants changes"
-samurai health --category drivers || true
+samurai health --category drivers >/tmp/step.log || true
+cat /tmp/step.log
+grep -q '^ok *drivers.profile' /tmp/step.log && grep -q '^ok *drivers.nvidia$' /tmp/step.log || fail "driver checks on an applied machine"
 
 say "2. card swapped to RTX 3090"
 card rtx3090
@@ -85,6 +87,6 @@ cat /tmp/step.log
 
 say "6. no database sync happened during any apply"
 ! grep -E 'pacman.*-S[a-z]*y' /var/log/pacman.log | grep -v -- '-Syu' || fail "a sync without upgrade ran"
-grep "Running 'pacman" /var/log/pacman.log | sed 's/.*Running/  Running/' | cut -c1-150
+grep -E "Running '[^ ]*pacman" /var/log/pacman.log | sed 's/.*Running/  Running/' | cut -c1-150
 echo "E2E PASS"
 EOS

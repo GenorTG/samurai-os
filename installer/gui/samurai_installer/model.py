@@ -67,7 +67,8 @@ PROXIES: tuple[tuple[str, str, str], ...] = (
     ("traefik", "Traefik", "Container-oriented proxy."),
 )
 NVIDIA_MODES: tuple[tuple[str, str, str], ...] = (
-    ("auto", "Automatic", "Install the NVIDIA driver only when an NVIDIA GPU is present."),
+    ("auto", "Automatic", "Install the driver when every NVIDIA card is RTX 20 or newer; older "
+                          "cards keep the open driver (later: samurai hw apply)."),
     ("yes", "Install NVIDIA driver", "For a GPU you will add later."),
     ("no", "Do not install", "Use the open Mesa drivers only."),
 )

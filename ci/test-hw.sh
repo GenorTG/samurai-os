@@ -71,6 +71,7 @@ LC_ALL=C chwd --list > /out/chwd-list.txt
 samurai hw detect --json > /out/detect.json
 samurai hw detect > /out/detect.txt
 samurai hw list --all --json > /out/list.json
+samurai health --category drivers --json > /out/health.json || [ $? -eq 1 ]
 EOS
 done
 

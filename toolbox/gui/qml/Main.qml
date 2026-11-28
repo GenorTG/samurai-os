@@ -18,6 +18,7 @@ Kirigami.ApplicationWindow {
         { id: "apps", title: "Applications", icon: "applications-all", file: "AppsPage.qml" },
         { id: "cleanup", title: "Cleanup", icon: "edit-clear-history", file: "CleanupPage.qml" },
         { id: "kernels", title: "Kernels & boot", icon: "cpu", file: "KernelsPage.qml" },
+        { id: "hardware", title: "Hardware", icon: "computer", file: "HardwarePage.qml" },
         { id: "updates", title: "Updates", icon: "system-software-update", file: "UpdatesPage.qml" },
         { id: "snapshots", title: "Snapshots", icon: "document-save-all", file: "SnapshotsPage.qml" },
         { id: "diagnostics", title: "Diagnostics", icon: "tools-report-bug", file: "DiagnosticsPage.qml" }

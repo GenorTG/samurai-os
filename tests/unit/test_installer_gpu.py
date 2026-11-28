@@ -68,3 +68,10 @@ def test_cuda_detection_agrees_everywhere(chip, cuda):
         assert run(detect, gpu(chip)) is cuda, detect
         assert run(detect, gpu(chip, "1002")) is False
     assert system.parse_gpus(gpu(chip))[0]["cuda"] is cuda
+
+
+@pytest.mark.parametrize("chip", ["G94", "GT218", "GF108", "GK104", "GM204", "GP104", "GV100",
+                                  "TU102", "GA102", "GB203", "Device"])
+def test_graphical_installer_agrees_with_the_install_script(chip):
+    legacy = system.parse_gpus(gpu(chip))[0]["legacy"]
+    assert run(program(INSTALL, "auto"), gpu(chip)) is not legacy

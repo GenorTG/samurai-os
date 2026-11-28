@@ -37,7 +37,7 @@ def facts(tools: engine.Tools) -> dict:
         "flavor": "offline", "uefi": True, "memory": 7900, "online": False,
         "disks": [d.as_dict() for d in system.parse_disks(LSBLK)],
         "gpus": [{"address": "0000:00:02.0", "vendor": "Red Hat, Inc. [1af4]",
-                  "device": "Virtio 1.0 GPU [1050]", "nvidia": False}],
+                  "device": "Virtio 1.0 GPU [1050]", "nvidia": False, "cuda": False, "legacy": False}],
         "timezones": system.timezones(), "timezone": "Europe/Warsaw",
         "locales": system.locales(), "keymaps": system.keymaps(),
         "apps": engine.catalog(tools), "catalogError": "", "offlineBrowsers": ["firefox"],

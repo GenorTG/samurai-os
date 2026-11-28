@@ -52,7 +52,7 @@ run_case() {   # $1 name, $2 delay of the fake CLI, then toolbox arguments
         echo "ok   $name"
     fi
 }
-pages="overview health apps cleanup kernels updates snapshots diagnostics"
+pages="overview health apps cleanup kernels hardware updates snapshots diagnostics"
 for page in $pages; do
     run_case "$page" 0 --page "$page"
 done

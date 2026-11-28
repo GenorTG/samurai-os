@@ -131,6 +131,8 @@ def memory_mib() -> int:
 
 # NVIDIA chips Arch's CUDA toolkit supports: Turing and newer (spec 07)
 CUDA_CHIP = re.compile(r"^(TU|GA|AD|GH|GB)[0-9]")
+# older than Turing: the open kernel modules cannot drive these (same test as samurai-install)
+LEGACY_CHIP = re.compile(r"^(G|GT|GF|GK|GM|GP|GV)[0-9]")
 
 
 def parse_gpus(lspci_mm: str) -> list[dict]:
@@ -142,7 +144,8 @@ def parse_gpus(lspci_mm: str) -> list[dict]:
             continue
         gpus.append({"address": parts[0].strip(), "vendor": parts[3], "device": parts[5],
                      "nvidia": "[10de]" in parts[3],
-                     "cuda": "[10de]" in parts[3] and bool(CUDA_CHIP.match(parts[5]))})
+                     "cuda": "[10de]" in parts[3] and bool(CUDA_CHIP.match(parts[5])),
+                     "legacy": "[10de]" in parts[3] and bool(LEGACY_CHIP.match(parts[5]))})
     return gpus
 
 

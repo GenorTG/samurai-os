@@ -31,6 +31,7 @@ set(qml_files
     qml/pages/UpdatesPage.qml
     qml/pages/SnapshotsPage.qml
     qml/pages/DiagnosticsPage.qml
+    qml/pages/HardwarePage.qml
 )
 # one flat module: every file can name every other one without per-directory imports
 foreach(file IN LISTS qml_files)
