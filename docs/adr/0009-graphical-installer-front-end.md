@@ -1,6 +1,6 @@
 # ADR-0009 — Graphical installer: a small Qt/QML wizard, not Calamares
 
-**Status:** proposed (implemented on `feat/installer-gui`, needs the owner's OK)
+**Status:** accepted (the owner accepted it on 2026-11-27 by not objecting; shipped in v0.0.1.90)
 
 ## Context
 Spec 08 first named Calamares with our own pages. The hard contract is one install engine: a
