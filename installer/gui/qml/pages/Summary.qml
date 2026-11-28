@@ -22,7 +22,10 @@ PageBody {
             ["Desktop", c.desktop === "kde" ? "KDE Plasma, Breeze Dark, widgets "
                         + (c.monitor_widgets ? "on" : "off") + ", reduced effects "
                         + (c.reduced_effects ? "on" : "off") : c.desktop],
-            ["Graphics", "NVIDIA driver: " + c.nvidia],
+            ["Graphics", "NVIDIA driver: " + c.nvidia + "  ·  CUDA "
+                        + (c.cuda && window.facts.gpus.some(g => g.cuda)
+                           && (c.nvidia === "yes" || (c.nvidia === "auto" && !window.facts.gpus.some(g => g.legacy)))
+                           ? "on (about 4 GB)" : "off")],
             ["Gaming", gaming],
             ["Development", "Python: " + on(c.python) + "  ·  conda: " + c.conda + "  ·  Docker: " + c.docker
                             + "  ·  AI tools: " + on(c.ai_clis) + (c.ollama ? "  ·  Ollama" : "")],

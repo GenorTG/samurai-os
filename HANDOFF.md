@@ -78,11 +78,18 @@ guided installers and CLI/GUI toolbox. VM validation runs on genorbox1. Site: <h
   sudo `diag bundle --out` stays inside the caller's home and user-file targets run via `System::run_as`;
   VM harness HTTP mirror binds 127.0.0.1.
 
+## Lane E hardware (branch `feat/hardware`, 2026-11-28, unmerged)
+- `samurai hw detect|list|apply|remove|fingerprint`, `drivers.*` checks, fingerprint service, toolbox
+  Hardware page, `[hardware] cuda`, packages `samurai-chwd` + `samurai-hardware` (new). Bumps:
+  samurai-tools 0.4.0-18, samurai-base 0.1.0-2 (depends samurai-hardware), toolbox-gui 0.1.0-2.
+  Release order: all packages to the repo first, ISO second.
+- Verification and gaps: `docs/plans/lane-e-hardware.md`. No real GPU was touched.
+
 ## Next
 1. Release `samurai-tools` 0.4.0-18 (repo first), with release-note files for the next ISO.
 2. Installer: Expert mode, geo-IP, size estimate, chwd/CUDA/gpu-unlock, manual/dual-boot disks,
    translations, NVIDIA live entry. Defaults: Plymouth/branding, Firefox policy (spec 09), welcome app.
-3. CLI/GUI: more spec-05 checks, `fix audio|pacman|reinstall-all`, `hw`, `queue`, D-Bus helper.
+3. CLI/GUI: more spec-05 checks, `fix audio|pacman|reinstall-all`, `queue`, D-Bus helper.
 4. Firewall presets, Secure Boot (sbctl), TPM2 unlock (spec 09, M8).
 - Signing key backup: Vaultwarden, restore-tested 2026-11-27 (docs/KEYS.md).
 
@@ -90,6 +97,7 @@ guided installers and CLI/GUI toolbox. VM validation runs on genorbox1. Site: <h
 - `bash scripts/install-hooks.sh` once per clone (per-commit BUILD bump).
 - `test_adopt`: `SAMURAI_TEST_ISO=<v0.0.1.75 online iso> SAMURAI_TEST_PROFILE_REF=v0.0.1.75
   SAMURAI_TEST_TOOLS_PKG=<new samurai-tools pkg>` (`ci/build-pkgs.sh <dir> samurai-tools`).
+- `bash scripts/install-hooks.sh` once per clone (per-commit BUILD bump). Hardware: `ci/test-hw.sh [--e2e]`.
 - Arch tooling only inside archlinux containers; never edit a running script (AGENTS.md gotchas).
 - `python3 -m pytest -q tests/unit`; `bash ci/test-gui.sh`; VM:
   `SAMURAI_TEST_ISO=<iso> SAMURAI_VM_RUN_ID=<id> pytest -q -s tests/vm/test_<x>.py` under

@@ -6,12 +6,12 @@ samurai-postinstall, the installers' summary and selection pages, and the
 offline ISO closure (ci/build-iso.sh). Schema: docs/plans/profile-schema.md.
 Validate the profile first (validate-profile.py): this tool trusts its values.
 
-  samurai-profile-plan PROFILE [--offline] [--nvidia] [--amd] [--json]
+  samurai-profile-plan PROFILE [--offline] [--nvidia] [--cuda-gpu] [--amd] [--json]
   samurai-profile-plan --offline-closure      packages the offline ISO carries
   samurai-profile-plan --list browsers|ai-cli catalog choices: id<TAB>name
 
 Default output is line based, for shell: "pkg NAME", "service UNIT",
-"user-service UNIT", "group NAME", "defer COMMAND<TAB>REASON".
+"user-service UNIT", "group NAME", "defer COMMAND<TAB>REASON", "note TEXT".
 """
 from __future__ import annotations
 
@@ -54,6 +54,10 @@ DOCKER_PACKAGES = ["docker", "docker-compose", "docker-buildx"]
 ROOTLESS_PACKAGES = ["docker-rootless-extras", "rootlesskit", "slirp4netns", "fuse-overlayfs"]
 REVERSE_PROXIES = {"none": [], "caddy": ["caddy"], "nginx": ["nginx", "certbot"],
                    "traefik": ["traefik"]}
+# spec 07 "CUDA": Arch's toolkit targets Turing and newer; about 4-5 GiB
+CUDA_PACKAGES = ["cuda", "cudnn", "nvtop"]
+CUDA_TOO_OLD = ("CUDA not installed: it needs an NVIDIA Turing (RTX 20) or newer card; "
+                "older CUDA versions are a manual install")
 # browsers whose packages the offline ISO carries
 OFFLINE_BROWSERS = ["firefox"]
 
@@ -113,7 +117,8 @@ def default_browsers(desktop: str) -> list[str]:
     return [] if desktop == "none" else ["firefox"]
 
 
-def features(profile: dict, catalog, nvidia: bool = False, amd: bool = False) -> list[Feature]:
+def features(profile: dict, catalog, nvidia: bool = False, amd: bool = False,
+             cuda_gpu: bool = False) -> list[Feature]:
     packages = profile.get("packages", {})
     desktop = packages.get("desktop", "kde")
     security = profile.get("security", {})
@@ -133,6 +138,10 @@ def features(profile: dict, catalog, nvidia: bool = False, amd: bool = False) ->
         out.append(Feature(firewall, "firewall", packages=[firewall, *extra]))
     if security.get("ssh_server", False):
         out.append(Feature("ssh", "ssh", packages=["openssh"]))
+
+    if nvidia and cuda_gpu and profile.get("hardware", {}).get("cuda", False):
+        out.append(Feature("cuda", "nvidia", packages=list(CUDA_PACKAGES),
+                           command=f"sudo pacman -S --needed {' '.join(CUDA_PACKAGES)}"))
 
     for browser in packages.get("browsers", default_browsers(desktop)):
         out.append(app_feature(catalog, browser, "browser"))
@@ -219,17 +228,19 @@ def offline_closure(catalog) -> list[str]:
 
 
 def build_plan(profile: dict, catalog, offline: bool = False, nvidia: bool = False,
-               amd: bool = False) -> dict:
+               amd: bool = False, cuda_gpu: bool = False) -> dict:
     carried = set(offline_closure(catalog))
     carried.update(profile.get("packages", {}).get("install", []))
     plan: dict = {"packages": [], "services": [], "user_services": [], "user_groups": [],
-                  "deferred": []}
+                  "deferred": [], "notes": []}
+    if nvidia and not cuda_gpu and profile.get("hardware", {}).get("cuda", False):
+        plan["notes"].append(CUDA_TOO_OLD)
     seen: set[str] = set()
 
     def extend(key: str, values: list[str]) -> None:
         plan[key].extend(v for v in values if v not in plan[key])
 
-    for feature in features(profile, catalog, nvidia=nvidia, amd=amd):
+    for feature in features(profile, catalog, nvidia=nvidia, amd=amd, cuda_gpu=cuda_gpu):
         available = all(p in carried for p in feature.packages)
         if feature.reason or (offline and not available):
             plan["deferred"].append({
@@ -253,6 +264,7 @@ def plan_lines(plan: dict) -> list[str]:
     lines += [f"user-service {s}" for s in plan["user_services"]]
     lines += [f"group {g}" for g in plan["user_groups"]]
     lines += [f"defer {d['command']}\t{d['reason']}" for d in plan["deferred"]]
+    lines += [f"note {n}" for n in plan["notes"]]
     return lines
 
 
@@ -261,6 +273,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("profile", nargs="?")
     parser.add_argument("--offline", action="store_true", help="defer what the offline ISO lacks")
     parser.add_argument("--nvidia", action="store_true")
+    parser.add_argument("--cuda-gpu", action="store_true",
+                        help="an NVIDIA card that can run CUDA (Turing or newer) is present")
     parser.add_argument("--amd", action="store_true")
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--catalog", help="catalog directory")
@@ -279,7 +293,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("a profile file is required")
     try:
         profile = tomllib.loads(pathlib.Path(args.profile).read_text(encoding="utf-8"))
-        plan = build_plan(profile, catalog, offline=args.offline, nvidia=args.nvidia, amd=args.amd)
+        plan = build_plan(profile, catalog, offline=args.offline, nvidia=args.nvidia, amd=args.amd,
+                          cuda_gpu=args.cuda_gpu)
     except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as e:
         print(f"error: cannot read {args.profile}: {e}", file=sys.stderr)
         return 1

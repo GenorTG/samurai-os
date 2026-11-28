@@ -1,0 +1,50 @@
+# Maintainer: Samurai OS <build@smart-samurai.pl>
+# Spec: docs/specs/07-HARDWARE-AND-DRIVERS.md. CachyOS's chwd, built from its
+# 1.25.0 tag WITHOUT its profiles: samurai-hardware installs ours into
+# /var/lib/chwd/db. The name differs from [cachyos]'s `chwd` on purpose:
+# [samurai] sits below [cachyos], so a package called `chwd` would never win,
+# and CachyOS's one brings the CachyOS profiles.
+#
+# One packaging patch (see prepare): the helper script runs `pacman -Sy` before
+# its first install, which is a partial upgrade. Samurai never does that.
+pkgname=samurai-chwd
+pkgver=1.25.0
+pkgrel=1
+pkgdesc="CachyOS hardware detection tool (chwd) without profiles, no database sync on install"
+arch=(x86_64)
+url="https://github.com/CachyOS/chwd"
+license=('GPL-3.0-or-later')
+depends=(gcc-libs glibc lua pacman pciutils libusb)
+makedepends=(cargo clang git)
+provides=("chwd=$pkgver")
+conflicts=(chwd)
+options=(!debug !lto)
+_commit=4c61525942aa98501448fbcc6eb830bf618e0fb5   # tag 1.25.0
+source=("chwd::git+https://github.com/CachyOS/chwd.git#commit=$_commit")
+# sha256 of `git archive` of that commit (makepkg's checksum for git sources)
+sha256sums=('89df7a5e1f8e6d26c5696d42066dd64ff4e414181f7ebb968cc90c740dabe9b8')
+
+prepare() {
+    cd "$srcdir/chwd"
+    local sync_line='return pacman_handle("--needed -Sy", packages)'
+    # fail the build when upstream changes the line instead of shipping the sync
+    [ "$(grep -cF "$sync_line" scripts/chwd)" = 1 ]
+    sed -i 's/return pacman_handle("--needed -Sy", packages)/return pacman_handle("--needed -S", packages)/' scripts/chwd
+    ! grep -qF -- '-Sy' scripts/chwd
+    cargo fetch --locked --target "$CARCH-unknown-linux-gnu"
+}
+
+build() {
+    cd "$srcdir/chwd"
+    cargo build --release --frozen -p chwd
+}
+
+package() {
+    cd "$srcdir/chwd"
+    install -Dm755 target/release/chwd "$pkgdir/usr/bin/chwd"
+    install -Dm755 scripts/chwd "$pkgdir/var/lib/chwd/scripts/chwd"
+    install -d -m755 "$pkgdir"/var/lib/chwd/db/{pci,usb} "$pkgdir"/var/lib/chwd/local/{pci,usb}
+    install -d -m755 "$pkgdir/var/lib/chwd/ids"
+    install -m644 ids/*.ids "$pkgdir/var/lib/chwd/ids/"
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

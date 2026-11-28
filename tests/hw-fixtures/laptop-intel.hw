@@ -1,0 +1,5 @@
+# synthetic
+chassis 10
+virt none
+kernels linux-cachyos
+dev 0000:00:02.0 0300 8086 3e9b boot

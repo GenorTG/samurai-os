@@ -35,7 +35,7 @@ ALLOWED = {
     "packages": {"install", "desktop", "apps", "browsers"},
     "repos": {"samurai", "cachyos", "chaotic_aur", "arch_mirror"},
     "security": {"firewall", "ssh_server"},
-    "hardware": {"nvidia"},
+    "hardware": {"nvidia", "cuda"},
     "kde": {"theme", "monitor_widgets", "reduced_effects"},
     "gaming": {"enabled", "steam", "heroic", "gamemode", "mangohud", "gamescope", "proton_ge",
                "proton_cachyos", "wine"},
@@ -367,6 +367,7 @@ def validate(path: str) -> dict:
     nv = _str(hw, "nvidia", "auto", "hardware")
     if nv not in KNOWN_NVIDIA:
         fail(f"hardware.nvidia must be auto, yes or no, got {nv!r}")
+    _bool(hw, "cuda", False, "hardware")
 
     repos = profile.get("repos", {})
     for key, default in REPO_DEFAULTS.items():

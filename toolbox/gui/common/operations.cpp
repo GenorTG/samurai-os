@@ -171,6 +171,10 @@ const std::vector<Operation> &table()
         {"fix-keyring-reset", Arity::None, nullptr, {"fix", "keyring", "--reset", "--yes"}, {}},
         {"fix-dkms", Arity::None, nullptr, {"fix", "dkms"}, {}},
         {"mirrors-refresh", Arity::None, nullptr, {"mirrors", "refresh"}, {}},
+        // hardware: fixed commands only, never a profile name from the GUI
+        {"hw-apply", Arity::None, nullptr, {"hw", "apply", "--yes"}, {}},
+        {"hw-apply-switch", Arity::None, nullptr, {"hw", "apply", "--yes", "--switch-driver"}, {}},
+        {"hw-accept", Arity::None, nullptr, {"hw", "fingerprint", "--accept"}, {}},
     };
     return t;
 }

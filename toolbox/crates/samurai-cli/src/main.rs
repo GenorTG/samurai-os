@@ -10,6 +10,7 @@ use samurai_core::clean;
 use samurai_core::diag::{self, Cmd};
 use samurai_core::fix;
 use samurai_core::health::{self, checks::ALL, system::RealSystem};
+use samurai_core::hw;
 use samurai_core::kernel;
 use samurai_core::mirrors;
 use samurai_core::status;
@@ -389,6 +390,206 @@ fn run_fix(args: &[String]) -> ExitCode {
     }
 }
 
+fn ask(question: &str) -> bool {
+    use std::io::{BufRead, Write};
+    eprint!("{question} [y/N] ");
+    let _ = std::io::stderr().flush();
+    let mut line = String::new();
+    std::io::stdin().lock().read_line(&mut line).is_ok() && matches!(line.trim(), "y" | "Y" | "yes")
+}
+
+fn is_root(sys: &RealSystem) -> bool {
+    use health::system::System;
+    sys.run("id", &["-u"])
+        .is_some_and(|o| o.stdout.trim() == "0")
+}
+
+fn hw_failed(e: &str) -> ExitCode {
+    eprintln!("samurai hw: {e}");
+    ExitCode::from(1)
+}
+
+fn print_hw_report(report: &hw::apply::Report) {
+    for line in &report.done {
+        println!("done     {line}");
+    }
+    if report.reboot {
+        println!("Reboot to use the new driver.");
+    }
+}
+
+fn run_hw_apply(
+    sys: &RealSystem,
+    request: &hw::plan::Request,
+    dry_run: bool,
+    no_snapshot: bool,
+    json: bool,
+    yes: bool,
+) -> ExitCode {
+    use std::io::IsTerminal;
+    let plan = match hw::plan::build(sys, request) {
+        Ok(p) => p,
+        Err(e) => return hw_failed(&e),
+    };
+    if json {
+        let state = hw::fingerprint::compare(sys).unwrap_or(hw::fingerprint::State::New);
+        print!("{}", hw::render_json(&plan, &state));
+    } else {
+        print!("{}", hw::render_text(&plan));
+    }
+    if !plan.refusals.is_empty() {
+        return ExitCode::from(1);
+    }
+    if dry_run {
+        return ExitCode::SUCCESS;
+    }
+    if !is_root(sys) {
+        return hw_failed("apply needs root (try: sudo samurai hw apply)");
+    }
+    if !plan.changes() {
+        return match hw::fingerprint::accept(sys) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => hw_failed(&e),
+        };
+    }
+    if !yes {
+        if !std::io::stdin().is_terminal() {
+            println!("Preview only: not a terminal. Run again with --yes to apply.");
+            return ExitCode::from(1);
+        }
+        if !ask("Apply these changes?") {
+            println!("declined");
+            return ExitCode::from(1);
+        }
+    }
+    let policy = if no_snapshot {
+        hw::apply::SnapshotPolicy::Skip
+    } else {
+        hw::apply::SnapshotPolicy::Require
+    };
+    match hw::apply::apply(sys, &plan, policy) {
+        Ok(report) => {
+            print_hw_report(&report);
+            if let Err(e) = hw::fingerprint::accept(sys) {
+                eprintln!("samurai hw: cannot update the hardware fingerprint: {e}");
+            }
+            ExitCode::SUCCESS
+        }
+        Err(f) => {
+            println!("failed   {}", f.reason);
+            println!("         {}", f.outcome);
+            ExitCode::from(1)
+        }
+    }
+}
+
+fn run_hw(args: &[String]) -> ExitCode {
+    use hw::Cmd;
+    let opts = match hw::parse_args(args) {
+        Ok(o) => o,
+        Err(e) => {
+            eprintln!("samurai hw: {e}\n");
+            eprint!("{}", hw::USAGE);
+            return ExitCode::from(2);
+        }
+    };
+    let sys = RealSystem;
+    match opts.cmd {
+        Cmd::Help => {
+            print!("{}", hw::USAGE);
+            ExitCode::SUCCESS
+        }
+        Cmd::Detect => match hw::plan::build(&sys, &hw::plan::Request::default()) {
+            Ok(plan) => {
+                let state = hw::fingerprint::compare(&sys).unwrap_or(hw::fingerprint::State::New);
+                if opts.json {
+                    print!("{}", hw::render_json(&plan, &state));
+                } else {
+                    if let hw::fingerprint::State::Changed { added, removed } = &state {
+                        println!("{}\n", hw::fingerprint::message(added, removed));
+                    }
+                    print!("{}", hw::render_text(&plan));
+                }
+                ExitCode::SUCCESS
+            }
+            Err(e) => hw_failed(&e),
+        },
+        Cmd::List(listing) => match hw::list(&sys, listing) {
+            Ok(rows) => {
+                if opts.json {
+                    print!("{}", hw::render_list_json(&rows));
+                } else {
+                    print!("{}", hw::render_list_text(&rows));
+                }
+                ExitCode::SUCCESS
+            }
+            Err(e) => hw_failed(&e),
+        },
+        Cmd::Apply {
+            request,
+            dry_run,
+            no_snapshot,
+        } => run_hw_apply(&sys, &request, dry_run, no_snapshot, opts.json, opts.yes),
+        Cmd::Remove {
+            profile,
+            no_snapshot,
+        } => {
+            if !is_root(&sys) {
+                return hw_failed("remove needs root (try: sudo samurai hw remove <profile>)");
+            }
+            if !opts.yes && !ask(&format!("Remove the driver profile {profile}?")) {
+                println!("declined");
+                return ExitCode::from(1);
+            }
+            let policy = if no_snapshot {
+                hw::apply::SnapshotPolicy::Skip
+            } else {
+                hw::apply::SnapshotPolicy::Require
+            };
+            match hw::apply::remove(&sys, &profile, policy) {
+                Ok(report) => {
+                    print_hw_report(&report);
+                    ExitCode::SUCCESS
+                }
+                Err(f) => {
+                    println!("failed   {}", f.reason);
+                    println!("         {}", f.outcome);
+                    ExitCode::from(1)
+                }
+            }
+        }
+        Cmd::Fingerprint { check, accept } => {
+            if (check || accept) && !is_root(&sys) {
+                return hw_failed("fingerprint --check/--accept need root");
+            }
+            let result = if accept {
+                hw::fingerprint::accept(&sys).map(|()| hw::fingerprint::State::Unchanged)
+            } else if check {
+                hw::fingerprint::check(&sys)
+            } else {
+                hw::fingerprint::compare(&sys)
+            };
+            match result {
+                Ok(state) => {
+                    if opts.json {
+                        print!("{}", hw::fingerprint::render_state_json(&state));
+                    } else {
+                        match &state {
+                            hw::fingerprint::State::New => println!("no earlier fingerprint"),
+                            hw::fingerprint::State::Unchanged => println!("hardware unchanged"),
+                            hw::fingerprint::State::Changed { added, removed } => {
+                                println!("{}", hw::fingerprint::message(added, removed))
+                            }
+                        }
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(e) => hw_failed(&e),
+            }
+        }
+    }
+}
+
 fn run_clean(args: &[String]) -> ExitCode {
     use health::system::System;
     let opts = match clean::parse_args(args) {
@@ -638,6 +839,7 @@ fn main() -> ExitCode {
         Action::Mirrors => run_mirrors(&rest),
         Action::Boot => run_boot(&rest),
         Action::Kernel => run_kernel(&rest),
+        Action::Hw => run_hw(&rest),
         Action::Version => {
             let v = read_version_file(Path::new(TOOLS_VERSION_FILE)).or_else(pacman_version);
             println!("{}", version_line(v.as_deref()));

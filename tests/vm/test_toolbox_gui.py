@@ -9,6 +9,7 @@ Every effect is checked through the guest agent; screenshots land in
 
   SAMURAI_TEST_TOOLS_PKG=/abs/samurai-tools-<ver>-x86_64.pkg.tar.zst \\
   SAMURAI_TEST_GUI_PKG=/abs/samurai-toolbox-gui-<ver>-x86_64.pkg.tar.zst \\
+  SAMURAI_TEST_HW_PKGS=/abs/samurai-chwd-...:/abs/samurai-hardware-... \\
   SAMURAI_TEST_ISO=/abs/offline.iso pytest -q -s test_toolbox_gui.py
 
 SAMURAI_TEST_GUI_BASE=/abs/disk.qcow2 reuses a disk made by `install_base` (an overlay is booted;
@@ -32,7 +33,7 @@ from vm import VM, WORK
 PAGES = {   # page id -> text that shows its content arrived
     "overview": "This system", "health": "Repairs", "apps": "Bundles", "cleanup": "Package cache",
     "kernels": "Boot settings", "updates": "Arch mirrors", "snapshots": "New snapshot",
-    "diagnostics": "Support bundle",
+    "diagnostics": "Support bundle", "hardware": "Driver profiles",
 }
 
 
@@ -46,6 +47,8 @@ def _package(var: str) -> pathlib.Path:
 @pytest.fixture(scope="module")
 def desktop(mirror):
     packages = [_package("SAMURAI_TEST_TOOLS_PKG"), _package("SAMURAI_TEST_GUI_PKG")]
+    # the Hardware page needs chwd and our profiles (an ISO of this branch already has them)
+    packages += [pathlib.Path(p) for p in os.environ.get("SAMURAI_TEST_HW_PKGS", "").split(":") if p]
     base = os.environ.get("SAMURAI_TEST_GUI_BASE", "")
     if not base:
         write_profile(mirror.dir)
@@ -89,7 +92,7 @@ def test_package_installs_policy_helper_and_launcher(desktop):
     out = run(desktop.ga, "pacman -Qlq samurai-toolbox-gui; pkaction | grep -c '^org.samurai.toolbox.'; "
                           "stat -c '%U %a' /usr/lib/samurai/gui-helper; "
                           "grep -E '^(Name|Exec)=' /usr/share/applications/samurai-toolbox.desktop")
-    for must in ("/usr/bin/samurai-toolbox", "/usr/lib/samurai/gui-helper", "\n27\n", "root 755",
+    for must in ("/usr/bin/samurai-toolbox", "/usr/lib/samurai/gui-helper", "\n30\n", "root 755",
                  "Name=Samurai Toolbox", "Exec=samurai-toolbox"):
         assert must in out, out
 

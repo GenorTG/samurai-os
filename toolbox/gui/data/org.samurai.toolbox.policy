@@ -332,4 +332,40 @@
     <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/samurai/gui-helper</annotate>
     <annotate key="org.freedesktop.policykit.exec.argv1">mirrors-refresh</annotate>
   </action>
+  <action id="org.samurai.toolbox.hw-apply">
+    <description>Apply the driver profiles</description>
+    <message>Authentication is required to install graphics and hardware drivers</message>
+    <icon_name>preferences-system</icon_name>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/samurai/gui-helper</annotate>
+    <annotate key="org.freedesktop.policykit.exec.argv1">hw-apply</annotate>
+  </action>
+  <action id="org.samurai.toolbox.hw-apply-switch">
+    <description>Replace the graphics driver</description>
+    <message>Authentication is required to replace the installed graphics driver</message>
+    <icon_name>preferences-system</icon_name>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/samurai/gui-helper</annotate>
+    <annotate key="org.freedesktop.policykit.exec.argv1">hw-apply-switch</annotate>
+  </action>
+  <action id="org.samurai.toolbox.hw-accept">
+    <description>Accept new hardware</description>
+    <message>Authentication is required to accept the changed hardware</message>
+    <icon_name>preferences-system</icon_name>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/samurai/gui-helper</annotate>
+    <annotate key="org.freedesktop.policykit.exec.argv1">hw-accept</annotate>
+  </action>
 </policyconfig>

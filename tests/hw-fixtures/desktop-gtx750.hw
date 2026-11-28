@@ -1,0 +1,5 @@
+# synthetic (Maxwell)
+chassis 3
+virt none
+kernels linux
+dev 0000:01:00.0 0300 10de 1381 boot

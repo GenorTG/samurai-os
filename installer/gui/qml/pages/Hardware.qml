@@ -32,4 +32,14 @@ PageBody {
             onToggled: installer.choices.nvidia = modelData.id
         }
     }
+    Heading { visible: installer.choices.nvidia !== "no"; text: "CUDA" }
+    Choice {
+        visible: installer.choices.nvidia !== "no"
+        label: "CUDA toolkit"
+        text: window.facts.gpus.some(g => g.cuda)
+              ? "cuda, cudnn and nvtop: about 4 GB more to download."
+              : "Needs an NVIDIA Turing (RTX 20) or newer card. None was found, so nothing is added."
+        checked: installer.choices.cuda
+        onToggled: on => installer.choices.cuda = on
+    }
 }

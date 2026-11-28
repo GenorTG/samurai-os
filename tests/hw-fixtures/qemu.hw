@@ -1,0 +1,6 @@
+# synthetic QEMU std VGA guest
+chassis 1
+virt kvm
+kernels linux-cachyos
+dev 0000:00:01.0 0300 1234 1111 boot
+dev 0000:00:02.0 0200 1af4 1000

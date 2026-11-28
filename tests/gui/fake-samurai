@@ -72,6 +72,29 @@ elif a[:3] == ["kernel", "list", "--json"]:
              k("linux-cachyos", "CachyOS performance kernel (Samurai default)", True, True, True,
                True, blocker="linux-cachyos is the running kernel; boot another one first"),
              k("linux-cachyos-lts", "CachyOS long-term support kernel", blocker="x")]})
+elif a == ["hw", "detect", "--json"]:
+    d = lambda addr, name, gen, cuda, driver, boot, cls="0300": {
+        "addr": addr, "class": cls, "vendor": "10de", "device": "2204", "name": name,
+        "driver": driver, "boot_display": boot, "generation": gen, "cuda": cuda,
+        "profiles": ["nvidia-open-dkms"]}
+    out({"schema": 1, "changes": True, "allowed": False, "hardware_changed": True,
+         "hardware_message": "New hardware: <b>NVIDIA</b> RTX 3090 (was GTX 1070). Check the "
+                             "drivers: samurai hw detect", "nvidia_driver": "nvidia-580xx",
+         "devices": [d("0000:01:00.0", "NVIDIA Corporation GA102 [GeForce RTX 3090]", "Ampere",
+                       True, "nvidia", True),
+                     d("0000:00:02.0", "Intel Corporation <img src=http://example.org/x> "
+                       + "Graphics " * 12, "", False, "i915", False)],
+         "steps": [{"profile": "nvidia-open-dkms",
+                    "description": "NVIDIA open kernel modules (Turing and newer)",
+                    "graphics": True, "status": "switch", "devices": ["0000:01:00.0"],
+                    "install": ["nvidia-utils", "linux-cachyos-nvidia-open", "libva-nvidia-driver",
+                                "lib32-nvidia-utils", "vulkan-icd-loader"],
+                    "remove": ["nvidia-580xx-dkms", "nvidia-580xx-utils"], "recorded": False},
+                   {"profile": "intel", "description": "Mesa open source driver for Intel graphics",
+                    "graphics": True, "status": "ok", "devices": ["0000:00:02.0"], "install": [],
+                    "remove": [], "recorded": True}],
+         "refusals": ["this replaces the installed NVIDIA driver branch; add --switch-driver to allow it"],
+         "warnings": []})
 elif a[:3] == ["boot", "get", "--json"]:
     p = lambda v, locked=False: {"value": v, "protected": locked}
     out({"schema": 1, "bootloader": "Limine", "editable": True, "timeout": 3, "max_timeout": 60,

@@ -1,0 +1,26 @@
+# Maintainer: Samurai OS <build@smart-samurai.pl>
+# Spec: docs/specs/07-HARDWARE-AND-DRIVERS.md. Our chwd profile set. After
+# editing a profile run ci/update-pkg-sums.py and bump pkgrel.
+pkgname=samurai-hardware
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Samurai OS hardware profiles for chwd (graphics, network)"
+arch=(any)
+url="https://github.com/GenorTG/samurai-os"
+license=('GPL-3.0-or-later')
+depends=(samurai-chwd pciutils)
+# GPL-3.0 text: /usr/share/licenses/spdx (the profiles derive from chwd's)
+source=(graphic_drivers.toml network_drivers.toml NOTICE)
+sha256sums=(
+    'aa1e8a064b8da0d7d7fea7435f10931f7d8ad20fcf3cd07fa40114f8ad01272c'
+    'e0a0d9fb385ba2d6972d64d62ccd4c509a329406007f5960e41ce7a5a8a7ae61'
+    '7238ad27830d55a3bbca0d7d675fb2eca0c812f1e55e90c4433a8e0215e1a11f'
+)
+
+package() {
+    local set
+    for set in graphic_drivers network_drivers; do
+        install -Dm644 "$srcdir/$set.toml" "$pkgdir/var/lib/chwd/db/pci/$set/profiles.toml"
+    done
+    install -Dm644 "$srcdir/NOTICE" "$pkgdir/usr/share/licenses/$pkgname/NOTICE"
+}

@@ -1,7 +1,7 @@
 # fish completion for samurai (shipped by samurai-tools; fish is the default shell)
 
 function __samurai_no_cmd
-    not __fish_seen_subcommand_from update adopt apps snap rescue status health diag clean fix mirrors boot kernel version help
+    not __fish_seen_subcommand_from update adopt apps snap rescue status health diag clean fix mirrors boot kernel hw version help
 end
 
 function __samurai_apps_ids
@@ -29,6 +29,7 @@ complete -c samurai -n __samurai_no_cmd -a fix     -d 'targeted repairs'
 complete -c samurai -n __samurai_no_cmd -a mirrors -d 'show or refresh the mirrorlist'
 complete -c samurai -n __samurai_no_cmd -a boot    -d 'sync boot entries with installed kernels'
 complete -c samurai -n __samurai_no_cmd -a kernel  -d 'list, install, remove, choose kernels'
+complete -c samurai -n __samurai_no_cmd -a hw      -d 'hardware and driver profiles'
 complete -c samurai -n __samurai_no_cmd -a version -d 'print the samurai-tools version'
 complete -c samurai -n __samurai_no_cmd -a help    -d 'usage'
 
@@ -141,3 +142,19 @@ complete -c samurai -n '__fish_seen_subcommand_from sync' -l check -d 'report on
 # kernel
 complete -c samurai -n '__fish_seen_subcommand_from kernel; and not __fish_seen_subcommand_from list install remove default' -a 'list install remove default'
 complete -c samurai -n '__fish_seen_subcommand_from kernel; and __fish_seen_subcommand_from install remove default' -a 'linux linux-lts linux-zen linux-hardened linux-cachyos linux-cachyos-lts'
+
+# hw
+set -l hw '__fish_seen_subcommand_from hw'
+complete -c samurai -n "$hw; and not __fish_seen_subcommand_from detect list apply remove fingerprint" -a 'detect list apply remove fingerprint'
+complete -c samurai -n "$hw; and __fish_seen_subcommand_from detect list fingerprint apply" -l json -d 'machine-readable output'
+complete -c samurai -n "$hw; and __fish_seen_subcommand_from list" -l installed -d 'installed profiles'
+complete -c samurai -n "$hw; and __fish_seen_subcommand_from list" -l available -d 'profiles for this machine'
+complete -c samurai -n "$hw; and __fish_seen_subcommand_from list" -l all -d 'every profile'
+complete -c samurai -n "$hw; and __fish_seen_subcommand_from apply" -l profile -x -d 'apply this profile'
+complete -c samurai -n "$hw; and __fish_seen_subcommand_from apply" -l reinstall -d 'run the profile setup again'
+complete -c samurai -n "$hw; and __fish_seen_subcommand_from apply" -l switch-driver -d 'allow an NVIDIA branch change'
+complete -c samurai -n "$hw; and __fish_seen_subcommand_from apply" -l dry-run -d 'preview only'
+complete -c samurai -n "$hw; and __fish_seen_subcommand_from apply remove" -l no-snapshot -d 'continue without a snapshot'
+complete -c samurai -n "$hw; and __fish_seen_subcommand_from apply remove" -l yes -d 'no confirmation'
+complete -c samurai -n "$hw; and __fish_seen_subcommand_from fingerprint" -l check -d 'update the notice (root)'
+complete -c samurai -n "$hw; and __fish_seen_subcommand_from fingerprint" -l accept -d 'accept the present hardware (root)'

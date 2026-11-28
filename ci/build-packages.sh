@@ -36,7 +36,7 @@ for src in /src/pkgbuilds/*/; do
         for name in samurai-update samurai-snap samurai-rescue samurai-apps samurai-adopt samurai-notifier validate-interventions.py \
                     samurai-notifier.service samurai-notifier.timer \
                     samurai-health.service samurai-health.timer \
-                    95-samurai-boot.hook; do
+                    95-samurai-boot.hook samurai-hw-fingerprint.service; do
             cp -a "/src/updates/$name" "$pkg/"
         done
         cp -a /src/updates/interventions/0001-update-mechanism-demo.toml "$pkg/"
@@ -44,6 +44,9 @@ for src in /src/pkgbuilds/*/; do
         cp -a /src/catalog/garuda-setup-wizard.toml /src/catalog/samurai.toml "$pkg/"
         cp -a /src/installer/samurai-profile-plan /src/ci/chaotic-bootstrap.sh "$pkg/"
         cp -a /src/iso/airootfs/usr/share/samurai/chaotic-key.asc "$pkg/chaotic-key.pubkey"
+    fi
+    if [ "$pkg" = samurai-chwd ]; then
+        pacman -S --noconfirm --needed rust clang git lua pciutils libusb >/dev/null
     fi
     if [ "$pkg" = samurai-toolbox-gui ]; then
         pacman -S --noconfirm --needed cmake ninja qt6-base qt6-declarative >/dev/null
