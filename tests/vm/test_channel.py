@@ -30,9 +30,13 @@ def _release_profile(ref: str) -> str:
     text = re.sub(r"\[user\].*?(?=\n\[|\Z)", user, text, flags=re.S)
     text = text.replace('desktop = "kde"', 'desktop = "none"')
     text = text.replace('kernels = ["linux-cachyos", "linux-zen"]', 'kernels = ["linux"]')
-    # older releases list catalog-backed choices (browsers/apps) in their default profile;
-    # drop them: this scenario tests the upgrade path, not the app catalog of that release
+    # older releases carry choices this scenario does not exercise: catalog-backed keys
+    # (browsers/apps) and desktop-specific tables their validator only accepts together
+    # with desktop = "kde" (it refuses [kde] once the desktop is "none")
     text = re.sub(r"(?m)^(browsers|apps)\s*=.*\n", "", text)
+    # desktop-coupled tables: their validator refuses them without desktop = "kde"
+    for table in ("kde", "gaming", "development"):
+        text = re.sub(rf"(?ms)^\[{table}\]\n.*?(?=^\[|\Z)", "", text)
     assert 'desktop = "none"' in text and 'kernels = ["linux"]' in text, "release profile changed shape"
     return with_test_autokey(text)
 
@@ -53,7 +57,8 @@ def test_published_channel_update(mirror):
         _, acc = ga.exec(
             "curl -fsSL http://10.0.2.2:8966/profile-test.toml -o /tmp/profile-test.toml "
             "&& SAMURAI_TEST_AUTOKEY=1 SAMURAI_SERIAL_CONSOLE=1 samurai-install --profile /tmp/profile-test.toml --disk /dev/vda --yes "
-            ">/dev/null 2>&1; rc=$?; echo INSTALL-RC=$rc; [ $rc -eq 0 ] || tail -n 60 /var/log/samurai/install.log",
+            "> /tmp/channel-install.out 2>&1; rc=$?; echo INSTALL-RC=$rc; tail -n 40 /tmp/channel-install.out; "
+            "[ $rc -eq 0 ] || tail -n 20 /var/log/samurai/install.log",
             timeout=INSTALL_TIMEOUT, check=False)
         assert "INSTALL-RC=0" in acc, acc[-2500:]
         ga.close()
