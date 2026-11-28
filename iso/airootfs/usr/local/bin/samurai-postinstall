@@ -472,6 +472,11 @@ kernel_cmdline() {
             opts="$opts rd.luks.key=/etc/cryptsetup-keys.d/samurai-root.key"
         fi
     fi
+    # spec 09: AppArmor is compiled into the Arch/CachyOS kernels but only active
+    # when it is named in lsm= (the list replaces the kernel's built-in one)
+    if installed samurai-settings-security; then
+        opts="$opts lsm=landlock,lockdown,yama,integrity,apparmor,bpf"
+    fi
     if [ "$AUTOKEY" -eq 1 ] || [ "${SAMURAI_SERIAL_CONSOLE:-0}" = 1 ]; then
         opts="$opts console=tty1 console=ttyS0,115200"
     fi

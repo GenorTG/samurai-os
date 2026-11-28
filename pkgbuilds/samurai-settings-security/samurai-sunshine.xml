@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<service>
+  <short>Sunshine (Moonlight host)</short>
+  <description>Game streaming to Moonlight clients. The web configuration page (47990/tcp) is not opened: configure Sunshine on this machine.</description>
+  <port protocol="tcp" port="47984"/>
+  <port protocol="tcp" port="47989"/>
+  <port protocol="tcp" port="48010"/>
+  <port protocol="udp" port="47998-48000"/>
+  <port protocol="udp" port="48002"/>
+</service>

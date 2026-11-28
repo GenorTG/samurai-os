@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<zone>
+  <short>Samurai tailnet</short>
+  <description>Tailscale interface. Inbound is refused like in public: joining a tailnet exposes nothing until you open a service for this zone.</description>
+  <interface name="tailscale0"/>
+</zone>

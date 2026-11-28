@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<service>
+  <short>Web development servers</short>
+  <description>Common development server ports (3000, 5173, 8000).</description>
+  <port protocol="tcp" port="3000"/>
+  <port protocol="tcp" port="5173"/>
+  <port protocol="tcp" port="8000"/>
+</service>
