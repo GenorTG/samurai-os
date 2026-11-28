@@ -77,16 +77,14 @@ fn userspace(branch: Branch) -> &'static [&'static str] {
     }
 }
 
-/// Packages whose absence means the card has no working driver (the rest of a profile is optional).
-const CORE: [&str; 8] = [
+/// Packages whose absence means the card has no working driver (the rest of a profile is optional:
+/// guest tools and software Vulkan never make a fresh install "differ from the profile").
+const CORE: [&str; 5] = [
     "nvidia-utils",
     "nvidia-580xx-utils",
     "mesa",
     "vulkan-radeon",
     "vulkan-intel",
-    "vulkan-swrast",
-    "vulkan-virtio",
-    "virtualbox-guest-utils",
 ];
 
 /// The NVIDIA branch a profile installs; `None` for non-proprietary profiles.

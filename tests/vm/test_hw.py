@@ -116,7 +116,9 @@ def test_detect_apply_and_health_on_the_qemu_profile(installed):
         run(ga, "samurai hw detect")
         plan = detect(ga)
         assert [s["profile"] for s in plan["steps"]] == ["qemu"], plan
-        assert plan["steps"][0]["status"] != "ok" and plan["allowed"], plan
+        # a fresh install lacks the guest extras: listed by detect, no health warning
+        assert plan["steps"][0]["status"] == "extras" and plan["allowed"], plan
+        assert drivers(ga)["drivers.profile"] == "ok"
         assert "qemu" in run(ga, "samurai hw list")
         # detection needs no administrator rights (the toolbox page runs it as the user)
         out = run(ga, "runuser -u samurai -- samurai hw detect --json")
@@ -145,14 +147,12 @@ def test_detect_apply_and_health_on_the_qemu_profile(installed):
         # a present device's profile cannot be removed
         out = run(ga, "samurai hw remove qemu --yes", ok=(1,))
         assert "present device" in out and "nothing was changed" in out
-        # breaking it is detected and health --fix repairs it
+        # a missing guest package is reported by detect, not as a health issue, and apply restores it
         run(ga, "pacman -Rdd --noconfirm vulkan-virtio >/dev/null")
         assert drivers(ga)["drivers.profile"] == "ok", "optional packages are not an issue"
         assert detect(ga)["steps"][0]["status"] == "extras"
-        run(ga, "pacman -Rdd --noconfirm mesa >/dev/null")
-        assert drivers(ga)["drivers.profile"] in ("ok", "issue")
         run(ga, "samurai hw apply --yes", timeout=1200)
-        run(ga, "pacman -Q mesa vulkan-virtio")
+        run(ga, "pacman -Q vulkan-virtio")
         run(ga, "sync")
         ga.close()
     finally:
