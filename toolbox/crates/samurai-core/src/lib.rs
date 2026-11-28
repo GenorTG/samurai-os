@@ -6,10 +6,12 @@
 pub mod boot;
 pub mod clean;
 pub mod diag;
+pub mod firewall;
 pub mod fix;
 pub mod health;
 pub mod kernel;
 pub mod mirrors;
+pub mod security;
 pub mod status;
 
 use std::fs;
@@ -33,6 +35,8 @@ commands
   mirrors     show or refresh the Arch mirrorlist (samurai mirrors --help)
   boot        boot entries, menu timeout, kernel parameters (samurai boot --help)
   kernel      list, install, remove, choose the default (samurai kernel --help)
+  security    security state of this machine: samurai security status
+  firewall    zones, ports and one-step presets (samurai firewall --help)
   version     print the samurai-tools version
   help        this text
 
@@ -64,6 +68,10 @@ pub enum Action {
     Boot,
     /// `samurai kernel`: list, install, remove and choose kernels.
     Kernel,
+    /// `samurai security`: read-only security report.
+    Security,
+    /// `samurai firewall`: firewalld zones, ports and presets.
+    Firewall,
     Version,
     Help,
     Unknown(String),
@@ -95,6 +103,8 @@ pub fn parse(cmd: &str) -> Action {
         "mirrors" => Action::Mirrors,
         "boot" => Action::Boot,
         "kernel" => Action::Kernel,
+        "security" => Action::Security,
+        "firewall" => Action::Firewall,
         "version" | "--version" | "-V" => Action::Version,
         "help" | "--help" | "-h" => Action::Help,
         other => Action::Unknown(other.to_string()),
@@ -167,6 +177,8 @@ mod tests {
         assert_eq!(parse("mirrors"), Action::Mirrors);
         assert_eq!(parse("boot"), Action::Boot);
         assert_eq!(parse("kernel"), Action::Kernel);
+        assert_eq!(parse("security"), Action::Security);
+        assert_eq!(parse("firewall"), Action::Firewall);
         for v in ["version", "--version", "-V"] {
             assert_eq!(parse(v), Action::Version);
         }

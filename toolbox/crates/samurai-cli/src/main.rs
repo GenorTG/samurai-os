@@ -8,10 +8,12 @@ use std::process::{Command, ExitCode};
 use samurai_core::boot;
 use samurai_core::clean;
 use samurai_core::diag::{self, Cmd};
+use samurai_core::firewall;
 use samurai_core::fix;
 use samurai_core::health::{self, checks::ALL, system::RealSystem};
 use samurai_core::kernel;
 use samurai_core::mirrors;
+use samurai_core::security;
 use samurai_core::status;
 use samurai_core::{
     parse, parse_pacman_q, read_version_file, resolve_tool, version_line, Action,
@@ -283,6 +285,124 @@ fn run_boot(args: &[String]) -> ExitCode {
         Err(e) => {
             eprintln!("samurai boot: {e}");
             ExitCode::from(1)
+        }
+    }
+}
+
+fn run_security(args: &[String]) -> ExitCode {
+    let opts = match security::parse_args(args) {
+        Ok(o) => o,
+        Err(e) => {
+            eprintln!("samurai security: {e}\n");
+            eprint!("{}", security::USAGE);
+            return ExitCode::from(2);
+        }
+    };
+    if opts.help {
+        print!("{}", security::USAGE);
+        return ExitCode::SUCCESS;
+    }
+    let root = security::is_root(&RealSystem);
+    let items = security::collect(&RealSystem, opts.online);
+    if opts.json {
+        print!("{}", security::render_json(&items, root));
+    } else {
+        print!("{}", security::render_text(&items, root));
+    }
+    ExitCode::from(security::exit_code(&items) as u8)
+}
+
+fn run_firewall(args: &[String]) -> ExitCode {
+    let cmd = match firewall::parse_args(args) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("samurai firewall: {e}\n");
+            eprint!("{}", firewall::USAGE);
+            return ExitCode::from(2);
+        }
+    };
+    match firewall_command(&RealSystem, cmd) {
+        Ok(text) => {
+            print!("{text}");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("samurai firewall: {e}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+/// Preview, then (unless --dry-run) require root, ask, apply and verify.
+fn firewall_command(sys: &RealSystem, cmd: firewall::Cmd) -> Result<String, String> {
+    let may_change = |flags: firewall::Flags, what: &str| -> Result<(), String> {
+        if !security::is_root(sys) {
+            return Err("changing the firewall needs root (try: sudo samurai firewall ...)".into());
+        }
+        if !confirm_on_tty(flags.yes, "firewall", what) {
+            return Err("declined; nothing changed".into());
+        }
+        Ok(())
+    };
+    let shown = |commands: &[Vec<String>]| -> String {
+        commands
+            .iter()
+            .map(|c| format!("  firewall-cmd {}\n", c.join(" ")))
+            .collect()
+    };
+    match cmd {
+        firewall::Cmd::Help => Ok(firewall::USAGE.to_string()),
+        firewall::Cmd::Status { json } => firewall::status(sys).map(|z| {
+            if json {
+                firewall::render_status_json(&z)
+            } else {
+                firewall::render_status(&z)
+            }
+        }),
+        firewall::Cmd::Presets { json } => Ok(firewall::render_presets(sys, json)),
+        firewall::Cmd::Change {
+            open,
+            target,
+            zone,
+            flags,
+        } => {
+            let plan = firewall::plan(sys, open, &target, zone.as_deref())?;
+            if plan.steps.is_empty() {
+                return Ok(format!(
+                    "nothing to change: already {} in zone {}\n",
+                    if open { "open" } else { "closed" },
+                    plan.zone
+                ));
+            }
+            println!("{}", plan.preview.join("\n"));
+            print!("{}", shown(&plan.commands()));
+            if flags.dry_run {
+                return Ok("dry run: nothing changed\n".into());
+            }
+            may_change(flags, &plan.preview[0])?;
+            firewall::apply(sys, &plan)?;
+            Ok(format!(
+                "done: {} in zone {} (now and after reboot)\n",
+                if open { "opened" } else { "closed" },
+                plan.zone
+            ))
+        }
+        firewall::Cmd::Zone {
+            interface,
+            zone,
+            flags,
+        } => {
+            let commands = firewall::zone_commands(sys, &interface, &zone)?;
+            print!("{}", shown(&commands));
+            if zone == "trusted" {
+                println!("warning: zone trusted accepts every connection on {interface}");
+            }
+            if flags.dry_run {
+                return Ok("dry run: nothing changed\n".into());
+            }
+            may_change(flags, &format!("move {interface} to zone {zone}"))?;
+            firewall::set_zone(sys, &interface, &zone)?;
+            Ok(format!("done: {interface} is in zone {zone}\n"))
         }
     }
 }
@@ -638,6 +758,8 @@ fn main() -> ExitCode {
         Action::Mirrors => run_mirrors(&rest),
         Action::Boot => run_boot(&rest),
         Action::Kernel => run_kernel(&rest),
+        Action::Security => run_security(&rest),
+        Action::Firewall => run_firewall(&rest),
         Action::Version => {
             let v = read_version_file(Path::new(TOOLS_VERSION_FILE)).or_else(pacman_version);
             println!("{}", version_line(v.as_deref()));

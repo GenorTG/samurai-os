@@ -1,7 +1,7 @@
 # fish completion for samurai (shipped by samurai-tools; fish is the default shell)
 
 function __samurai_no_cmd
-    not __fish_seen_subcommand_from update apps snap rescue status health diag clean fix mirrors boot kernel version help
+    not __fish_seen_subcommand_from update apps snap rescue status health diag clean fix mirrors boot kernel security firewall version help
 end
 
 function __samurai_apps_ids
@@ -23,6 +23,8 @@ complete -c samurai -n __samurai_no_cmd -a fix     -d 'targeted repairs'
 complete -c samurai -n __samurai_no_cmd -a mirrors -d 'show or refresh the mirrorlist'
 complete -c samurai -n __samurai_no_cmd -a boot    -d 'sync boot entries with installed kernels'
 complete -c samurai -n __samurai_no_cmd -a kernel  -d 'list, install, remove, choose kernels'
+complete -c samurai -n __samurai_no_cmd -a security -d 'security state of this machine'
+complete -c samurai -n __samurai_no_cmd -a firewall -d 'zones, ports and presets'
 complete -c samurai -n __samurai_no_cmd -a version -d 'print the samurai-tools version'
 complete -c samurai -n __samurai_no_cmd -a help    -d 'usage'
 
@@ -135,3 +137,16 @@ complete -c samurai -n '__fish_seen_subcommand_from sync' -l check -d 'report on
 # kernel
 complete -c samurai -n '__fish_seen_subcommand_from kernel; and not __fish_seen_subcommand_from list install remove default' -a 'list install remove default'
 complete -c samurai -n '__fish_seen_subcommand_from kernel; and __fish_seen_subcommand_from install remove default' -a 'linux linux-lts linux-zen linux-hardened linux-cachyos linux-cachyos-lts'
+
+# security
+complete -c samurai -n '__fish_seen_subcommand_from security; and not __fish_seen_subcommand_from status' -a status
+complete -c samurai -n '__fish_seen_subcommand_from security' -l json -d 'machine-readable'
+complete -c samurai -n '__fish_seen_subcommand_from security' -l online -d 'ask arch-audit too'
+
+# firewall
+set -l fw '__fish_seen_subcommand_from firewall'
+complete -c samurai -n "$fw; and not __fish_seen_subcommand_from status presets open close zone" -a 'status presets open close zone'
+complete -c samurai -n "$fw; and __fish_seen_subcommand_from open close" -a 'kdeconnect steam-remote-play steam-transfer sunshine localsend syncthing samba ssh minecraft ollama web-dev web'
+complete -c samurai -n "$fw; and __fish_seen_subcommand_from open close" -l zone -r -d 'firewalld zone'
+complete -c samurai -n "$fw; and __fish_seen_subcommand_from open close zone" -l dry-run -d 'show, change nothing'
+complete -c samurai -n "$fw; and __fish_seen_subcommand_from open close zone" -l yes -d 'do not ask'
