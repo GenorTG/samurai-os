@@ -15,7 +15,7 @@ _samurai() {
     sub="${COMP_WORDS[2]:-}"
 
     if [ "$COMP_CWORD" -eq 1 ]; then
-        mapfile -t COMPREPLY < <(compgen -W "update apps snap rescue status health diag clean fix mirrors boot kernel version help" -- "$cur")
+        mapfile -t COMPREPLY < <(compgen -W "update apps snap rescue status health diag clean fix mirrors boot kernel hw version help" -- "$cur")
         return 0
     fi
 
@@ -84,6 +84,20 @@ _samurai() {
             ;;
         boot)
             mapfile -t COMPREPLY < <(compgen -W "sync get set timeout param add remove --check --help" -- "$cur")
+            ;;
+        hw)
+            if [ "$COMP_CWORD" -eq 2 ]; then
+                mapfile -t COMPREPLY < <(compgen -W "detect list apply remove fingerprint --help" -- "$cur")
+            else
+                case "$sub" in
+                    detect) mapfile -t COMPREPLY < <(compgen -W "--json" -- "$cur") ;;
+                    list) mapfile -t COMPREPLY < <(compgen -W "--installed --available --all --json" -- "$cur") ;;
+                    apply) mapfile -t COMPREPLY < <(compgen -W "--profile --reinstall --switch-driver \
+                        --no-snapshot --dry-run --yes --json" -- "$cur") ;;
+                    remove) mapfile -t COMPREPLY < <(compgen -W "--no-snapshot --yes" -- "$cur") ;;
+                    fingerprint) mapfile -t COMPREPLY < <(compgen -W "--check --accept --json" -- "$cur") ;;
+                esac
+            fi
             ;;
         mirrors)
             mapfile -t COMPREPLY < <(compgen -W "status refresh --help" -- "$cur")

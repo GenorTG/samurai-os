@@ -670,7 +670,14 @@ enable_unit 'btrfs-scrub@-.timer'
 enable_unit paccache.timer
 ### fingerprint + install info ###
 install -d -m 755 /var/lib/samurai
-{ lspci -nn 2>/dev/null || true; lsusb 2>/dev/null || true; } | sed 's/^/  /' > /var/lib/samurai/hw-fingerprint
+# spec 07: the baseline `samurai hw fingerprint --check` compares with at every boot (a plain
+# listing it replaces on first boot is left when this cannot run)
+if samurai hw fingerprint --accept; then
+    log "hardware: fingerprint recorded"
+else
+    { lspci -nn 2>/dev/null || true; } | sed 's/^/  /' > /var/lib/samurai/hw-fingerprint
+fi
+chmod 644 /var/lib/samurai/hw-fingerprint
 if [ ! -f /var/lib/samurai/install-profile.toml ]; then
     # manual run (the driver stages a hash-free copy at 0600 itself)
     ( umask 077; grep -v '^password_hash = ' "$PROFILE" > /var/lib/samurai/install-profile.toml )
