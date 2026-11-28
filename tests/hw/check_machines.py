@@ -41,7 +41,9 @@ NVIDIA_CHECK = {"genorbox1": "issue", "desktop-rtx3090": "issue", "desktop-rtx30
 
 def health_problems(path: pathlib.Path, name: str) -> list[str]:
     results = {r["id"]: r["status"] for r in json.loads(path.read_text(encoding="utf-8"))["results"]}
-    expected = {"drivers.profile": "issue", "drivers.nvidia": NVIDIA_CHECK.get(name, "skipped")}
+    # a VM guest's packages are all optional: the virtual card works without them
+    expected = {"drivers.profile": "ok" if name == "qemu" else "issue",
+                "drivers.nvidia": NVIDIA_CHECK.get(name, "skipped")}
     return [f"{check} is {results.get(check)}, expected {status}"
             for check, status in expected.items() if results.get(check) != status]
 
