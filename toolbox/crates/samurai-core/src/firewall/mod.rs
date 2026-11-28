@@ -269,7 +269,7 @@ fn require_zone(sys: &dyn System, zone: &str) -> Result<(), String> {
 fn service_ports(sys: &dyn System, service: &str) -> Result<String, String> {
     let info = query(sys, &[&format!("--info-service={service}")]).map_err(|_| {
         format!(
-            "firewalld does not know the service {service:?}. After installing samurai-settings-security: sudo firewall-cmd --reload"
+            "cannot read the firewalld service {service:?} (it needs root, or after installing samurai-settings-security: sudo firewall-cmd --reload)"
         )
     })?;
     let field = |name: &str| {

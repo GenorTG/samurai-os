@@ -59,7 +59,7 @@ fn confirm_on_tty(yes: bool, id: &str, summary: &str) -> bool {
         return true;
     }
     if !std::io::stdin().is_terminal() {
-        eprintln!("samurai health: {id} needs confirmation; not a terminal, skipping (use --yes)");
+        eprintln!("samurai: {id} needs confirmation; not a terminal, skipping (use --yes)");
         return false;
     }
     eprint!("{id}: {summary}\nApply the fix? [y/N] ");
@@ -366,6 +366,12 @@ fn firewall_command(sys: &RealSystem, cmd: firewall::Cmd) -> Result<String, Stri
             zone,
             flags,
         } => {
+            // firewalld answers a normal user only partially: refuse early, with the reason
+            if !flags.dry_run && !security::is_root(sys) {
+                return Err(
+                    "changing the firewall needs root (try: sudo samurai firewall ...)".into(),
+                );
+            }
             let plan = firewall::plan(sys, open, &target, zone.as_deref())?;
             if plan.steps.is_empty() {
                 return Ok(format!(

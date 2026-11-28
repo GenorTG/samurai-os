@@ -34,6 +34,7 @@ Unprivileged user namespaces stay on (Flatpak, Steam pressure-vessel, browser sa
 |------|--------|-------------------|
 | `/etc/sudoers.d/50-samurai-security` | `timestamp_timeout=5`, `use_pty` | piping into a long-running command started through `sudo` behaves as in any current sudo |
 | `/usr/lib/systemd/coredump.conf.d/50-samurai.conf` | core dumps on disk, max 1 GiB | older dumps are removed sooner |
+| `/usr/lib/systemd/resolved.conf.d/50-samurai.conf` | `LLMNR=no`: no listener on port 5355, no LLMNR poisoning | single-label names of Windows machines that only answer LLMNR (use `name.local` or DNS) |
 | `apparmor.service` + `lsm=...apparmor...` (installer) | profiles shipped by packages are enforced | a program doing something its packaged profile does not allow (`journalctl -k \| grep DENIED`); off: remove the `lsm=` parameter (`sudo samurai boot set param remove lsm`) |
 | `/etc/firefox/policies/policies.json` | telemetry and studies off, uBlock Origin installed (can be disabled; needs network on first start) | sites that break with an ad blocker; edit or delete the file (pacman keeps your version) |
 | firewalld services `samurai-*`, zone `samurai-tailnet` | presets; `tailscale0` refuses inbound like `public` | services reached over the tailnet must be opened for that zone (`samurai firewall open ssh --zone samurai-tailnet`). Tailscale SSH is handled inside `tailscaled` and is not filtered by firewalld |

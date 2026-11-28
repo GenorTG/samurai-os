@@ -117,7 +117,10 @@ fn opening_previews_then_changes_permanent_first_and_verifies() {
         .calls()
         .iter()
         .any(|c| c.ends_with("--add-service=samurai-ollama")));
-    assert!(!sys.calls().iter().any(|c| c.contains("--reload")));
+    assert!(!sys
+        .calls()
+        .iter()
+        .any(|c| c.contains("firewall-cmd --reload")));
 }
 
 #[test]
@@ -148,7 +151,7 @@ fn closing_something_closed_is_a_no_op_and_errors_surface() {
     );
     assert!(plan(&running(), true, &Target::Preset("sunshine"), None)
         .unwrap_err()
-        .contains("--reload"));
+        .contains("firewall-cmd --reload"));
     assert!(plan(&Fake::default(), true, &Target::Preset("ssh"), None)
         .unwrap_err()
         .contains("not running"));

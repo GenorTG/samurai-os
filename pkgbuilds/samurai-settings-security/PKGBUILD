@@ -15,6 +15,7 @@ install=samurai-settings-security.install
 source=(
     80-samurai-security.conf
     50-samurai-coredump.conf
+    50-samurai-resolved.conf
     50-samurai-security.sudoers
     policies.json
     samurai-sunshine.xml
@@ -27,6 +28,7 @@ source=(
 sha256sums=(
     'b5f17aeb069ab72a95bcdb685c029716d7815707d8575b1341a74aa0f65e0e8d'
     '74fbe5ee6f509e84bd4d8aff2cfea15ae7c13045615c8ad31b3a56fc6fa58af7'
+    '54e8c1926a2a0a237256cf8fca15dd55d52d358a84e1a1f26079c1adcdc36a0f'
     'ae2348c9ad3fb43141f796fcfc6cf40b9968283e43feabc6acf6f4dc244d7b6a'
     '0db324c63b3e539798c8d225968430ce435daed430dc0c1fddc7994e963fcd5f'
     'b96fe059b739331a3df8cc678638c430b14b63e4105357539c1f41adbce377c3'
@@ -42,6 +44,7 @@ package() {
     install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
     install -Dm644 80-samurai-security.conf "$pkgdir/usr/lib/sysctl.d/80-samurai-security.conf"
     install -Dm644 50-samurai-coredump.conf "$pkgdir/usr/lib/systemd/coredump.conf.d/50-samurai.conf"
+    install -Dm644 50-samurai-resolved.conf "$pkgdir/usr/lib/systemd/resolved.conf.d/50-samurai.conf"
     install -dm750 "$pkgdir/etc/sudoers.d"
     install -m440 50-samurai-security.sudoers "$pkgdir/etc/sudoers.d/50-samurai-security"
     install -Dm644 policies.json "$pkgdir/etc/firefox/policies/policies.json"
