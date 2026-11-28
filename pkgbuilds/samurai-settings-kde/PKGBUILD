@@ -3,7 +3,7 @@
 # reduced effects, Baloo file names only, SDDM greeter, Konsole profile).
 pkgname=samurai-settings-kde
 pkgver=0.1.0
-pkgrel=1
+pkgrel=2
 pkgdesc="Samurai OS KDE Plasma defaults: theme, panel layout, monitor widgets, reduced effects"
 arch=(any)
 url="https://github.com/GenorTG/samurai-os"
@@ -20,7 +20,7 @@ source=(
     LICENSE
 )
 sha256sums=(
-    'cc15ee240c7f8b407a11ddea2ede4ade6a757814c05199729207b4542b4d77ca'
+    '4da026e7951c435a3ff6fb7cc62bba41f505898cf2cd334e0cb7fc2dc6414d5e'
     'cd122d504694a5d31211ae1e32c6b356c4118d976ed3bfc29b801c5ae0751c1c'
     '2a8d901f4a4de23379f10f91ff618bed3feb9882bfe562898a5e9988e33ea6d9'
     '05905280d9c05b9b9a3040e7f4441913ae167afe7a74f2cdbeb4e6f28506112d'

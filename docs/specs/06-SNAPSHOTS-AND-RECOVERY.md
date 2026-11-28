@@ -3,7 +3,7 @@
 ## Disk layout (installer default)
 | Partition | Size | FS | Notes |
 |-----------|------|----|-------|
-| ESP, mounted at `/boot` | 2 GiB | FAT32 | kernels and initramfs live here (Limine reads them; ADR-0003). Not encrypted; integrity comes from Limine's hash check + Secure Boot (spec 09) |
+| ESP, mounted at `/boot` | 2 GiB | FAT32 | kernels and initramfs live here (Limine reads them; ADR-0003). Not encrypted and not integrity-protected yet: no file hashes, no Secure Boot (spec 09, `docs/security/secure-boot.md`) |
 | root | rest | LUKS2 (default on) → btrfs | `zstd:1` compression, `noatime` |
 
 Swap: zram (spec 10). There is no swap partition, because hibernation is a non-goal for v1.
@@ -64,7 +64,7 @@ btrfs-assistant ships as the advanced GUI.
 |--------|------|
 | `rescue mount` | find our install (btrfs with `@`), unlock LUKS (passphrase or recovery key), mount all subvolumes + ESP under `/mnt` |
 | `rescue chroot` | mount + `arch-chroot` with the toolbox available inside |
-| `rescue bootloader` | reinstall Limine to the ESP, recreate the UEFI boot entry, regenerate config, re-sign + re-enroll for Secure Boot |
+| `rescue bootloader` | reinstall Limine to the ESP, recreate the UEFI boot entry, regenerate config, (planned, with Secure Boot: re-sign + re-enroll) |
 | `rescue initramfs` | rebuild all initramfs images |
 | `rescue kernel` | reinstall kernel packages from the cache, or from the network |
 | `rescue rollback` | snapshot rollback from outside the system (same steps as above) |

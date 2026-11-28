@@ -148,3 +148,11 @@ def test_license_files_present():
     assert text.startswith("Required Notice: Copyright 2026 GenorTG"), "Required Notice line must come first"
     body = (REPO / "LICENSES/PolyForm-Noncommercial-1.0.0.txt").read_text()
     assert body in text, "LICENSE must carry the unmodified PolyForm text"
+
+
+@pytest.mark.parametrize("unit", ["samurai-notifier.service", "samurai-health.service"])
+def test_units_that_read_kernel_modules_can_see_them(unit):
+    """ProtectKernelModules= hides /usr/lib/modules: the notifier reported "reboot pending" forever
+    (confirmed on systemd 262, user unit) and the health checks saw no kernel."""
+    lines = (REPO / "updates" / unit).read_text().splitlines()
+    assert "ProtectKernelModules=yes" not in lines

@@ -423,3 +423,86 @@ def test_confirmation(adopt, command, monkeypatch):
     assert command(adoption(adopt)) == adopt.EXIT_ABORTED and not command.applied
     monkeypatch.setattr("builtins.input", lambda prompt: "y")
     assert command(adoption(adopt)) == 0 and command.applied
+
+
+# ------------------------------------------------------------------ AppArmor and Firefox
+@pytest.fixture
+def boot(adopt, tmp_path, monkeypatch):
+    """A machine whose boot entries and policy file are faked."""
+    state = {"json": '{"editable": true, "parameters": [{"value": "rw"}]}', "rc": 0, "owned": False}
+    lsm = tmp_path / "lsm"
+    lsm.write_text("capability,landlock,yama,bpf")
+    policy = tmp_path / "policies.json"
+
+    def fake_run(cmd, **kw):
+        if cmd[:2] == ["pacman", "-Qqo"]:
+            return subprocess.CompletedProcess(cmd, 0 if state["owned"] else 1, "", "")
+        return subprocess.CompletedProcess(cmd, state["rc"], state["json"], "")
+
+    monkeypatch.setattr(adopt, "run", fake_run)
+    monkeypatch.setattr(adopt, "LSM_ACTIVE", lsm)
+    monkeypatch.setattr(adopt, "FIREFOX_POLICY", policy)
+    state.update(lsm=lsm, policy=policy)
+    return state
+
+
+def test_apparmor_parameter_is_planned_once(adopt, boot):
+    assert adopt.apparmor_plan(True, {}) == (adopt.LSM_PARAM, "")
+    # a later run never brings a removed parameter back, a failed attempt is retried
+    assert adopt.apparmor_plan(False, {}) == ("", "")
+    assert adopt.apparmor_plan(False, {"apparmor": "added"}) == ("", "")
+    assert adopt.apparmor_plan(False, {"apparmor": "pending"})[0] == adopt.LSM_PARAM
+    boot["lsm"].write_text("capability,landlock,apparmor,bpf")
+    assert adopt.apparmor_plan(True, {}) == ("", "")
+
+
+def test_apparmor_respects_the_users_boot_setup(adopt, boot):
+    boot["json"] = '{"editable": true, "parameters": [{"value": "lsm=landlock,selinux"}]}'
+    param, note = adopt.apparmor_plan(True, {})
+    assert param == "" and "lsm=landlock,selinux is kept" in note
+    boot["json"] = '{"editable": true, "parameters": [{"value": "lsm=apparmor,bpf"}]}'
+    assert adopt.apparmor_plan(True, {}) == ("", "")
+    for json_, rc in (('{"editable": false, "parameters": []}', 0), ("", 1), ("nonsense", 0)):
+        boot["json"], boot["rc"] = json_, rc
+        param, note = adopt.apparmor_plan(True, {})
+        assert param == "" and adopt.LSM_PARAM in note
+
+
+def test_apparmor_parameter_matches_the_installer(adopt):
+    assert adopt.LSM_PARAM in (REPO / "installer" / "samurai-postinstall").read_text()
+
+
+def test_an_unowned_firefox_policy_is_announced(adopt, boot):
+    assert adopt.firefox_note() == ""
+    boot["policy"].write_text("{}")
+    assert "is kept" in adopt.firefox_note()
+    boot["owned"] = True
+    assert adopt.firefox_note() == ""
+
+
+def test_preview_shows_the_kernel_parameter(adopt):
+    result = adoption(adopt, selection=adopt.Selection(), enable_chaotic=False,
+                      kernel_param=adopt.LSM_PARAM)
+    assert result.needed
+    assert f"boot: add the kernel parameter {adopt.LSM_PARAM}" in adopt.render(result)
+
+
+def test_apply_adds_the_kernel_parameter(adopt, machine, capsys):
+    assert adopt.apply(adoption(adopt, kernel_param=adopt.LSM_PARAM), no_snapshot=False) == 0
+    assert machine["commands"][-1] == [adopt.SAMURAI_CLI, "boot", "set", "param", "add",
+                                       adopt.LSM_PARAM]
+    assert adopt.load_state()["apparmor"] == "added"
+    assert "param remove lsm" in capsys.readouterr().out
+
+
+def test_a_failed_kernel_parameter_is_retried(adopt, machine, capsys, monkeypatch):
+    real = adopt.Log.stream
+
+    def failing(self, cmd):
+        rc = real(self, cmd)
+        return 1 if cmd[0] == adopt.SAMURAI_CLI else rc
+
+    monkeypatch.setattr(adopt.Log, "stream", failing)
+    assert adopt.apply(adoption(adopt, kernel_param=adopt.LSM_PARAM), no_snapshot=False) == 1
+    assert "could not add the kernel parameter" in capsys.readouterr().out
+    assert adopt.load_state()["apparmor"] == "pending"

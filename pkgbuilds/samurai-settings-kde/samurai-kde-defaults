@@ -44,6 +44,11 @@ BASE_KEYS = {
     "etc/xdg/konsolerc": {
         "Desktop Entry": {"DefaultProfile": "Samurai.profile"},
     },
+    # Plasma's Welcome Center never opens by itself (the Samurai welcome does): its kded
+    # launcher starts it when no version was seen yet, or after an upgrade with the update page on
+    "etc/xdg/plasma-welcomerc": {
+        "General": {"LastSeenVersion": "6.0.0", "ShowUpdatePage": "false"},
+    },
 }
 
 

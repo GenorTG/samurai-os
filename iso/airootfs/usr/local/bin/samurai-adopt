@@ -49,6 +49,13 @@ STATE_PATH = pathlib.Path("/var/lib/samurai/adopt.json")
 LOG_DIR = pathlib.Path("/var/log/samurai")
 # repositories that must stay above [chaotic-aur] (spec 02: it only ADDS packages)
 ABOVE_CHAOTIC = ("core", "extra", "multilib", "cachyos")
+# what brings AppArmor; the kernel only runs it when lsm= names it (installer: same value)
+SECURITY_PACKAGE = "samurai-settings-security"
+LSM_PARAM = "lsm=landlock,lockdown,yama,integrity,apparmor,bpf"
+ENABLE_APPARMOR = f"sudo samurai boot set param add {LSM_PARAM}, then reboot"
+SAMURAI_CLI = "/usr/local/bin/samurai"
+LSM_ACTIVE = pathlib.Path("/sys/kernel/security/lsm")
+FIREFOX_POLICY = pathlib.Path("/etc/firefox/policies/policies.json")
 # the package that shows a desktop is still in use
 DESKTOP_CORE = {"kde": "plasma-workspace", "gnome": "gnome-shell", "xfce": "xfce4-session",
                 "lxqt": "lxqt-session"}
@@ -468,10 +475,12 @@ class Adoption:
     transaction: list[str]       # "repo name version" lines pacman will install or upgrade
     upgrades: list[str]
     installed: set[str]
+    kernel_param: str = ""       # added to the boot entries after the transaction
 
     @property
     def needed(self) -> bool:
-        return bool(self.selection.targets) or self.enable_chaotic or self.bootstrap
+        return (bool(self.selection.targets) or self.enable_chaotic or self.bootstrap
+                or bool(self.kernel_param))
 
 
 def wants_chaotic(conf: str, stored: dict | None, state: dict, opt_in: set[str]) -> tuple[bool, str]:
@@ -482,6 +491,50 @@ def wants_chaotic(conf: str, stored: dict | None, state: dict, opt_in: set[str])
     if chose and "chaotic" not in opt_in:
         return False, "[chaotic-aur] was enabled and you removed it: left off (--with chaotic adds it)"
     return True, ""
+
+
+def boot_parameters() -> list[str] | None:
+    """The kernel parameters of the managed boot entries; None when they cannot be edited."""
+    r = run([SAMURAI_CLI, "boot", "get", "--json"])
+    try:
+        data = json.loads(r.stdout) if r.returncode == 0 else {}
+        if data.get("editable") is not True:
+            return None
+        return [str(p["value"]) for p in data["parameters"]]
+    except (ValueError, KeyError, TypeError):
+        return None
+
+
+def apparmor_plan(adding: bool, state: dict) -> tuple[str, str]:
+    """(kernel parameter to add, note). Only for the run that brings the security package
+    (or the retry of a failed attempt): a parameter removed later stays removed."""
+    if not adding and state.get("apparmor") != "pending":
+        return "", ""
+    try:
+        if "apparmor" in LSM_ACTIVE.read_text().strip().split(","):
+            return "", ""
+    except OSError:
+        pass
+    params = boot_parameters()
+    if params is None:
+        return "", ("AppArmor stays off: this boot loader's kernel parameters are not managed. "
+                    f"Add {LSM_PARAM} to the kernel command line yourself")
+    own = [p for p in params if p.startswith("lsm=")]
+    if not own:
+        return LSM_PARAM, ""
+    if "apparmor" in own[-1][4:].split(","):
+        return "", ""
+    return "", (f"your kernel parameter {own[-1]} is kept, so AppArmor stays off; "
+                f"to replace it: {ENABLE_APPARMOR}")
+
+
+def firefox_note() -> str:
+    """A policy file that no package owns survives the install (it is a pacman backup file)."""
+    if not FIREFOX_POLICY.is_file() or run(["pacman", "-Qqo", str(FIREFOX_POLICY)]).returncode == 0:
+        return ""
+    return (f"your {FIREFOX_POLICY} is kept; the Samurai policy (telemetry and studies off, "
+            f"uBlock Origin) is not active. If the two differ it is saved as "
+            f"{FIREFOX_POLICY.name}.pacnew")
 
 
 def examine(opt_in: set[str], workdir: pathlib.Path) -> Adoption:
@@ -562,8 +615,15 @@ def examine(opt_in: set[str], workdir: pathlib.Path) -> Adoption:
         selection.swaps = resolver.swaps(new)
     upgrades = [l for l in run([*pac, "-Qu"]).stdout.splitlines()
                 if l.strip() and "[ignored]" not in l]
+    adding = SECURITY_PACKAGE not in installed and any(
+        l.split()[1] == SECURITY_PACKAGE for l in transaction)
+    if adding and (note := firefox_note()):
+        notes.append(note)
+    kernel_param, note = apparmor_plan(adding, state)
+    if note:
+        notes.append(note)
     return Adoption(profile, features, selection, sync, notes, enable, bootstrap,
-                    transaction, upgrades, installed)
+                    transaction, upgrades, installed, kernel_param)
 
 
 def render(a: Adoption) -> str:
@@ -587,6 +647,9 @@ def render(a: Adoption) -> str:
     for new_pkg, old in a.selection.swaps.items():
         out.append(f"\nreplaces: {new_pkg} takes the place of {', '.join(old)} "
                    "(installed only as a dependency)")
+    if a.kernel_param:
+        out.append(f"\nboot: add the kernel parameter {a.kernel_param} "
+                   "(turns AppArmor on at the next boot)")
     if a.selection.skipped:
         out.append("\nleft alone:")
         out += [f"  {name}: {why}" for name, why in sorted(a.selection.skipped.items())]
@@ -644,10 +707,14 @@ def write_conf(text: str) -> None:
     os.replace(tmp, PACMAN_CONF)
 
 
-def undo_hint(snapshot: str) -> str:
+def undo_hint(snapshot: str, kernel_param: str = "") -> str:
     if not snapshot:
         return "no snapshot was taken (--no-snapshot): there is no automatic way back"
-    return f"to undo everything: sudo samurai snap rollback {snapshot} && systemctl reboot"
+    hint = f"to undo everything: sudo samurai snap rollback {snapshot} && systemctl reboot"
+    if kernel_param:   # the boot menu lives on the ESP, outside the snapshot
+        hint += ("\n(the kernel parameter stays in the boot menu: "
+                 "sudo samurai boot set param remove lsm)")
+    return hint
 
 
 def configure(a: Adoption, new: set[str], stored: dict | None, log: Log) -> list[str]:
@@ -686,8 +753,10 @@ def configure(a: Adoption, new: set[str], stored: dict | None, log: Log) -> list
     return problems
 
 
-def record(a: Adoption, new: set[str], snapshot: str) -> None:
+def record(a: Adoption, new: set[str], snapshot: str, apparmor: str = "") -> None:
     state = load_state()
+    if apparmor:
+        state["apparmor"] = apparmor
     state.update({
         "schema": 1,
         "completed": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
@@ -748,12 +817,19 @@ def apply(a: Adoption, no_snapshot: bool) -> int:
         log.say(f"log: {log.path}")
         return EXIT_FAIL
     problems = configure(a, new, load_stored_profile(), log)
-    record(a, new, snapshot)
+    apparmor = added = ""
+    if a.kernel_param:
+        if log.stream([SAMURAI_CLI, "boot", "set", "param", "add", a.kernel_param]) == 0:
+            apparmor, added = "added", a.kernel_param
+        else:
+            apparmor = "pending"
+            problems.append(f"could not add the kernel parameter: {ENABLE_APPARMOR}")
+    record(a, new, snapshot, apparmor)
     log.say(f"\nadopted: {len(new)} package(s) added")
     for p in problems:
         log.say(f"still to do: {p}")
     log.say("reboot to apply the new system settings")
-    log.say(undo_hint(snapshot))
+    log.say(undo_hint(snapshot, added))
     log.say(f"log: {log.path}")
     return EXIT_FAIL if any(p.startswith("could not") for p in problems) else EXIT_OK
 

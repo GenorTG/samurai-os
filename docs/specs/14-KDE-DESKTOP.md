@@ -75,3 +75,5 @@ Settings; our values are only the starting point):
   I/O and CPU spikes.
 - Wayland session only. NVIDIA gets the kernel parameters from spec 07.
 - Discover for Flatpak only (no PackageKit; spec 04).
+- Plasma's Welcome Center never starts by itself (`/etc/xdg/plasma-welcomerc`: a version already
+  seen, no update page); the Samurai welcome opens instead. The app stays in the menu.

@@ -234,6 +234,12 @@ def test_default_kde_system(mirror):
               f"pgrep -u {USER} -x kwin_wayland >/dev/null && echo KWIN-OK", ["KWIN-OK"])
         c.run("audio", env + " wpctl status | head -4", ["PipeWire"], timeout=60)
         c.ga.exec("sleep 10", timeout=40)
+        # Plasma's own Welcome Center stays closed (ours opens instead)
+        c.run("plasma-welcome", env + " kreadconfig6 --file plasma-welcomerc --group General --key ShowUpdatePage; "
+              f"pgrep -u {USER} -x plasma-welcome || echo NO-PLASMA-WELCOME", ["false", "NO-PLASMA-WELCOME"])
+        # the sandboxed user unit sees the running kernel's modules: no false reboot notice
+        c.run("notifier", env + " systemctl --user start samurai-notifier.service; "
+              f"cat /home/{USER}/.local/state/samurai/update-check", ["reboot=0"], timeout=240)
         vm.screendump("defaults-01-desktop")
         # started by the user's systemd manager: the real session environment
         c.run("terminal", env + " systemd-run --user --collect --quiet konsole; sleep 10; "

@@ -78,7 +78,8 @@ Runs in the target chroot, idempotent, every step logged to `/var/log/samurai/in
 3. Repos and keyrings: `[samurai]`, `[cachyos]`, `[chaotic-aur]` with their keyrings (spec 02).
 4. Kernels and headers.
 5. Hardware: `chwd` profiles; CUDA if chosen; gpu-unlock local build if chosen (spec 07). These need
-   network. Without it they are queued for `samurai-hw-firstboot`.
+   network. Without it they are skipped and reported by health (`drivers.profile`); nothing is installed
+   unattended later. gpu-unlock is deferred (spec 07).
 6. One pacman transaction with every selected package (desktop meta, gaming, dev, apps, AI CLIs).
 7. Root commands from the catalog (enable services), then user commands as the new user via
    `runuser` (uv tools, vendor installers), each shown in the log with its exact command.
@@ -91,6 +92,7 @@ Runs in the target chroot, idempotent, every step logged to `/var/log/samurai/in
 11. Write `hw-fingerprint`, `install-info.json`, `install-profile.toml`; first snapshot `install-complete`.
 
 ## First boot
-`samurai welcome` opens once: release notes; **Connect Tailscale** (if on); **Set up Secure Boot**
-(if the firmware supports it); **Enrol TPM unlock** (if TPM2 and encryption); anything step 5 had to
+`samurai welcome` opens once (Plasma's own Welcome Center does not start by itself, spec 14):
+release notes; **Connect Tailscale** (if on); **Set up Secure Boot** (planned, not built, spec 09);
+**Enrol TPM unlock** (if TPM2 and encryption); anything step 5 had to
 defer; links to the setup assistant (the same catalog) and the toolbox.

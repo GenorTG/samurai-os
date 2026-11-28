@@ -1,5 +1,7 @@
 # ADR-0008 — gpu-unlock is built on each machine, never redistributed
 
+> **Deferred (2026-11-28):** not built; nothing in the catalog or installer offers it.
+
 **Status:** accepted
 
 ## Context

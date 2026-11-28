@@ -7,8 +7,9 @@ nothing or stop the machine from booting.
 ## Facts
 - No boot entry carries a file hash: nothing in `installer/samurai-postinstall`,
   `toolbox/crates/samurai-core/src/boot/`, `updates/samurai-snap` or `updates/samurai-rescue` writes
-  `#<blake2b>` after a path or runs `limine enroll-config`. Spec 09 "Disk encryption" and ADR-0003
-  say Limine verifies kernel and initramfs hashes: **that is not true of the current code**. Anyone
+  `#<blake2b>` after a path or runs `limine enroll-config`. Spec 09 and ADR-0003 used to describe
+  Limine verifying kernel and initramfs hashes; **the code never did that** (texts corrected
+  2026-11-28; decision: Secure Boot stays unbuilt). Anyone
   who can write the ESP can replace the kernel or initramfs.
 - Limine `CONFIG.md` (trunk): "When Secure Boot is active and a config hash is enrolled, all file
   paths must have a hash appended or Limine will panic" and "Without an enrolled hash Limine treats

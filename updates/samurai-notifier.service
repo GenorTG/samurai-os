@@ -16,7 +16,8 @@ ProtectSystem=strict
 ReadWritePaths=%S/samurai %C/samurai
 PrivateTmp=yes
 ProtectKernelTunables=yes
-ProtectKernelModules=yes
+# not ProtectKernelModules=yes: in a user unit it hides /usr/lib/modules too, and every check
+# then reported "reboot pending"
 ProtectControlGroups=yes
 RestrictRealtime=yes
 LockPersonality=yes

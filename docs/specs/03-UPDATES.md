@@ -91,6 +91,13 @@ asked. It is an executor in `samurai-tools` (`updates/samurai-adopt`); an old in
   an outdated `samurai-tools` always does.
 - **Configuration:** no `--overwrite`; a file in the way fails the transaction. On failure with nothing
   installed, `pacman.conf` is restored and the rollback command is printed.
+- **System settings that come along** (all shown in the preview): the KDE system defaults in
+  `/etc/xdg` (a user's own settings win); the security baseline, including the AppArmor kernel
+  parameter `lsm=landlock,lockdown,yama,integrity,apparmor,bpf`, added to the Samurai boot entries
+  after the transaction. A user's own `lsm=` parameter is kept, an unmanaged boot loader (GRUB) gets
+  a note instead, and a parameter removed later is not added again (a failed attempt is retried).
+  The parameter lives on the ESP, so a snapshot rollback keeps it. An existing
+  `/etc/firefox/policies/policies.json` that no package owns is kept (ours becomes `.pacnew`).
 - Idempotent: a second run reports "nothing to do" and takes no snapshot. State:
   `/var/lib/samurai/adopt.json`; log: `/var/log/samurai/adopt-<time>.log`.
 - Limit: removals are known only as far back as the pacman logs on the machine reach.

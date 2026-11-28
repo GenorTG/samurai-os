@@ -45,6 +45,8 @@ Arch's default already makes `wheel` members authenticate as themselves
 password for local `wheel` users (Flatpak system installs) are left as upstream ships them.
 
 ## Existing installs
+`samurai adopt` brings the package and adds the AppArmor kernel parameter itself (previewed; your own
+`lsm=` parameter and your own Firefox policy file are kept). A manual `pacman -S` does not:
 Installing the package applies the kernel, sudo, Firefox and firewall files. AppArmor additionally
 needs the kernel parameter:
 `sudo samurai boot set param add lsm=landlock,lockdown,yama,integrity,apparmor,bpf`, then reboot.

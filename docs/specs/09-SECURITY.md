@@ -4,7 +4,7 @@
 | Threat | Mitigation |
 |--------|-----------|
 | Stolen or lost machine | LUKS2 full-root encryption (default on), TPM2+PIN unlock optional, screen lock |
-| Evil maid / boot tampering | Secure Boot with our own keys, Limine config hash enrolled, TPM binding to PCR 7 |
+| Evil maid / boot tampering | **Not covered yet.** Planned: Secure Boot with our own keys, Limine config hash enrolled, TPM binding to PCR 7. Today only the TPM PIN and the passphrase protect the disk |
 | Network attacks | firewall default-deny inbound, no listening services by default, sshd off |
 | Compromised or tampered packages | signed `[samurai]` repo + db, Arch signing as-is, no unsigned repos, AUR never as root |
 | Our own supply chain (GitHub account, CI) | hardware-key 2FA, pinned Actions, signing key isolated (below) |
@@ -18,15 +18,16 @@ that breaks them goes in the opt-in `paranoid` profile.
 Built: `samurai-settings-security` (kernel settings, sudo and core dump defaults, AppArmor, LLMNR
 off, Firefox policy, firewall presets, tailnet zone), `samurai security status`, `samurai firewall`
 (not `watch`), `samurai security tpm enroll|remove`, `recovery-key`, `samurai welcome`.
-Not built: Secure Boot setup (`docs/security/secure-boot.md`; **no boot entry carries a file hash
-yet**, so the Limine verification described below does not exist), `paranoid` profile,
+Not built: Secure Boot setup (decision 2026-11-28: stays unbuilt until the work listed in
+`docs/security/secure-boot.md` is done; **no boot entry carries a file hash**, so Limine verifies
+neither kernels nor initramfs), `paranoid` profile,
 `security profile`, vnstat and the Servers/Reverse proxy sections. What each default can break:
 `docs/security/hardening.md`.
 
 ## Disk encryption
-- LUKS2, argon2id, default on in the installer. `/boot` is the unencrypted ESP; Limine verifies
-  kernel and initramfs hashes (ADR-0003), so they are integrity-protected even though they are not
-  encrypted.
+- LUKS2, argon2id, default on in the installer. `/boot` is the unencrypted ESP and its content
+  (boot loader, kernels, initramfs, menu) is **not integrity-protected**: nothing verifies it, so
+  anyone who can write the ESP can replace it.
 - First boot offers a **recovery key** (`systemd-cryptenroll --recovery-key`), shown once with the
   advice to store it offline.
 - Optional TPM2 unlock: `systemd-cryptenroll --tpm2-device=auto --tpm2-pcrs=7 --tpm2-with-pin=yes`.
@@ -35,14 +36,15 @@ yet**, so the Limine verification described below does not exist), `paranoid` pr
   key changes reset PCR 7. The toolbox re-enrols after `samurai security sign` and warns before fwupd
   updates.
 
-## Secure Boot
+## Secure Boot (planned, not built)
+The design below is a target; none of it exists today (`docs/security/secure-boot.md`).
 - `samurai security secureboot setup` (offered in the welcome app when the firmware is in setup mode):
   `sbctl create-keys` → `sbctl enroll-keys --microsoft` → sign Limine's EFI binaries → enrol the Limine
   config checksum (`limine-enroll-config`) → verify (`sbctl verify`) → reboot to firmware to turn it on.
 - **Keep the Microsoft keys** (`--microsoft`). GPU and NVMe option ROMs are signed with them, and
   enrolling only our keys can leave a machine without display or boot device. The toolbox refuses to
   drop them unless forced.
-- Do not sign the kernels with sbctl: Limine checks them by hash, and the config holding the hashes is
+- Do not sign the kernels with sbctl: Limine would check them by hash, and the config holding the hashes is
   itself enrolled. A pacman hook re-runs signing + enrolment whenever Limine or its config changes
   (kernel updates, snapshot entries). Verify the snapshot-entry case in the M4 spike.
 - What this does **not** cover: kernel module signature enforcement (lockdown). NVIDIA DKMS modules
@@ -83,7 +85,7 @@ net.ipv4.icmp_ignore_bogus_error_responses = 1
 ## Network
 - **firewalld** (nftables backend), enabled at install; ufw is the installer/toolbox alternative,
   OpenSnitch an optional per-app outbound firewall on top. Default zone `public`: inbound denied except
-  DHCPv6 client and mDNS. ADR-0006 explains firewalld over ufw.
+  DHCPv6 client. mDNS stays closed (decision 2026-11-28); open it per zone when needed. ADR-0006 explains firewalld over ufw.
 - **Opening ports and services should be easy**, in two places that change the same firewalld config:
   - System Settings → Firewall (`plasma-firewall`, KDE's own module; works with firewalld and ufw);
   - toolbox → Firewall page, and `samurai firewall`:
@@ -158,7 +160,7 @@ net.ipv4.icmp_ignore_bogus_error_responses = 1
 | Profile | Adds |
 |---------|------|
 | `standard` (default) | everything above |
-| `paranoid` (opt-in) | `apparmor.d` enforce, USBGuard (allow present devices, prompt on new), `init_on_free=1`, `lockdown=integrity` when no out-of-tree modules, `nosmt` offer on affected CPUs, stricter firewall (no mDNS) |
+| `paranoid` (opt-in) | `apparmor.d` enforce, USBGuard (allow present devices, prompt on new), `init_on_free=1`, `lockdown=integrity` when no out-of-tree modules, `nosmt` offer on affected CPUs |
 
 `samurai security status` reports each item with pass/warn/fail; `samurai security profile <name>`
 applies one with a snapshot first.

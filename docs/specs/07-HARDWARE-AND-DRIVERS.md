@@ -8,13 +8,12 @@ install/remove hooks. It also handles conflict groups (one NVIDIA driver at a ti
 
 What we change (checked against the chwd source, 2026-10-27):
 - chwd reads profiles from a fixed path, `/var/lib/chwd/db/{pci,usb}/`, and its helper script from
-  `/var/lib/chwd/scripts/chwd`. We split it into two packages: our `chwd` package builds the binary +
-  scripts from CachyOS's tag, and `samurai-hardware` installs **our** profile set into the db dir. No
-  patching of chwd itself.
-  As built (2026-11-28): the package is **`samurai-chwd`** (`provides`/`conflicts` `chwd`), because
+  `/var/lib/chwd/scripts/chwd`. We split it into two packages: **`samurai-chwd`** builds the binary +
+  scripts from CachyOS's tag, and `samurai-hardware` installs **our** profile set into the db dir.
+- Decided 2026-11-28: the package name is `samurai-chwd` (`provides`/`conflicts` `chwd`), because
   `[samurai]` sits below `[cachyos]`, which ships its own `chwd` with CachyOS's profiles. It carries
-  one packaging patch: the helper script ran `pacman -Sy` before its first install (a partial
-  upgrade); the build fails if upstream changes that line.
+  one packaging patch that removes the helper script's `pacman -Sy` before its first install (a
+  partial upgrade); the build fails if upstream changes that line. No other patching of chwd.
 - Our profiles start from CachyOS's set with CachyOS-only packages removed (e.g.
   `cachyos-drm-awaiter`, unless the CachyOS repo provides it). Kernel module packages are chosen
   per installed kernel: CachyOS's prebuilt `linux-cachyos-nvidia-open` for `linux-cachyos`, Arch's
@@ -59,15 +58,15 @@ standard repository driver packages.
   unless a kernel lacks the module or `--reinstall` asks.
 - The installer's `auto` installs the open modules only when no pre-Turing NVIDIA card is present
   (`nvidia-utils` blacklists nouveau, so an older card would be left without a driver).
-- Not built yet: `samurai-hw-firstboot.service` (nothing installs drivers unattended; the daily health
-  check reports `drivers.profile`), the installer's chwd step, handheld/Framework/T2/fingerprint
+- Decided 2026-11-28: **no unattended driver install on first boot** (the daily health check reports
+  `drivers.profile` and the user applies it). Not built yet: the installer's chwd step, handheld/Framework/T2/fingerprint
   profiles, `diag gpu` chwd output, `samurai hw gpu`, the weekly upstream profile diff.
 
 ## When detection runs
 1. **Installer**: the installer's chwd step applies profiles into the target system,
    using packages from the ISO's offline cache when they are there, the network otherwise.
-2. **First boot**: `samurai-hw-firstboot.service` re-runs detection once with network. It catches
-   anything the offline install skipped.
+2. **First boot**: nothing installs drivers unattended (decided 2026-11-28; there is no
+   `samurai-hw-firstboot.service`). What the install skipped shows up as `drivers.profile` in health.
 3. **Hardware change**: at every boot, `samurai-hw-fingerprint.service` hashes the PCI device list
    (class + vendor + device) and compares it with `/var/lib/samurai/hw-fingerprint`. If it changed,
    the notifier says "New hardware: NVIDIA GeForce RTX 5080 (was RTX 3090). Apply the recommended
@@ -96,6 +95,9 @@ standard repository driver packages.
 - `cuda` is about 4–5 GiB, so the summary page shows it in the download size.
 
 ## gpu-unlock (FP16/BF16 tensor throughput unlock, default on for supported cards)
+**Deferred (2026-11-28): nothing of this section is built** and the app catalog offers no toggle,
+because no `samurai-gpu-unlock` package exists and no pinned fork list is named.
+
 [`Zagitta/gpu-unlock`](https://github.com/Zagitta/gpu-unlock) is a kernel module that runs before
 the unmodified NVIDIA driver. It sets the speed selectors on consumer cards to the professional
 rate (upstream's 3090 Ti measurement: BF16 87.5 → 157.4 TFLOPS, FP16 87.5 → 118.4, TF32 42.6 → 82.6,

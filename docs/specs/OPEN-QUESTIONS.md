@@ -29,3 +29,12 @@ None. Every Q1–Q16 has a decision above. New questions go here when they appea
 | Q14 | Docker mode | **Both offered; choice made during install — confirmed (Genor 2026-11-17)** | group vs rootless becomes an installer option, not a global default |
 | Q15 | AI CLIs | **All unticked by default — confirmed (Genor 2026-11-17)** | spec 13 as written |
 | Q16 | gpu-unlock scope | **Include forks for RTX 20 + non-4090 RTX 40 — confirmed (Genor 2026-11-17)** | ALL recipes (upstream included) marked "untested / potentially unstable" until we validate on real hardware; spec 07 + ADR-0008 updated |
+
+## Decided at the 2026-11-28 integration
+- The hardware engine package is `samurai-chwd`, with the patch that removes its `pacman -Sy` (spec 07).
+- No unattended driver install on first boot (spec 07).
+- gpu-unlock is deferred; no catalog toggle until the package exists (spec 07, ADR-0008).
+- Plasma's Welcome Center does not start by itself; the Samurai welcome does (spec 14).
+- mDNS stays closed in the default firewall zone (spec 09).
+- `samurai adopt` applies the KDE system defaults and turns AppArmor on (kernel parameter, previewed).
+- Secure Boot stays unbuilt; no document may claim that Limine verifies hashes today.

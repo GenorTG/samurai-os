@@ -1,7 +1,9 @@
 """An install made by an older release adopts the current defaults (spec 11).
 
   SAMURAI_TEST_ISO=<online ISO of the old release> SAMURAI_TEST_PROFILE_REF=v0.0.1.75 \
-  SAMURAI_TEST_TOOLS_PKG=<new samurai-tools package> pytest -q -s test_adopt.py
+  SAMURAI_TEST_TOOLS_PKG=<new samurai-tools package> \
+  [SAMURAI_TEST_EXTRA_PKGS=<other unpublished [samurai] packages, colon separated>] \
+  pytest -q -s test_adopt.py
 
 Flow: install KDE from the old ISO -> the user removes an app and changes settings ->
 `samurai update` brings the new samurai-tools (from a local repo while it is
@@ -25,8 +27,12 @@ from vm import VM
 
 DEFAULTS = ("samurai-base samurai-settings-system samurai-settings-shell samurai-settings-dev "
             "samurai-desktop-base samurai-settings-kde samurai-toolbox-gui yay pipewire-jack")
+# what this release adds; checked when the branch packages are supplied
+NEW_DEFAULTS = "samurai-settings-security samurai-hardware samurai-chwd apparmor"
+POLICY = "/etc/firefox/policies/policies.json"
 USER_FILES = ("/home/samurai/.config/kdeglobals /etc/sddm.conf.d/10-samurai-kde.conf "
               "/etc/uv-user-note")
+EXTRA = [pathlib.Path(p) for p in os.environ.get("SAMURAI_TEST_EXTRA_PKGS", "").split(":") if p]
 LOCAL_REPO = r"[samurai-local]\nSigLevel = Never\nServer = file:///var/lib/adopt-repo\n"
 
 
@@ -77,7 +83,12 @@ def test_adopt_current_defaults(mirror):
         pytest.skip("set SAMURAI_TEST_PROFILE_REF=<old tag> and SAMURAI_TEST_TOOLS_PKG=<new package>")
     package_path = pathlib.Path(package)
     assert package_path.is_file(), package
+    names = [package_path.name]
     shutil.copy(package_path, mirror.dir / package_path.name)
+    for extra in EXTRA:
+        assert extra.is_file(), extra
+        shutil.copy(extra, mirror.dir / extra.name)
+        names.append(extra.name)
     (mirror.dir / "profile-adopt.toml").write_text(_old_profile(ref))
 
     vm = VM("adopt", iso=str(find_iso()), disk_size="30G", ram="4096")
@@ -97,12 +108,12 @@ def test_adopt_current_defaults(mirror):
         vm.reboot()
         vm.wait_for("login:", timeout=400)
         g = Guest(vm)
-        _scenario(g, package_path.name)
+        _scenario(g, names)
     finally:
         vm.stop()
 
 
-def _scenario(g: Guest, package_name: str) -> None:
+def _scenario(g: Guest, names: list[str]) -> None:
     # the old release: no Chaotic-AUR, no metas, no adopt command
     old = g.ok("pacman -Q samurai-tools; grep -c '^\\[chaotic-aur\\]' /etc/pacman.conf; "
                "pacman -Qq | grep -E '^samurai-' | tr '\\n' ' '")
@@ -115,11 +126,13 @@ def _scenario(g: Guest, package_name: str) -> None:
          "printf '[General]\\nColorScheme=BreezeLight\\n' > /home/samurai/.config/kdeglobals && "
          "chown samurai:samurai /home/samurai/.config/kdeglobals && echo mine > /etc/uv-user-note && "
          "echo '# my own bashrc line' >> /etc/bash.bashrc")
-    user_files = g.ok(f"md5sum {USER_FILES}")
+    g.ok(f"install -d /etc/firefox/policies && echo '{{\"policies\": {{}}}}' > {POLICY}")
+    user_files = g.ok(f"md5sum {USER_FILES} {POLICY}")
 
     # the new samurai-tools arrives with a normal update
+    fetch = " && ".join(f"curl -fsSLO 'http://10.0.2.2:8966/{n}'" for n in names)
     g.ok(f"install -d -m 755 /var/lib/adopt-repo && cd /var/lib/adopt-repo && "
-         f"curl -fsSLO 'http://10.0.2.2:8966/{package_name}' && repo-add -q samurai-local.db.tar.gz *.pkg.tar.zst && "
+         f"{fetch} && repo-add -q samurai-local.db.tar.gz *.pkg.tar.zst && "
          f"chmod 644 * && sed -i '/^\\[samurai\\]$/i " + LOCAL_REPO + "' /etc/pacman.conf")
     rc, out = g.sh("samurai-update --noconfirm >/tmp/up.log 2>&1; rc=$?; tail -15 /tmp/up.log; exit $rc", 1500)
     assert rc in (0, 2), out
@@ -132,6 +145,10 @@ def _scenario(g: Guest, package_name: str) -> None:
     assert "enable [chaotic-aur]" in preview and "samurai-base" in preview
     assert "kate: you removed it" in preview and "samurai-desktop-kde: it needs kate" in preview
     assert "gaming: no" in preview
+    if EXTRA:
+        assert "samurai-settings-security" in preview
+        assert "boot: add the kernel parameter lsm=" in preview and "apparmor" in preview
+        assert f"your {POLICY} is kept" in preview
     assert g.state() == before
     gaming = g.ok("samurai adopt --preview --with gaming", 600)
     assert "steam" in gaming and "samurai-wine" in gaming and g.state() == before
@@ -155,6 +172,10 @@ def _scenario(g: Guest, package_name: str) -> None:
     assert rc == 0, out
     snapshot = re.search(r"snapshot #(\d+) created", out).group(1)
     _assert_adopted(g, user_files)
+    if EXTRA:
+        assert "failed" not in out.lower().replace("fallback", ""), out
+        g.ok("grep -c 'cmdline:.*lsm=landlock,lockdown,yama,integrity,apparmor,bpf' /boot/limine.conf")
+        g.ok(f"test -s {POLICY}.pacnew")
     assert g.sh("pacman -Qq kate")[0] != 0 and g.sh("pacman -Qq samurai-desktop-kde")[0] != 0
     assert g.sh("pacman -Qq steam")[0] != 0
 
@@ -170,6 +191,11 @@ def _scenario(g: Guest, package_name: str) -> None:
     g.ok("for i in $(seq 60); do systemctl is-active -q sddm && break; sleep 2; done; systemctl is-active sddm")
     assert g.ok("sysctl -n vm.max_map_count").strip() == "2147483642"
     assert g.ok("systemctl --failed --no-legend --plain").strip() == ""
+    if EXTRA:
+        assert "apparmor" in g.ok("cat /sys/kernel/security/lsm").strip().split(",")
+        g.ok("systemctl is-active apparmor.service")
+        g.ok("samurai security status | grep -i apparmor")
+        assert g.ok("kreadconfig6 --file plasma-welcomerc --group General --key ShowUpdatePage").strip() == "false"
     g.ok("swapon --show --noheadings | grep zram")
     rc, out = g.sh("samurai-update --noconfirm >/tmp/up2.log 2>&1; rc=$?; tail -8 /tmp/up2.log; exit $rc", 1200)
     assert rc in (0, 2), out
@@ -200,7 +226,9 @@ def _assert_adopted(g: Guest, user_files: str) -> None:
     g.ok(f"pacman -Q {DEFAULTS}")
     g.ok("pacman -Dk")
     assert "realtime" in g.ok("id -nG samurai").split()
-    assert g.ok(f"md5sum {USER_FILES}") == user_files
+    assert g.ok(f"md5sum {USER_FILES} {POLICY}") == user_files
+    if EXTRA:
+        g.ok(f"pacman -Q {NEW_DEFAULTS}")
     g.ok("grep -qx '# my own bashrc line' /etc/bash.bashrc && grep -q 'samurai-settings-shell$' /etc/bash.bashrc")
     assert g.sh("systemctl is-enabled bluetooth.service")[1].strip() == "disabled"
     out = g.ok("snapper -c root list; cat /var/lib/samurai/adopt.json")

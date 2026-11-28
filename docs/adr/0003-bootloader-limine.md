@@ -1,12 +1,14 @@
 # ADR-0003 — Limine as the bootloader
 
-**Status:** proposed; confirm with the M4 spike (snapshot entries + Secure Boot together)
+**Status:** Limine shipped. The Secure Boot part is **not built** (decision 2026-11-28): no boot
+entry carries a file hash and no checksum is enrolled, so Limine verifies nothing today. Everything
+below about hashes and signing is the design to be proven (`docs/security/secure-boot.md`).
 
 ## Options
 | | GRUB + grub-btrfs (Garuda) | systemd-boot + UKIs | **Limine + limine-snapper-sync (CachyOS)** |
 |--|--|--|--|
 | Boot into snapshots | yes, mature | no good story | yes (`limine-snapper-sync` + `btrfs-overlayfs` hook) |
-| Secure Boot with own keys | awkward: GRUB modules, shim or signed standalone GRUB, no verification of kernels from `/boot` | best: sign the UKI | good: sign the Limine EFI binary, enrol the config checksum; kernels verified by BLAKE2B hashes in the config |
+| Secure Boot with own keys | awkward: GRUB modules, shim or signed standalone GRUB, no verification of kernels from `/boot` | best: sign the UKI | possible: sign the Limine EFI binary, enrol the config checksum, put BLAKE2B hashes of the kernels in the config (not implemented) |
 | LUKS2 + argon2id root | GRUB's LUKS2 support for argon2 is limited, so `/boot` usually goes outside LUKS anyway | fine (ESP outside) | fine (ESP outside) |
 | Maintained by a distro we copy | Garuda | — | CachyOS (default bootloader) |
 
@@ -24,8 +26,8 @@ Limine, good on systemd-boot (UKIs later), off by default on GRUB/rEFInd until t
 is worked out. `samurai rescue bootloader` is bootloader-aware (detects the target's config).
 
 ## Why
-It is the only option that gives both snapshot boot (which we copy from Garuda) and a clean Secure
-Boot chain, and CachyOS has proven the combination in daily use.
+It is the only option that offers both snapshot boot (which we copy from Garuda) and a path to a
+Secure Boot chain, and CachyOS has proven the combination in daily use.
 
 ## Risks and checks (M4 spike)
 - Every change to `limine.conf` (new kernel, new snapshot entry) requires re-enrolling the checksum
