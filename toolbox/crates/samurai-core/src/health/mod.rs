@@ -3,6 +3,7 @@
 //! Slice 1 is detect-only. `fix()` and `fix_risk` handling arrive with the first fixable check.
 
 pub mod checks;
+pub mod drivers;
 pub mod system;
 
 use std::fs;

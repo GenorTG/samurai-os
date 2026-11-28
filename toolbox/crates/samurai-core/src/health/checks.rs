@@ -1,5 +1,10 @@
 //! The v1 check set (spec 05). Every `detect` is read-only and goes through [`System`].
 
+use super::drivers::{
+    driver_family as drivers_nvidia, fix_module as drivers_fix_module,
+    fix_params as drivers_fix_params, fix_profile as drivers_fix_profile, module as drivers_module,
+    params as drivers_params, profile as drivers_profile,
+};
 use super::system::System;
 use super::{Category, Check, FixRisk, Issue, Outcome, Severity};
 use crate::boot;
@@ -695,6 +700,38 @@ macro_rules! check {
 }
 
 pub const ALL: &[Check] = &[
+    check!(
+        "drivers.profile",
+        Drivers,
+        Warning,
+        NeedsConfirm,
+        drivers_profile,
+        fix = drivers_fix_profile
+    ),
+    check!(
+        "drivers.nvidia",
+        Drivers,
+        Error,
+        NeedsConfirm,
+        drivers_nvidia,
+        fix = drivers_fix_profile
+    ),
+    check!(
+        "drivers.nvidia-module",
+        Drivers,
+        Critical,
+        NeedsConfirm,
+        drivers_module,
+        fix = drivers_fix_module
+    ),
+    check!(
+        "drivers.nvidia-params",
+        Drivers,
+        Warning,
+        NeedsConfirm,
+        drivers_params,
+        fix = drivers_fix_params
+    ),
     check!("packages.core", Packages, Error, Safe, packages_core),
     check!(
         "packages.packagekit",
