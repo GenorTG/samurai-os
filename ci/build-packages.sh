@@ -33,7 +33,7 @@ for src in /src/pkgbuilds/*/; do
         # the Rust CLI replaces the shell dispatcher (updates/samurai stays for the live ISO)
         mkdir -p "$pkg/toolbox"
         tar -C /src/toolbox --exclude=target --exclude=./gui -cf - . | tar -C "$pkg/toolbox" -xf -
-        for name in samurai-update samurai-snap samurai-rescue samurai-apps samurai-notifier validate-interventions.py \
+        for name in samurai-update samurai-snap samurai-rescue samurai-apps samurai-adopt samurai-notifier validate-interventions.py \
                     samurai-notifier.service samurai-notifier.timer \
                     samurai-health.service samurai-health.timer \
                     95-samurai-boot.hook; do
@@ -42,6 +42,8 @@ for src in /src/pkgbuilds/*/; do
         cp -a /src/updates/interventions/0001-update-mechanism-demo.toml "$pkg/"
         cp -a /src/updates/interventions/0001-update-mechanism-demo.sh "$pkg/"
         cp -a /src/catalog/garuda-setup-wizard.toml /src/catalog/samurai.toml "$pkg/"
+        cp -a /src/installer/samurai-profile-plan /src/ci/chaotic-bootstrap.sh "$pkg/"
+        cp -a /src/iso/airootfs/usr/share/samurai/chaotic-key.asc "$pkg/chaotic-key.pubkey"
     fi
     if [ "$pkg" = samurai-toolbox-gui ]; then
         pacman -S --noconfirm --needed cmake ninja qt6-base qt6-declarative >/dev/null

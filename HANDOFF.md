@@ -28,21 +28,29 @@ guided installers and CLI/GUI toolbox. VM validation runs on genorbox1. Site: <h
   container); Rust 145 passed, clippy `-D warnings` + fmt clean; `ci/test-gui.sh` all pages OK (55
   advisory qmllint warnings); repo no-shadowing / no-epoch OK.
 
+## Branch `feat/adopt-defaults` (2026-11-28, unreleased)
+- `samurai adopt` (`updates/samurai-adopt`, spec 03): opt-in move of an older install to the current
+  defaults. samurai-tools **0.4.0-18** ships it with the planner and the Chaotic-AUR trust script under
+  `/usr/lib/samurai/`. Publish the repo before telling users; they run `samurai update`, then `adopt`.
+- VM PASS (`tests/vm/test_adopt.py`, 23 min, v0.0.1.75 online ISO, KDE, new package from a local repo):
+  preview changes nothing, failing transaction restores `pacman.conf`, removed Kate stays removed,
+  `jack2` -> `pipewire-jack`, user files unchanged, second run no-op, reboot, update, snapshot rollback,
+  full desktop meta on the second adoption. Run on the commit before a message-only wording fix.
+- Not verified: adopting from the offline ISO or from v0.0.1.90, `--with gaming|tailscale` beyond preview,
+  non-KDE desktops, non-Limine, the effective Plasma theme for a user without own settings.
+- Not adopted: installer-only steps (graphical keyboard files, motd, panel layout for existing users).
+- Catalog: `craft-launcher` and the `gpu-unlock` toggle removed (no repository carries the package);
+  `ci/check-catalog.sh` (CI job) fails on any offered entry that resolves nowhere.
+- Release notes: `ci/release-iso.sh --publish` needs `--verified FILE` (`docs/releases/README.md`).
+- ADR-0009 accepted.
+
 ## Open / unverified
-- Existing installs do not receive the new defaults via `samurai update` (no `[chaotic-aur]`, nothing
-  depends on the new metas): needs an update intervention.
-- ArtCraft: catalog entry `craft-launcher` points at `artcraft-launcher-appimage`, which no repo has
-  (shown as not available).
-- ADR-0009 (Qt installer instead of Calamares): shipped; default is accepted unless the owner objects.
-  The ADR file still says "proposed".
 - VM only: no real hardware, no real NVIDIA GPU, no game or Windows program launched; installer keyboard
   layout verified for `us` only; CachyOS kernel switching, systemd-boot and GRUB covered by unit tests only.
 - Not run: `test_update_archive`.
 - GUI not VM-exercised: fix-* repairs, mirrors refresh, boot param add/remove, apps upgrade-and-install,
   news acknowledgement.
-- `ci/release-iso.sh` hard-codes the notes' "New" and "Verified" text; v0.0.1.90's Verified section was
-  corrected by hand. Update the template before the next release (and never re-run it for a published tag
-  after a commit).
+- Never re-run `ci/release-iso.sh --publish` for a published tag after a commit.
 - `publish-testing-repo.yml` skips publishing (no secrets); once secrets exist, a package push to main
   publishes to testing by itself.
 
@@ -71,7 +79,7 @@ guided installers and CLI/GUI toolbox. VM validation runs on genorbox1. Site: <h
   VM harness HTTP mirror binds 127.0.0.1.
 
 ## Next
-1. Intervention to bring existing installs to the new defaults.
+1. Release `samurai-tools` 0.4.0-18 (repo first), with release-note files for the next ISO.
 2. Installer: Expert mode, geo-IP, size estimate, chwd/CUDA/gpu-unlock, manual/dual-boot disks,
    translations, NVIDIA live entry. Defaults: Plymouth/branding, Firefox policy (spec 09), welcome app.
 3. CLI/GUI: more spec-05 checks, `fix audio|pacman|reinstall-all`, `hw`, `queue`, D-Bus helper.
@@ -80,6 +88,8 @@ guided installers and CLI/GUI toolbox. VM validation runs on genorbox1. Site: <h
 
 ## Commands
 - `bash scripts/install-hooks.sh` once per clone (per-commit BUILD bump).
+- `test_adopt`: `SAMURAI_TEST_ISO=<v0.0.1.75 online iso> SAMURAI_TEST_PROFILE_REF=v0.0.1.75
+  SAMURAI_TEST_TOOLS_PKG=<new samurai-tools pkg>` (`ci/build-pkgs.sh <dir> samurai-tools`).
 - Arch tooling only inside archlinux containers; never edit a running script (AGENTS.md gotchas).
 - `python3 -m pytest -q tests/unit`; `bash ci/test-gui.sh`; VM:
   `SAMURAI_TEST_ISO=<iso> SAMURAI_VM_RUN_ID=<id> pytest -q -s tests/vm/test_<x>.py` under

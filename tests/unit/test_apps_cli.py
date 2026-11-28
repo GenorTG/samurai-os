@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import sys
+from dataclasses import replace
 
 import pytest
 
@@ -39,8 +40,10 @@ def test_plan_reasons(apps, catalog, make_index):
     idx, _ = make_index(missing={"steam"}, repos=["core", "extra"])
     st = apps.app_state(catalog.toggles["gaming"], catalog, idx)
     assert st.status == "partial" and "needs the [multilib] repository" in st.reason
-    idx2, _ = make_index(missing={"artcraft-launcher-appimage"})   # source samurai, not in sync
-    assert apps.app_state(catalog.apps["craft-launcher"], catalog, idx2).status == "not-yet"
+    # a source = "samurai" package that no repository carries yet
+    pending = replace(catalog.apps["htop"], source="samurai")
+    idx2, _ = make_index(missing={"htop"})
+    assert apps.app_state(pending, catalog, idx2).status == "not-yet"
 
 
 def test_plan_services_and_installed(apps, catalog, make_index):
@@ -143,8 +146,8 @@ def test_info_search_json(catalog, tmp_path):
 
 def test_exit_codes(catalog, tmp_path):
     assert run(["install", "-n", "nosuchapp"], catalog, tmp_path).returncode == 2
-    assert run(["install", "-n", "craft-launcher"], catalog, tmp_path,
-               missing={"artcraft-launcher-appimage"}).returncode == 3
+    assert run(["install", "-n", "photocraft"], catalog, tmp_path,
+               missing={"photocraft"}).returncode == 3
     assert run(["install", "-n", "htop"], catalog, tmp_path, db_age_days=10).returncode == 4
     assert run(["install", "-n", "htop"], catalog, tmp_path, pending_upgrades=["glibc"]).returncode == 4
     r = run(["install", "htop"], catalog, tmp_path)             # no TTY, no --yes

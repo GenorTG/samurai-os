@@ -33,7 +33,7 @@ Repos page. The page warns which installed packages would then stop getting upda
 | Our own packages | toolbox, settings, meta, keyring, branding, hooks | the ≤ 30 target from spec 00 |
 | Builders | `samurai-gpu-unlock` | ships source pins + build scripts only; output is built on the user's machine (spec 07) |
 | Repackaged upstream binaries | `samurai-proton-ge` (GE-Proton from its GitHub releases), `samurai-python310…313` (python-build-standalone), `samurai-miniforge`, `samurai-miniconda`, `samurai-theme-otto/scratchy` | only when no Arch/CachyOS/Chaotic package exists; a CI job watches each upstream's releases and opens a version-bump PR |
-| AUR-only packages Chaotic lacks | `openai-codex-bin`, `opencode-bin`, `vectorcraft-bin`, `artcraft-launcher-appimage` | built from the AUR PKGBUILD (pinned commit, reviewed diff); dropped again when Chaotic or Arch picks them up |
+| AUR-only packages Chaotic lacks | `openai-codex-bin`, `opencode-bin`, `vectorcraft-bin`, `artcraft-launcher-appimage` | built from the AUR PKGBUILD (pinned commit, reviewed diff); dropped again when Chaotic or Arch picks them up. Not offered in the catalog until built (`ci/check-catalog.sh`) |
 
 Names: AUR names are kept where we rebuild an AUR package unchanged, so yay sees the same package. Our
 own repackages use the `samurai-` prefix and `provides=` the common name (e.g. `samurai-proton-ge`

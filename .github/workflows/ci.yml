@@ -100,6 +100,20 @@ jobs:
       - name: Site structure, accessibility and CSP
         run: python3 -I ci/check-site.py site/index.html
 
+  catalog:
+    name: Offered catalog entries resolve in the live repositories
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: samurai apps check --strict
+        run: ci/check-catalog.sh
+
   unit:
     name: Unit tests and profile validation
     runs-on: ubuntu-latest

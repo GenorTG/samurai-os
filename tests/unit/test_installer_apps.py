@@ -73,6 +73,7 @@ def test_postinstall_syntax_and_apps_step():
 COPIES = {
     "iso/airootfs/usr/local/bin/samurai": "updates/samurai",
     "iso/airootfs/usr/local/bin/samurai-apps": "updates/samurai-apps",
+    "iso/airootfs/usr/local/bin/samurai-adopt": "updates/samurai-adopt",
     "iso/airootfs/usr/local/bin/samurai-update": "updates/samurai-update",
     "iso/airootfs/usr/local/bin/samurai-snap": "updates/samurai-snap",
     "iso/airootfs/usr/local/bin/samurai-rescue": "updates/samurai-rescue",
@@ -108,7 +109,11 @@ def test_pkgbuild_sources_and_checksums():
               # shell completions live beside the PKGBUILD (makepkg finds local sources there)
               "LICENSE": "LICENSE",
               "samurai.bash": "pkgbuilds/samurai-tools/samurai.bash",
-              "samurai.fish": "pkgbuilds/samurai-tools/samurai.fish"}
+              "samurai.fish": "pkgbuilds/samurai-tools/samurai.fish",
+              # staged for `samurai adopt`
+              "samurai-profile-plan": "installer/samurai-profile-plan",
+              "chaotic-bootstrap.sh": "ci/chaotic-bootstrap.sh",
+              "chaotic-key.pubkey": "iso/airootfs/usr/share/samurai/chaotic-key.asc"}
     for src, digest in zip(sources, sums):
         path = REPO / origin.get(src, f"updates/{src}")
         assert path.is_file(), src

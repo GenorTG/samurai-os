@@ -26,6 +26,7 @@ commands
   snap        snapshot manager (spec 06): list/create/delete/diff/restore-file/repair/rollback
   rescue      recovery tool (spec 06): mount/chroot/bootloader/initramfs/kernel/rollback
   status      last update check and report (--json, --report: report only, --check)
+  adopt       add the current defaults to an older install: samurai adopt --preview
   health      read-only health checks (spec 05): samurai health --help
   diag        diagnostics and the redacted support bundle: samurai diag --help
   clean       free disk space (preview first): samurai clean --help
@@ -85,6 +86,10 @@ pub fn parse(cmd: &str) -> Action {
         },
         "rescue" => Action::Exec {
             tool: "rescue",
+            prefix: &[],
+        },
+        "adopt" => Action::Exec {
+            tool: "adopt",
             prefix: &[],
         },
         "status" => Action::Status,

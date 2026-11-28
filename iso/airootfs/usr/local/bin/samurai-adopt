@@ -1,0 +1,827 @@
+#!/usr/bin/python3 -I
+"""samurai adopt: bring an install made by an older release to the current defaults.
+
+Opt-in (spec 03): `samurai update` upgrades what is installed; this command adds what
+newer releases install by default. WHAT that is comes from samurai-profile-plan (the
+installer's planner), fed with the machine's stored install profile; this tool only
+subtracts what the user removed or replaced, previews, snapshots and runs one
+`pacman -Syu` transaction (ADR-0002). It never overwrites configuration files.
+
+Python 3.11+ stdlib only.
+"""
+from __future__ import annotations
+
+import argparse
+import gzip
+import importlib.machinery
+import importlib.util
+import json
+import os
+import pathlib
+import re
+import shutil
+import signal
+import subprocess
+import sys
+import tempfile
+import time
+import tomllib
+from dataclasses import dataclass, field
+
+EXIT_OK = 0
+EXIT_FAIL = 1          # a step failed after the preview was accepted
+EXIT_USAGE = 2         # bad arguments, no TTY without --yes
+EXIT_REFUSED = 3       # a precondition is not met: nothing was changed
+EXIT_NEEDS_UPDATE = 4  # upgrades are pending
+EXIT_ABORTED = 5       # the user answered "no"
+
+TRUSTED_PATH = "/usr/local/sbin:/usr/local/bin:/usr/bin"
+PACMAN_CONF = pathlib.Path("/etc/pacman.conf")
+CONF_BACKUP = pathlib.Path("/etc/pacman.conf.samurai-adopt.bak")
+CHAOTIC_MIRRORLIST = pathlib.Path("/etc/pacman.d/chaotic-mirrorlist")
+CHAOTIC_FPR = "EF925EA60F33D0CB85C44AD13056513887B78AEB"
+# used only to preview a machine that does not have chaotic-mirrorlist yet
+CHAOTIC_BOOT_SERVERS = ("https://cdn-mirror.chaotic.cx/$repo/$arch",
+                        "https://geo-mirror.chaotic.cx/$repo/$arch")
+LIB_DIR = pathlib.Path("/usr/lib/samurai")
+PROFILE_PATH = pathlib.Path("/var/lib/samurai/install-profile.toml")
+STATE_PATH = pathlib.Path("/var/lib/samurai/adopt.json")
+LOG_DIR = pathlib.Path("/var/log/samurai")
+# repositories that must stay above [chaotic-aur] (spec 02: it only ADDS packages)
+ABOVE_CHAOTIC = ("core", "extra", "multilib", "cachyos")
+# the package that shows a desktop is still in use
+DESKTOP_CORE = {"kde": "plasma-workspace", "gnome": "gnome-shell", "xfce": "xfce4-session",
+                "lxqt": "lxqt-session"}
+OPT_IN = ("gaming", "tailscale", "chaotic")
+# what trusting Chaotic-AUR installs before the transaction; harmless without the repository
+CHAOTIC_PACKAGES = {"chaotic-keyring", "chaotic-mirrorlist"}
+USERNAME_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
+SECTION_RE = re.compile(r"^\s*\[([^\]]+)\]\s*$")
+ALPM_RE = re.compile(r"\[ALPM\] (installed|reinstalled|upgraded|downgraded|removed) (\S+) \(")
+DEP_NAME_RE = re.compile(r"^[^<>=:\s]+")
+
+
+class Refused(Exception):
+    def __init__(self, message: str, code: int = EXIT_REFUSED):
+        super().__init__(message)
+        self.code = code
+
+
+# ------------------------------------------------------------------ pacman.conf
+def sections(conf: str) -> list[str]:
+    """Names of the enabled (uncommented) sections."""
+    return [m.group(1) for line in conf.splitlines() if (m := SECTION_RE.match(line))]
+
+
+def add_chaotic(conf: str, body: list[str] | None = None) -> str:
+    """`conf` with [chaotic-aur] enabled below Arch and CachyOS; unchanged if it already is."""
+    if "chaotic-aur" in sections(conf):
+        return conf
+    body = body or [f"Include = {CHAOTIC_MIRRORLIST}"]
+    lines = conf.splitlines()
+    headers = [(i, m.group(1)) for i, line in enumerate(lines) if (m := SECTION_RE.match(line))]
+    above = [i for i, name in headers if name in ABOVE_CHAOTIC]
+    if not above:
+        raise Refused("pacman.conf enables none of [core], [extra], [multilib], [cachyos]: "
+                      "not a configuration this tool can extend")
+    after = [i for i, _ in headers if i > max(above)]
+    at = after[0] if after else len(lines)
+    while at > 0 and (not lines[at - 1].strip() or lines[at - 1].lstrip().startswith("#")):
+        at -= 1       # the comments before the next section stay with it
+    block = ["",
+             "# Chaotic-AUR (ADR-0007), enabled by `samurai adopt`: prebuilt AUR packages,",
+             "# below Arch and CachyOS so it only ADDS packages.",
+             "[chaotic-aur]", "SigLevel = Required DatabaseOptional", *body]
+    return "\n".join(lines[:at] + block + lines[at:]) + "\n"
+
+
+# ------------------------------------------------------------------ what the user chose
+def removed_packages(log_lines, installed: set[str]) -> set[str]:
+    """Packages whose last pacman log action is a removal and that are still absent."""
+    last: dict[str, str] = {}
+    for line in log_lines:
+        if m := ALPM_RE.search(line):
+            last[m.group(2)] = m.group(1)
+    return {name for name, action in last.items() if action == "removed" and name not in installed}
+
+
+def read_pacman_logs(logfile: pathlib.Path):
+    """The pacman log and its rotated copies, oldest first."""
+    files = sorted((p for p in logfile.parent.glob(logfile.name + "*") if p.is_file()),
+                   key=lambda p: (p.stat().st_mtime, p.name == logfile.name))
+    for path in files:
+        opener = gzip.open if path.suffix == ".gz" else open
+        try:
+            with opener(path, "rt", encoding="utf-8", errors="replace") as fh:
+                yield from fh
+        except (OSError, EOFError) as e:
+            raise Refused(f"cannot read {path} ({e}): without it removed packages cannot be respected")
+
+
+def _table(profile: dict, key: str) -> dict:
+    value = profile.get(key, {})
+    return value if isinstance(value, dict) else {}
+
+
+def target_profile(stored: dict | None, installed: set[str], opt_in: set[str],
+                   planner, catalog) -> tuple[dict, list[str]]:
+    """The profile the planner gets: the stored choices, corrected by what is installed now.
+
+    Software a stored profile never mentions (gaming, development, network on old releases)
+    stays off unless asked for with --with. packages.install is installer-time only.
+    """
+    notes: list[str] = []
+    old = stored or {}
+    if stored is None:
+        notes.append("no stored install profile: choices are read from the installed packages")
+    packages = _table(old, "packages")
+    detected = next((d for d, core in DESKTOP_CORE.items() if core in installed), "none")
+    desktop = packages.get("desktop", "kde") if stored is not None else detected
+    if desktop not in planner.DESKTOPS:
+        notes.append(f"stored desktop {desktop!r} is unknown; using the installed one ({detected})")
+        desktop = detected
+    if desktop != "none" and DESKTOP_CORE[desktop] not in installed:
+        notes.append(f"the {desktop} desktop from the install profile is no longer installed: "
+                     "no desktop defaults")
+        desktop = "none"
+
+    browsers = packages.get("browsers", [])
+    browsers = [b for b in browsers if b in catalog.apps] if isinstance(browsers, list) else []
+    security = _table(old, "security")
+    firewall = security.get("firewall", "none")
+    if stored is None:
+        firewall = next((f for f in ("firewalld", "ufw") if f in installed), "none")
+    profile: dict = {
+        "packages": {"desktop": desktop, "browsers": browsers if desktop != "none" else [],
+                     "install": []},
+        "security": {"firewall": firewall if firewall in ("none", "firewalld", "ufw") else "none",
+                     "ssh_server": security.get("ssh_server") is True},
+    }
+    for section in ("gaming", "development", "network"):
+        if section in old and isinstance(old[section], dict):
+            profile[section] = dict(old[section])
+    if desktop == "none" and "gaming" in profile:
+        del profile["gaming"]
+    if "gaming" in opt_in:
+        if desktop == "none":
+            raise Refused("--with gaming needs a desktop")
+        profile["gaming"] = {"enabled": True}
+    if "tailscale" in opt_in:
+        profile.setdefault("network", {})["tailscale"] = True
+    return profile, notes
+
+
+# ------------------------------------------------------------------ package metadata
+@dataclass
+class Pkg:
+    name: str
+    repo: str = ""
+    depends: list[str] = field(default_factory=list)
+    provides: list[str] = field(default_factory=list)
+    conflicts: list[str] = field(default_factory=list)
+    replaces: list[str] = field(default_factory=list)
+    groups: list[str] = field(default_factory=list)
+
+
+_FIELDS = {"Depends On": "depends", "Provides": "provides", "Conflicts With": "conflicts",
+           "Replaces": "replaces", "Groups": "groups"}
+
+
+def parse_info(text: str) -> dict[str, Pkg]:
+    """`pacman -Si` / `-Qi` output. The first repository that has a name wins, as in pacman."""
+    found: dict[str, Pkg] = {}
+    block: dict[str, str] = {}
+    key = ""
+
+    def flush() -> None:
+        name = block.get("Name", "")
+        if name and name not in found:
+            pkg = Pkg(name, block.get("Repository", ""))
+            for label, attr in _FIELDS.items():
+                value = block.get(label, "").split()
+                setattr(pkg, attr, [] if value == ["None"] else value)
+            found[name] = pkg
+        block.clear()
+
+    for line in text.splitlines():
+        if not line.strip():
+            flush()
+        elif line[:1].isspace():
+            if key:
+                block[key] += " " + line.strip()
+        elif " : " in line or line.rstrip().endswith(" :"):
+            label, _, value = line.partition(":")
+            key = label.strip()
+            block[key] = value.strip()
+    flush()
+    return found
+
+
+def dep_name(dep: str) -> str:
+    m = DEP_NAME_RE.match(dep)
+    return m.group(0) if m else dep
+
+
+@dataclass
+class Selection:
+    targets: list[str] = field(default_factory=list)
+    skipped: dict[str, str] = field(default_factory=dict)   # package -> why
+    swaps: dict[str, list[str]] = field(default_factory=dict)  # new package -> replaced deps
+    new: set[str] = field(default_factory=set)              # estimate of what gets installed
+
+
+class Resolver:
+    """Which of the planned packages can be added without undoing a user's choice."""
+
+    def __init__(self, sync: dict[str, Pkg], local: dict[str, Pkg], explicit: set[str],
+                 removed: set[str], ignored: set[str], satisfied):
+        self.sync, self.local = sync, local
+        self.explicit, self.removed, self.ignored = explicit, removed, ignored
+        self.satisfied = satisfied                     # dependency string -> bool (local db)
+        self.choices: set[str] = set()                 # filled by select()
+        self.providers: dict[str, list[str]] = {}
+        self.groups: dict[str, list[str]] = {}
+        for pkg in sync.values():
+            for item in pkg.provides:
+                self.providers.setdefault(dep_name(item), []).append(pkg.name)
+            for group in pkg.groups:
+                self.groups.setdefault(group, []).append(pkg.name)
+
+    def installed_matching(self, spec: str) -> list[str]:
+        """Installed packages a conflict entry names (by name or by what they provide)."""
+        if not self.satisfied(spec):
+            return []
+        wanted = dep_name(spec)
+        if wanted in self.local:
+            return [wanted]
+        return [p.name for p in self.local.values()
+                if wanted in {dep_name(i) for i in p.provides}]
+
+    def conflicting(self, name: str) -> list[str]:
+        pkg = self.sync[name]
+        found: dict[str, None] = {}
+        for spec in pkg.conflicts:
+            found.update(dict.fromkeys(self.installed_matching(spec)))
+        mine = {name} | {dep_name(i) for i in pkg.provides}
+        for other in self.local.values():
+            # versioned entries ("foo<2") target old releases, not what we would add now
+            if mine & set(other.conflicts):
+                found[other.name] = None
+        replaced = {dep_name(r) for r in pkg.replaces}
+        return [o for o in found if o != name and o not in replaced]
+
+    def offered(self, wanted: list[str]) -> set[str]:
+        """The names a user sees as software they can drop: what the plan lists and what
+        the meta packages and groups in it list. Anything deeper is a plain dependency:
+        `pacman -Rns` removes those along the way, which says nothing about a choice."""
+        found: set[str] = set()
+        todo = list(wanted)
+        while todo:
+            name = todo.pop()
+            if name in found:
+                continue
+            found.add(name)
+            todo += self.groups.get(name, []) if name not in self.sync else []
+            if name in self.sync and (name.startswith("samurai-") or name.endswith("-meta")):
+                todo += [dep_name(d) for d in self.sync[name].depends]
+        return found
+
+    def why_blocked(self, name: str) -> str | None:
+        if name in self.removed and name in self.choices:
+            return "you removed it"
+        if name in self.ignored:
+            return "it is in IgnorePkg"
+        chosen = [o for o in self.conflicting(name) if o in self.explicit]
+        if chosen:
+            return f"it conflicts with {', '.join(chosen)}, which you installed"
+        return None
+
+    def provider(self, dep: str, preferred: set[str]) -> str | None:
+        name = dep_name(dep)
+        if name in self.sync:
+            return name
+        options = self.providers.get(name, [])
+        for pick in options:
+            if pick in preferred:
+                return pick
+        usable = [p for p in options if not self.why_blocked(p)]
+        return (usable or options or [None])[0]
+
+    def closure(self, name: str, preferred: set[str]) -> tuple[set[str], str]:
+        """Packages `name` would newly pull in, or the reason it cannot be added."""
+        seen: set[str] = set()
+        todo = [name]
+        while todo:
+            current = todo.pop()
+            if current in seen:
+                continue
+            why = self.why_blocked(current)
+            if why:
+                return set(), why if current == name else f"it needs {current}: {why}"
+            seen.add(current)
+            for dep in self.sync[current].depends:
+                if self.satisfied(dep):
+                    continue
+                pick = self.provider(dep, preferred)
+                if pick is None:
+                    return set(), f"nothing in the enabled repositories provides {dep}"
+                todo.append(pick)
+        return seen, ""
+
+    def select(self, wanted: list[str]) -> Selection:
+        """A Samurai meta or settings package that cannot be added is replaced by its own
+        dependencies, so one removed program does not cost the rest of the defaults."""
+        result = Selection()
+        visited: set[str] = set()
+        preferred = set(wanted)
+        self.choices = self.offered(wanted)
+
+        def visit(name: str) -> None:
+            if name in visited:
+                return
+            visited.add(name)
+            if name not in self.sync and name in self.groups:
+                for member in self.groups[name]:
+                    visit(member)
+                return
+            if self.satisfied(name):
+                return
+            if name not in self.sync:
+                if name.startswith("samurai-"):
+                    raise Refused(f"{name} is not in any enabled repository (is [samurai] up to "
+                                  "date? run: sudo samurai update)")
+                result.skipped[name] = "it is not in any enabled repository"
+                return
+            pulled, why = self.closure(name, preferred)
+            if not why:
+                result.targets.append(name)
+                result.new |= pulled
+                return
+            result.skipped[name] = why
+            if name.startswith("samurai-"):
+                for dep in self.sync[name].depends:
+                    if not self.satisfied(dep) and (pick := self.provider(dep, preferred)):
+                        preferred.add(pick)
+                        visit(pick)
+
+        for name in wanted:
+            visit(name)
+        result.swaps = self.swaps(result.new)
+        return result
+
+    def swaps(self, new: set[str]) -> dict[str, list[str]]:
+        return {n: old for n in sorted(new) if n in self.sync and (old := self.conflicting(n))}
+
+    def check(self, new: set[str]) -> None:
+        """The last guard, on what pacman itself resolved: nothing the user got rid of or
+        replaced may come back through a provider this tool did not foresee."""
+        undone = [f"{n} ({why})" for n in sorted(new) if n in self.sync and (why := self.why_blocked(n))]
+        if undone:
+            raise Refused("the transaction would override your choices: " + ", ".join(undone))
+
+
+# ------------------------------------------------------------------ the machine
+def run(cmd: list[str], **kw) -> subprocess.CompletedProcess:
+    return subprocess.run(cmd, capture_output=True, text=True, **kw)
+
+
+def output(cmd: list[str], what: str) -> str:
+    r = run(cmd)
+    if r.returncode != 0:
+        raise Refused(f"{what} failed: {(r.stderr or r.stdout).strip()[-600:]}")
+    return r.stdout
+
+
+def installed_names() -> set[str]:
+    return set(output(["pacman", "-Qq"], "pacman -Qq").split())
+
+
+def load_planner():
+    here = pathlib.Path(__file__).resolve().parent
+    # never /usr/local/bin: an older installer may have left a stale unowned copy there
+    for cand in (here.parent / "installer" / "samurai-profile-plan", LIB_DIR / "samurai-profile-plan"):
+        if cand.is_file():
+            loader = importlib.machinery.SourceFileLoader("samurai_profile_plan", str(cand))
+            spec = importlib.util.spec_from_loader("samurai_profile_plan", loader)
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[spec.name] = module
+            loader.exec_module(module)
+            return module
+    raise Refused("samurai-profile-plan is missing: reinstall samurai-tools")
+
+
+def gpu_vendors() -> set[str]:
+    r = run(["lspci", "-mm", "-n"])
+    found = set()
+    for line in r.stdout.splitlines():
+        parts = line.replace('"', "").split()
+        if len(parts) > 2 and parts[1].startswith("03"):
+            found.add(parts[2])
+    return found
+
+
+def chaotic_trusted() -> bool:
+    r = run(["gpg", "--homedir", "/etc/pacman.d/gnupg", "--batch", "--with-colons",
+             "--list-keys", CHAOTIC_FPR])
+    return any(l.startswith("pub:") and l.split(":")[1] in ("f", "u") for l in r.stdout.splitlines())
+
+
+def preflight() -> None:
+    if run(["pacman", "-Qq", "samurai-release"]).returncode != 0:
+        raise Refused("this is not a Samurai OS install (samurai-release is not installed)")
+    opts = run(["findmnt", "-n", "-o", "OPTIONS", "/"]).stdout
+    cmdline = pathlib.Path("/proc/cmdline").read_text(errors="replace")
+    subvol = next((o[7:] for o in opts.strip().split(",") if o.startswith("subvol=")), "")
+    if "snapshot" in subvol or re.search(r"snapshots/[0-9]+/snapshot", cmdline):
+        raise Refused("booted from a snapshot: roll back or boot the current system first")
+    dbpath = pathlib.Path(output(["pacman-conf", "DBPath"], "pacman-conf").strip())
+    if (dbpath / "db.lck").exists():
+        raise Refused(f"pacman is locked ({dbpath / 'db.lck'}): finish the other package operation")
+
+
+def load_stored_profile() -> dict | None:
+    if not PROFILE_PATH.is_file():
+        return None
+    try:
+        return tomllib.loads(PROFILE_PATH.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as e:
+        raise Refused(f"cannot read {PROFILE_PATH}: {e}")
+
+
+def load_state() -> dict:
+    try:
+        data = json.loads(STATE_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+@dataclass
+class Adoption:
+    profile: dict
+    features: list
+    selection: Selection
+    sync: dict[str, Pkg]
+    notes: list[str]
+    enable_chaotic: bool
+    bootstrap: bool
+    transaction: list[str]       # "repo name version" lines pacman will install or upgrade
+    upgrades: list[str]
+    installed: set[str]
+
+    @property
+    def needed(self) -> bool:
+        return bool(self.selection.targets) or self.enable_chaotic or self.bootstrap
+
+
+def wants_chaotic(conf: str, stored: dict | None, state: dict, opt_in: set[str]) -> tuple[bool, str]:
+    """(enable it?, note). A repository the user switched off stays off."""
+    if "chaotic-aur" in sections(conf):
+        return False, ""
+    chose = _table(stored or {}, "repos").get("chaotic_aur") is True or state.get("chaotic_enabled") is True
+    if chose and "chaotic" not in opt_in:
+        return False, "[chaotic-aur] was enabled and you removed it: left off (--with chaotic adds it)"
+    return True, ""
+
+
+def examine(opt_in: set[str], workdir: pathlib.Path) -> Adoption:
+    """Everything the preview shows. Changes nothing: databases sync into `workdir`."""
+    preflight()
+    stored, state = load_stored_profile(), load_state()
+    conf = PACMAN_CONF.read_text(encoding="utf-8")
+    enable, chaotic_note = wants_chaotic(conf, stored, state, opt_in)
+    uses_chaotic = enable or "chaotic-aur" in sections(conf)
+    bootstrap = uses_chaotic and not (CHAOTIC_MIRRORLIST.is_file() and chaotic_trusted())
+
+    body = None if CHAOTIC_MIRRORLIST.is_file() else [f"Server = {s}" for s in CHAOTIC_BOOT_SERVERS]
+    preview_conf = workdir / "pacman.conf"
+    preview_conf.write_text(add_chaotic(conf, body) if enable else conf, encoding="utf-8")
+    dbpath = pathlib.Path(output(["pacman-conf", "DBPath"], "pacman-conf").strip())
+    (workdir / "db").mkdir()
+    (workdir / "db" / "local").symlink_to(dbpath / "local")
+    os.chmod(workdir, 0o755)            # pacman downloads as the unprivileged alpm user
+    os.chmod(workdir / "db", 0o755)
+    pac = ["pacman", "--config", str(preview_conf), "--dbpath", str(workdir / "db"),
+           "--logfile", os.devnull]
+    print("reading the current package databases (into a temporary copy)...", flush=True)
+    output([*pac, "-Sy", "--noconfirm"], "downloading the package databases")
+
+    sync = parse_info(output([*pac, "-Si"], "pacman -Si"))
+    local = parse_info(output(["pacman", "-Qi"], "pacman -Qi"))
+    installed = set(local)
+    explicit = set(run(["pacman", "-Qqe"]).stdout.split())
+    ignored = set(run(["pacman-conf", "--config", str(preview_conf), "IgnorePkg"]).stdout.split())
+    logfile = pathlib.Path(output(["pacman-conf", "LogFile"], "pacman-conf").strip())
+    removed = removed_packages(read_pacman_logs(logfile), installed)
+
+    planner = load_planner()
+    catalog = planner.load_catalog()
+    profile, notes = target_profile(stored, installed, opt_in, planner, catalog)
+    if chaotic_note:
+        notes.append(chaotic_note)
+    vendors = gpu_vendors()
+    gpu = {"nvidia": "10de" in vendors, "amd": "1002" in vendors}
+    try:
+        plan = planner.build_plan(profile, catalog, **gpu)
+        features = planner.features(profile, catalog, **gpu)
+    except KeyError as e:
+        raise Refused(f"the stored install profile holds an unknown value: {e}")
+    wanted = [p["name"] for p in plan["packages"]]
+    for item in plan["deferred"]:
+        notes.append(f"not installed automatically: {item['id']} ({item['command']})")
+
+    cache: dict[str, bool] = {}
+    every = set(wanted)
+    for pkg in list(sync.values()):
+        every.update(pkg.depends)
+        every.update(pkg.conflicts)
+    ordered = sorted(every)
+    for start in range(0, len(ordered), 2000):
+        chunk = ordered[start:start + 2000]
+        r = run(["pacman", "-T", "--", *chunk])
+        if r.returncode not in (0, 127):
+            raise Refused(f"pacman -T failed: {r.stderr.strip()}")
+        missing = set(r.stdout.split())
+        cache.update({d: d not in missing for d in chunk})
+
+    def satisfied(dep: str) -> bool:
+        if dep not in cache:
+            cache[dep] = run(["pacman", "-T", "--", dep]).returncode == 0
+        return cache[dep]
+
+    resolver = Resolver(sync, local, explicit, removed, ignored, satisfied)
+    selection = resolver.select(wanted)
+
+    transaction: list[str] = []
+    if selection.targets or enable:
+        listing = output([*pac, "-Su", "--print", "--noconfirm", "--print-format", "%r %n %v",
+                          "--", *selection.targets], "resolving the transaction")
+        transaction = [l for l in listing.splitlines() if len(l.split()) == 3]
+        new = {l.split()[1] for l in transaction} - installed
+        resolver.check(new)
+        selection.swaps = resolver.swaps(new)
+    upgrades = [l for l in run([*pac, "-Qu"]).stdout.splitlines()
+                if l.strip() and "[ignored]" not in l]
+    return Adoption(profile, features, selection, sync, notes, enable, bootstrap,
+                    transaction, upgrades, installed)
+
+
+def render(a: Adoption) -> str:
+    out = ["", "samurai adopt: preview", "=" * 22]
+    desktop = a.profile["packages"]["desktop"]
+    gaming = "yes" if a.profile.get("gaming", {}).get("enabled") else "no (add with --with gaming)"
+    out.append(f"desktop: {desktop}    gaming: {gaming}")
+    if a.enable_chaotic:
+        out.append(f"repository: enable [chaotic-aur] (signing key pinned to {CHAOTIC_FPR})")
+    if a.bootstrap:
+        out.append("repository: install and trust chaotic-keyring + chaotic-mirrorlist")
+    if a.selection.targets:
+        out.append(f"\nadd ({len(a.selection.targets)} selected): " + " ".join(a.selection.targets))
+    new = [l for l in a.transaction if l.split()[1] not in a.installed]
+    if new:
+        out.append(f"\nnew packages, dependencies included ({len(new)}):")
+        out += [f"  {l.split()[1]} {l.split()[2]} [{l.split()[0]}]" for l in new]
+    if a.upgrades:
+        out.append(f"\npending upgrades that go into the same transaction ({len(a.upgrades)}):")
+        out += [f"  {l}" for l in a.upgrades]
+    for new_pkg, old in a.selection.swaps.items():
+        out.append(f"\nreplaces: {new_pkg} takes the place of {', '.join(old)} "
+                   "(installed only as a dependency)")
+    if a.selection.skipped:
+        out.append("\nleft alone:")
+        out += [f"  {name}: {why}" for name, why in sorted(a.selection.skipped.items())]
+    if a.notes:
+        out.append("\nnotes:")
+        out += [f"  {n}" for n in a.notes]
+    if "samurai-settings-kde" in a.selection.targets:
+        out.append("\nKDE: system-wide starting values are written to /etc/xdg; "
+                   "settings in your home directory win.")
+    if not a.needed:
+        out.append("\nnothing to do: this system already has the current defaults")
+    else:
+        out.append("\nA snapshot is taken first. No configuration file you edited is overwritten.")
+    return "\n".join(out)
+
+
+# ------------------------------------------------------------------ apply
+class Log:
+    def __init__(self) -> None:
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+        self.path = LOG_DIR / time.strftime("adopt-%Y%m%d-%H%M%S.log")
+        fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o640)
+        self.fh = os.fdopen(fd, "a", encoding="utf-8")
+
+    def say(self, text: str) -> None:
+        print(text, flush=True)
+        self.fh.write(text + "\n")
+        self.fh.flush()
+
+    def stream(self, cmd: list[str]) -> int:
+        self.say("$ " + " ".join(cmd))
+        with subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                              stderr=subprocess.STDOUT, text=True, errors="replace") as proc:
+            for line in proc.stdout:
+                self.say(line.rstrip("\n"))
+        return proc.returncode
+
+
+def take_snapshot(log: Log) -> str:
+    r = run(["snapper", "-c", "root", "create", "--type", "single", "--cleanup-algorithm", "number",
+             "--description", "samurai-adopt", "--userdata", "important=yes", "--print-number"]) \
+        if shutil.which("snapper") else None
+    if r is None or r.returncode != 0 or not r.stdout.strip().isdigit():
+        why = "snapper is not installed" if r is None else r.stderr.strip()
+        raise Refused(f"no snapshot, nothing changed ({why}). Repair with `sudo samurai snap "
+                      "repair`, or pass --no-snapshot to go on without a rollback point")
+    log.say(f"snapshot #{r.stdout.strip()} created")
+    return r.stdout.strip()
+
+
+def write_conf(text: str) -> None:
+    tmp = PACMAN_CONF.with_name("pacman.conf.samurai-new")
+    tmp.write_text(text, encoding="utf-8")
+    shutil.copymode(PACMAN_CONF, tmp)
+    os.replace(tmp, PACMAN_CONF)
+
+
+def undo_hint(snapshot: str) -> str:
+    if not snapshot:
+        return "no snapshot was taken (--no-snapshot): there is no automatic way back"
+    return f"to undo everything: sudo samurai snap rollback {snapshot} && systemctl reboot"
+
+
+def configure(a: Adoption, new: set[str], stored: dict | None, log: Log) -> list[str]:
+    """Enable services and groups for what was just added. A unit or membership that belongs
+    to a package which was already there is the user's business and is not touched."""
+    problems: list[str] = []
+    user = _table(stored or {}, "user").get("name", "")
+    for feature in a.features:
+        reach, todo = set(), list(feature.packages)
+        while todo:
+            name = todo.pop()
+            if name not in reach and name in a.sync:
+                reach.add(name)
+                todo += [dep_name(d) for d in a.sync[name].depends]
+        if not reach & new:
+            continue
+        for unit in feature.services:
+            owner = run(["pacman", "-Qqo", f"/usr/lib/systemd/system/{unit}"]).stdout.strip()
+            if owner not in new:
+                continue
+            if unit.endswith("dm.service") and os.path.lexists("/etc/systemd/system/display-manager.service"):
+                continue
+            if log.stream(["systemctl", "enable", unit]) != 0:
+                problems.append(f"could not enable {unit}")
+        for group in feature.user_groups:
+            if not (isinstance(user, str) and USERNAME_RE.match(user)) or run(["id", "-u", "--", user]).returncode != 0:
+                problems.append(f"add your user to the {group} group: sudo usermod -aG {group} <user>")
+            elif run(["getent", "group", group]).returncode == 0 \
+                    and group not in run(["id", "-nG", "--", user]).stdout.split():
+                if log.stream(["usermod", "-aG", group, "--", user]) != 0:
+                    problems.append(f"could not add {user} to {group}")
+                else:
+                    log.say(f"{user} added to the {group} group (active after the next login)")
+        for unit in feature.user_services:
+            problems.append(f"enable for your user: systemctl --user enable {unit}")
+    return problems
+
+
+def record(a: Adoption, new: set[str], snapshot: str) -> None:
+    state = load_state()
+    state.update({
+        "schema": 1,
+        "completed": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "snapshot": snapshot or None,
+        "added": sorted(set(state.get("added", [])) | new),
+        "left_alone": a.selection.skipped,
+        "chaotic_enabled": bool(state.get("chaotic_enabled")) or a.enable_chaotic,
+    })
+    STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    tmp = STATE_PATH.with_name(STATE_PATH.name + ".tmp")
+    tmp.write_text(json.dumps(state, indent=1) + "\n", encoding="utf-8")
+    os.chmod(tmp, 0o644)
+    os.replace(tmp, STATE_PATH)
+
+
+def apply(a: Adoption, no_snapshot: bool) -> int:
+    log = Log()
+    log.fh.write(render(a) + "\n")
+    snapshot = "" if no_snapshot else take_snapshot(log)
+    before = installed_names()
+    original = PACMAN_CONF.read_text(encoding="utf-8")
+    changed_conf = False
+    failure = ""
+    try:
+        if a.bootstrap:
+            script, key = LIB_DIR / "chaotic-bootstrap.sh", LIB_DIR / "chaotic-key.asc"
+            if log.stream(["bash", str(script), str(key)]) != 0:
+                failure = "trusting Chaotic-AUR failed; pacman.conf and your packages are unchanged"
+        if not failure and a.enable_chaotic:
+            shutil.copy2(PACMAN_CONF, CONF_BACKUP)
+            write_conf(add_chaotic(original))
+            changed_conf = True
+            log.say(f"[chaotic-aur] enabled (previous file: {CONF_BACKUP})")
+        if not failure:
+            # one transaction: full upgrade plus the additions, never -Sy alone (ADR-0002)
+            cmd = ["pacman", "-Syu", "--needed", "--noconfirm"]
+            if a.selection.swaps:
+                cmd.append("--ask=4")   # answer yes to exactly the replacements previewed
+            rc = log.stream([*cmd, "--", *a.selection.targets])
+            absent = [t for t in a.selection.targets if run(["pacman", "-T", "--", t]).returncode != 0]
+            if rc != 0 or absent:
+                failure = f"pacman failed (exit {rc})" + (f"; not installed: {' '.join(absent)}" if absent else "")
+    except KeyboardInterrupt:
+        failure = "interrupted"
+    new = installed_names() - before
+    if failure:
+        log.say(f"\nsamurai adopt FAILED: {failure}")
+        # only the chaotic bootstrap packages may have landed: then the old config is safe
+        if changed_conf and not new - CHAOTIC_PACKAGES:
+            write_conf(original)
+            kept = f" besides {' and '.join(sorted(new))}" if new else ""
+            log.say(f"no new software was installed{kept}; pacman.conf restored. The package databases "
+                    "may be newer than the system: run `sudo samurai update` before installing "
+                    "anything.")
+        elif new:
+            log.say(f"{len(new)} package(s) were installed before the failure.")
+        log.say(undo_hint(snapshot))
+        log.say(f"log: {log.path}")
+        return EXIT_FAIL
+    problems = configure(a, new, load_stored_profile(), log)
+    record(a, new, snapshot)
+    log.say(f"\nadopted: {len(new)} package(s) added")
+    for p in problems:
+        log.say(f"still to do: {p}")
+    log.say("reboot to apply the new system settings")
+    log.say(undo_hint(snapshot))
+    log.say(f"log: {log.path}")
+    return EXIT_FAIL if any(p.startswith("could not") for p in problems) else EXIT_OK
+
+
+def parse_args(argv: list[str] | None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        prog="samurai adopt", description=__doc__.split("\n")[0],
+        epilog="exit codes: 0 done / nothing to do, 1 failed, 2 usage, 3 refused (nothing "
+               "changed), 4 upgrades pending, 5 aborted")
+    parser.add_argument("--preview", action="store_true", help="show what would change, then stop")
+    parser.add_argument("--yes", "-y", action="store_true", help="do not ask for confirmation")
+    parser.add_argument("--with", dest="opt_in", action="append", default=[], choices=OPT_IN,
+                        help="also add an optional set (repeatable)")
+    parser.add_argument("--with-upgrade", action="store_true",
+                        help="include pending upgrades (without it: run samurai update first)")
+    parser.add_argument("--no-snapshot", action="store_true", help="go on without a rollback point")
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    args = parse_args(argv)
+    if os.geteuid() != 0:
+        sudo = shutil.which("sudo", path=TRUSTED_PATH)
+        if not sudo:
+            print("samurai adopt: needs root, and sudo is not installed", file=sys.stderr)
+            return EXIT_USAGE
+        os.execv(sudo, [sudo, "--", str(pathlib.Path(__file__).resolve()), *argv])
+    os.environ.clear()
+    os.environ.update(PATH=TRUSTED_PATH, HOME="/root", LC_ALL="C.UTF-8")
+    os.umask(0o022)
+    sys.dont_write_bytecode = True
+
+    def interrupted(*_):
+        raise KeyboardInterrupt
+
+    for sig in (signal.SIGTERM, signal.SIGHUP):
+        signal.signal(sig, interrupted)
+    try:
+        with tempfile.TemporaryDirectory(prefix="samurai-adopt.", dir="/var/tmp") as tmp:
+            adoption = examine(set(args.opt_in), pathlib.Path(tmp))
+        print(render(adoption))
+        if args.preview:
+            return EXIT_OK
+        if not adoption.needed:
+            return EXIT_OK
+        if any(u.split()[0] == "samurai-tools" for u in adoption.upgrades):
+            raise Refused("samurai-tools itself has an update: run `sudo samurai update` first",
+                          EXIT_NEEDS_UPDATE)
+        if adoption.upgrades and not args.with_upgrade:
+            raise Refused(f"{len(adoption.upgrades)} upgrade(s) pending: run `sudo samurai update` "
+                          "first (it handles news and interventions), or pass --with-upgrade",
+                          EXIT_NEEDS_UPDATE)
+        if not args.yes:
+            if not sys.stdin.isatty():
+                print("samurai adopt: not a terminal; pass --yes to apply", file=sys.stderr)
+                return EXIT_USAGE
+            if input("\nApply these changes? [y/N] ").strip().lower() not in ("y", "yes"):
+                print("aborted; nothing changed")
+                return EXIT_ABORTED
+        return apply(adoption, args.no_snapshot)
+    except Refused as e:
+        print(f"samurai adopt: {e}", file=sys.stderr)
+        return e.code
+    except (KeyboardInterrupt, EOFError):
+        print("\naborted", file=sys.stderr)
+        return EXIT_ABORTED
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -206,13 +206,6 @@ packages = ["cuda", "cudnn", "nvtop"]
 source = "arch"
 
 [[toggle]]
-id = "gpu-unlock"
-default = true
-when = "gpu.any_supported_by_gpu_unlock"                  # spec 07: recipe table read from the module source
-packages = ["samurai-gpu-unlock"]                         # builder only; firmware is built on this machine
-source = "samurai"
-
-[[toggle]]
 id = "kde-monitor-widgets"
 default = true
 when = "desktop == kde"
@@ -235,13 +228,6 @@ packages = [
 ]
 
 # ---------------------------------------------------------------- new categories
-[[app]]
-category = "craft"
-id = "craft-launcher"
-name = "Craft Launcher (installs and updates every ArtCraft app)"
-packages = ["artcraft-launcher-appimage"]
-source = "samurai"   # AUR only; not packaged yet (brand licence unconfirmed)
-
 [[app]]
 category = "craft"
 id = "photocraft"

@@ -68,6 +68,33 @@ machines get the fix before the transaction that needs it.
   cache using the temp db. Nothing is installed. (Check during M3 that `-d` behaves this way without root.)
 - Never installs anything on its own. Unattended updates are a non-goal for a rolling desktop.
 
+## Adopting current defaults (`samurai adopt`, opt-in)
+An update never installs what an older release did not install. `samurai adopt` does, and only when
+asked. It is an executor in `samurai-tools` (`updates/samurai-adopt`); an old install gets it with
+`samurai update`.
+
+- **Selection:** `samurai-profile-plan` (the installer's planner), fed with the stored install profile.
+  Nothing else chooses packages. Sets the profile never had (gaming, Tailscale) stay off unless asked:
+  `--with gaming`, `--with tailscale`. Browsers and the installer-time `packages.install` list are not
+  re-added.
+- **User choices win:** a package whose last `pacman.log` action is a removal, one in `IgnorePkg`, or one
+  conflicting with a package the user installed is left out. A Samurai meta or settings package that
+  needs it is replaced by its other dependencies. A removal counts for packages the plan, a meta package
+  or a group lists; plain libraries (which `pacman -Rns` takes along) come back with what needs them. A desktop that was removed gets no desktop defaults. A
+  removed `[chaotic-aur]` stays removed (`--with chaotic`). A conflicting package installed only as a
+  dependency (for example `jack2`) is replaced, and the preview says so.
+- **Order:** preview (databases synced into a temporary directory, nothing changed) → confirmation →
+  snapper snapshot → Chaotic-AUR keyring and mirrorlist (`pacman -U`, signatures checked against the
+  pinned primary key) → `[chaotic-aur]` below Arch and CachyOS in `pacman.conf` → one
+  `pacman -Syu --needed` → services and groups for what was added.
+- **Upgrades:** pending upgrades stop it (exit 4, "run samurai update first") unless `--with-upgrade`;
+  an outdated `samurai-tools` always does.
+- **Configuration:** no `--overwrite`; a file in the way fails the transaction. On failure with nothing
+  installed, `pacman.conf` is restored and the rollback command is printed.
+- Idempotent: a second run reports "nothing to do" and takes no snapshot. State:
+  `/var/lib/samurai/adopt.json`; log: `/var/log/samurai/adopt-<time>.log`.
+- Limit: removals are known only as far back as the pacman logs on the machine reach.
+
 ## Distro releases
 - A release = bump `VERSION` and `samurai-release`, regenerate the ISO, tag `v<VERSION>`, publish
   the GitHub Release with the ISO, `.sha256` and `.sig` (spec 08).
