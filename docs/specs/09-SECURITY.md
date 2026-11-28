@@ -14,6 +14,15 @@
 Constraint: games, Steam, Proton and anti-cheat must keep working on the default profile. Anything
 that breaks them goes in the opt-in `paranoid` profile.
 
+## Implementation status (2026-11-28)
+Built: `samurai-settings-security` (kernel settings, sudo and core dump defaults, AppArmor, LLMNR
+off, Firefox policy, firewall presets, tailnet zone), `samurai security status`, `samurai firewall`
+(not `watch`), `samurai security tpm enroll|remove`, `recovery-key`, `samurai welcome`.
+Not built: Secure Boot setup (`docs/security/secure-boot.md`; **no boot entry carries a file hash
+yet**, so the Limine verification described below does not exist), `paranoid` profile,
+`security profile`, vnstat and the Servers/Reverse proxy sections. What each default can break:
+`docs/security/hardening.md`.
+
 ## Disk encryption
 - LUKS2, argon2id, default on in the installer. `/boot` is the unencrypted ESP; Limine verifies
   kernel and initramfs hashes (ADR-0003), so they are integrity-protected even though they are not
@@ -54,8 +63,8 @@ fs.protected_symlinks = 1, fs.protected_hardlinks = 1, fs.protected_fifos = 2, f
 fs.suid_dumpable = 0
 net.ipv4.tcp_syncookies = 1
 net.ipv4.conf.all.rp_filter = 2            # loose: strict (1) breaks Tailscale/VPN asymmetric routing
-net.ipv4.conf.all.accept_redirects = 0, net.ipv6.conf.all.accept_redirects = 0
-net.ipv4.conf.all.send_redirects = 0
+net.ipv4.conf.all.accept_redirects = 0, net.ipv6.conf.all.accept_redirects = 0   # and default and
+net.ipv4.conf.all.send_redirects = 0                  # every interface: "all" alone changes nothing
 net.ipv4.conf.all.accept_source_route = 0
 net.ipv4.icmp_ignore_bogus_error_responses = 1
 ```

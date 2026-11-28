@@ -30,6 +30,7 @@ Status: done 35, gap 10, optional 7. `done` = installed/configured by default or
 | 10 Desktop | Firefox policy from spec 09 | firefox `extra` | spec 09 hardening not in this lane | **gap** |
 | 10 Performance | ananicy-cpp + CachyOS rules, irqbalance, power-profiles-daemon | ananicy-cpp `extra`<br>cachyos-ananicy-rules `cachyos`<br>irqbalance `extra`<br>power-profiles-daemon `extra` | samurai-settings-system | **done** |
 | 10 Performance | I/O schedulers, sysctl, THP madvise, journald 500M, 15s stop timeout | — | samurai-settings-system | **done** |
+| 09 Security | sysctl hardening, sudo/core dump defaults, AppArmor at boot, LLMNR off, Firefox policy, firewall presets + tailnet zone | apparmor `extra`<br>arch-audit `extra` | samurai-settings-security | **done** (this branch, unpublished) |
 | 10 Performance | scx-scheds installed, sched_ext off | scx-scheds `extra` | samurai-settings-system | **done** |
 | 10 Gaming | Steam, Heroic, GameMode, MangoHud, GOverlay, gamescope | steam `multilib`<br>heroic-games-launcher-bin `cachyos`<br>gamemode `extra`<br>lib32-gamemode `multilib`<br>mangohud `extra`<br>lib32-mangohud `multilib`<br>goverlay `extra`<br>gamescope `extra` | profile [gaming] (default on) | **done** |
 | 10 Gaming | GE-Proton system-wide | samurai-proton-ge `samurai` (pkgbuilds, 11.14) | new [samurai] package, pinned release | **done** |

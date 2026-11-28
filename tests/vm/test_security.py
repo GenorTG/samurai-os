@@ -109,6 +109,26 @@ def _reach(ns: str, net: int, port: int) -> str:
             f"&& echo REACH-{port}=yes || echo REACH-{port}=no")
 
 
+def _check_welcome(vm: VM, c: Checks) -> None:
+    """The window opens at the first Plasma login of a user, once."""
+    c.run("welcome-cli", f"{AS_USER} samurai welcome --json",
+          ['"schema":1', '"id":"recovery-key"', "sudo samurai security status"], absent=['"id":"tpm"'])
+    login = ("systemctl restart sddm; "
+             f"for i in $(seq 90); do pgrep -u {USER} -x plasmashell >/dev/null && break; sleep 2; done; "
+             f"pgrep -u {USER} -x plasmashell >/dev/null && echo SESSION-OK")
+    window = "pgrep -u " + USER + " -af '^[^ ]*samurai-toolbox --page welcom[e]'"
+    marker = f"/home/{USER}/.local/state/samurai/welcome-shown"
+    c.run("welcome-first-login", f"rm -f {marker}; mkdir -p /etc/sddm.conf.d && "
+          f"printf '[Autologin]\\nUser={USER}\\nSession=plasma\\n' > /etc/sddm.conf.d/zz-vm-autologin.conf && {login}; "
+          f"for i in $(seq 60); do {window} >/dev/null && break; sleep 2; done; {window} && echo WINDOW-OK; "
+          f"stat -c '%U %n' {marker}", ["SESSION-OK", "WINDOW-OK", f"{USER} {marker}"], timeout=420)
+    for _ in range(25):
+        vm.serial_read(max_wait=1.0)
+    print("welcome screenshot:", vm.screendump("security-welcome"))
+    c.run("welcome-second-login", f"systemctl stop sddm; pkill -u {USER}; sleep 5; {login}; sleep 45; "
+          f"{window} || echo NOT-SHOWN-AGAIN", ["SESSION-OK", "NOT-SHOWN-AGAIN"], timeout=420)
+
+
 def test_security_baseline(mirror):
     pkg_dir = os.environ.get("SAMURAI_TEST_SEC_PKGS")
     if not pkg_dir:
@@ -259,6 +279,10 @@ def test_security_baseline(mirror):
         c.run("zone-change", "samurai firewall zone lanveth home --yes && firewall-cmd --get-zone-of-interface=lanveth",
               ["done: lanveth is in zone home", "\nhome"])
         c.expect_status(c.status("status-tailnet"), {"net.tailnet": "pass", "net.listening": "warn"})
+
+        # --- first boot window (spec 08) ----------------------------------------------
+        if any(f.name.startswith("samurai-toolbox-gui-") for f in files):
+            _check_welcome(vm, c)
 
         failed = c.run("final-units", "systemctl --failed --no-legend; echo UNITS-DONE", ["UNITS-DONE"])
         if re.search(r"\.(service|mount|socket)", failed):
