@@ -411,7 +411,8 @@ def preflight() -> None:
         raise Refused("this is not a Samurai OS install (samurai-release is not installed)")
     opts = run(["findmnt", "-n", "-o", "OPTIONS", "/"]).stdout
     cmdline = pathlib.Path("/proc/cmdline").read_text(errors="replace")
-    if "snapshot" in opts or re.search(r"snapshots/[0-9]+/snapshot", cmdline):
+    subvol = next((o[7:] for o in opts.strip().split(",") if o.startswith("subvol=")), "")
+    if "snapshot" in subvol or re.search(r"snapshots/[0-9]+/snapshot", cmdline):
         raise Refused("booted from a snapshot: roll back or boot the current system first")
     dbpath = pathlib.Path(output(["pacman-conf", "DBPath"], "pacman-conf").strip())
     if (dbpath / "db.lck").exists():

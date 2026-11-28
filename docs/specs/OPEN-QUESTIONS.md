@@ -11,7 +11,7 @@ All open questions answered in the native form on 2026-11-17; none remain open.
 | Q5 | Encryption default, TPM | on / TPM+PIN offered at first boot (no objection) | spec 09 |
 | Q8 | Chaotic-AUR | **on by default** ("copy Garuda's solution") | ADR-0007 |
 | Q9 | Browser | Firefox ticked by default, every Garuda-list browser selectable (Genor) | spec 08 page 10 |
-| Q11 | Installers | graphical (own Qt wizard instead of Calamares, ADR-0009, pending Genor's OK) + terminal guided + unattended profile (Genor) | spec 08 |
+| Q11 | Installers | graphical (own Qt wizard instead of Calamares, ADR-0009, accepted 2026-11-27: the owner did not object) + terminal guided + unattended profile (Genor) | spec 08 |
 
 ## Open
 
