@@ -76,7 +76,7 @@ _samurai() {
                 --preview --json --yes --keep --help" -- "$cur")
             ;;
         security)
-            mapfile -t COMPREPLY < <(compgen -W "status --json --online --help" -- "$cur")
+            mapfile -t COMPREPLY < <(compgen -W "status tpm recovery-key enroll remove --json --online --dry-run --help" -- "$cur")
             ;;
         firewall)
             if [ "$COMP_CWORD" -eq 2 ]; then

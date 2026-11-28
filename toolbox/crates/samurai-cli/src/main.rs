@@ -302,6 +302,9 @@ fn run_security(args: &[String]) -> ExitCode {
         print!("{}", security::USAGE);
         return ExitCode::SUCCESS;
     }
+    if let Some(action) = opts.key_change {
+        return run_key_change(action, opts.dry_run);
+    }
     let root = security::is_root(&RealSystem);
     let items = security::collect(&RealSystem, opts.online);
     if opts.json {
@@ -310,6 +313,38 @@ fn run_security(args: &[String]) -> ExitCode {
         print!("{}", security::render_text(&items, root));
     }
     ExitCode::from(security::exit_code(&items) as u8)
+}
+
+/// Disk keyslot changes: preview, ask, hand the terminal to systemd-cryptenroll, verify.
+fn run_key_change(action: security::tpm::Action, dry_run: bool) -> ExitCode {
+    use std::io::IsTerminal;
+    let fail = |e: String| {
+        eprintln!("samurai security: {e}");
+        ExitCode::from(1)
+    };
+    let plan = match security::tpm::plan(&RealSystem, action) {
+        Ok(p) => p,
+        Err(e) => return fail(e),
+    };
+    println!("{}", plan.preview.join("\n"));
+    println!("  systemd-cryptenroll {}", plan.args.join(" "));
+    if dry_run {
+        println!("dry run: nothing changed");
+        return ExitCode::SUCCESS;
+    }
+    if !std::io::stdin().is_terminal() {
+        return fail("needs a terminal: it asks for your passphrase; nothing changed".into());
+    }
+    if !confirm_on_tty(false, "security", "continue") {
+        return fail("declined; nothing changed".into());
+    }
+    match security::tpm::apply(&RealSystem, action, &plan) {
+        Ok(message) => {
+            println!("{message}");
+            ExitCode::SUCCESS
+        }
+        Err(e) => fail(e),
+    }
 }
 
 fn run_firewall(args: &[String]) -> ExitCode {

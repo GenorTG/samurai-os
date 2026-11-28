@@ -139,7 +139,9 @@ complete -c samurai -n '__fish_seen_subcommand_from kernel; and not __fish_seen_
 complete -c samurai -n '__fish_seen_subcommand_from kernel; and __fish_seen_subcommand_from install remove default' -a 'linux linux-lts linux-zen linux-hardened linux-cachyos linux-cachyos-lts'
 
 # security
-complete -c samurai -n '__fish_seen_subcommand_from security; and not __fish_seen_subcommand_from status' -a status
+complete -c samurai -n '__fish_seen_subcommand_from security; and not __fish_seen_subcommand_from status tpm recovery-key' -a 'status tpm recovery-key'
+complete -c samurai -n '__fish_seen_subcommand_from security; and __fish_seen_subcommand_from tpm' -a 'enroll remove'
+complete -c samurai -n '__fish_seen_subcommand_from security; and __fish_seen_subcommand_from tpm recovery-key' -l dry-run -d 'show, change nothing'
 complete -c samurai -n '__fish_seen_subcommand_from security' -l json -d 'machine-readable'
 complete -c samurai -n '__fish_seen_subcommand_from security' -l online -d 'ask arch-audit too'
 

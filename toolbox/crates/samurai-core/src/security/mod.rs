@@ -7,13 +7,24 @@ use crate::health::{json_escape, system::System};
 
 #[cfg(test)]
 mod tests;
+pub mod tpm;
 
 pub const USAGE: &str = "usage: samurai security status [--json] [--online]
+       samurai security tpm enroll|remove [--dry-run]
+       samurai security recovery-key [--dry-run]
 
   status      disk encryption, Secure Boot, TPM, AppArmor, kernel settings, firewall, listeners,
               SSH, Docker ports, accounts, browser policy. Read-only.
   --json      machine-readable (schema 1)
   --online    also ask arch-audit (network) for packages with known vulnerabilities
+
+  tpm enroll    unlock the encrypted disk with this machine's TPM and a PIN
+  tpm remove    remove that again
+  recovery-key  add a recovery key, shown once
+  --dry-run     show what would run, change nothing
+
+The disk passphrase is never removed: it is what you type if the TPM refuses. These three need
+root and a terminal.
 
 Run with sudo for the items only root can read. Exit code: 0 no failed item, 1 at least one
 failed item, 2 usage error.
@@ -162,26 +173,25 @@ fn tpm_item(sys: &dyn System, root: bool, backing: Option<String>) -> Item {
     let Some(dump) = ok_out(sys, "cryptsetup", &["luksDump", &device]) else {
         return item("disk.tpm", State::Unknown, "cannot read the LUKS header");
     };
-    if !dump.contains("systemd-tpm2") {
+    if tpm::parse_header(&dump).tpm().is_none() {
         return item(
             "disk.tpm",
             State::Skip,
             "TPM unlock is not set up (optional)",
         );
     }
-    let pin = dump
-        .lines()
-        .any(|l| l.trim().starts_with("tpm2-pin:") && l.trim().ends_with("true"));
-    if pin {
+    if tpm::parse_header(&dump).tpm() == Some(true) {
         item("disk.tpm", State::Pass, "TPM unlock with PIN is enrolled")
     } else {
-        item("disk.tpm", State::Warn, "TPM unlock is enrolled without a PIN")
-            .details(vec![
-                "Anyone holding the machine reaches the login screen with the disk open".into(),
-            ])
-            .hint(format!(
-                "Re-enrol with a PIN: sudo systemd-cryptenroll {device} --wipe-slot=tpm2 --tpm2-device=auto --tpm2-pcrs=7 --tpm2-with-pin=yes"
-            ))
+        item(
+            "disk.tpm",
+            State::Warn,
+            "TPM unlock is enrolled without a PIN",
+        )
+        .details(vec![
+            "Anyone holding the machine reaches the login screen with the disk open".into(),
+        ])
+        .hint("Re-enrol with a PIN: sudo samurai security tpm enroll")
     }
 }
 
@@ -734,6 +744,9 @@ pub fn render_json(items: &[Item], root: bool) -> String {
 
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Options {
+    /// A change to the disk keyslots instead of the report.
+    pub key_change: Option<tpm::Action>,
+    pub dry_run: bool,
     pub json: bool,
     pub online: bool,
     pub help: bool,
@@ -748,12 +761,22 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
             return Ok(opts);
         }
         Some("status") => {}
+        Some("tpm") => {
+            opts.key_change = Some(match it.next() {
+                Some("enroll") => tpm::Action::Enroll,
+                Some("remove") => tpm::Action::Remove,
+                _ => return Err("expected: tpm enroll | tpm remove".into()),
+            });
+        }
+        Some("recovery-key") => opts.key_change = Some(tpm::Action::RecoveryKey),
         Some(other) => return Err(format!("unknown command: {other}")),
     }
+    let change = opts.key_change.is_some();
     for a in it {
         match a {
-            "--json" => opts.json = true,
-            "--online" => opts.online = true,
+            "--json" if !change => opts.json = true,
+            "--online" if !change => opts.online = true,
+            "--dry-run" if change => opts.dry_run = true,
             "--help" | "-h" => opts.help = true,
             other => return Err(format!("unknown option: {other}")),
         }
